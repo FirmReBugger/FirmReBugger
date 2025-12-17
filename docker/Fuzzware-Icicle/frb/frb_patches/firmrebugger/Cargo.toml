@@ -1,0 +1,11 @@
+[package]
+name = "firmrebugger"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+icicle-vm = { git = "https://github.com/icicle-emu/icicle-emu" }
+
+[build-dependencies]
+cc = "1.0.104"
+bindgen = "0.69.4"

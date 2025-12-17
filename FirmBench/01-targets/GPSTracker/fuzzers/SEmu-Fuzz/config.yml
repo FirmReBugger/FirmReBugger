@@ -1,0 +1,14 @@
+entry_point: 0x837a1
+fork_points:
+  - 0x847ec
+include:
+  - ./cortexm_memory.yml
+initial_sp: 0x20088000
+isr_vector: 0x837a1
+memory_map:
+  flash:
+    base_addr: 0x80000
+    file: uEmu.GPSTracker.bin
+    permissions: r-x
+    size: 0x2000000
+rules: rules.txt

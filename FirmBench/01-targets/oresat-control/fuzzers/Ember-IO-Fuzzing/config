@@ -1,0 +1,15 @@
+./app_control.elf
+-sram_size
+1024k
+-flash_base
+0x8000000
+-flash_size
+330k
+-sram2_base
+0x1FFF7000
+-sram2_size
+4k
+-machine
+embedded_fuzz
+-fuzz_input
+@@

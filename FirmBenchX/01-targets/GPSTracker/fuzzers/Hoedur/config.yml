@@ -1,0 +1,36 @@
+board:
+  init_nsvtor: 0x80000
+
+interrupt:
+  mode: round-robin
+  trigger:
+    on-infinite-sleep: true
+    interval: 1000
+
+memory_maps:
+  - name: mmio
+    address: 0x40000000
+    size: 0x20000000
+    type: mmio
+  - name: mmio_UDD
+    address: 0x20180000
+    size: 0x20000
+    type: mmio
+  - name: flash
+    address: 0xa0000
+    size: 0x20000
+    type: ram
+  - name: ram
+    address: 0x20000000
+    size: 0x100000
+    type: ram
+  - name: text
+    address: 0x80000
+    size: 0x1c000
+    file:
+      path: GPSTrackerX.bin
+    type: rom
+  - name: internal_ROM
+    address: 0x100000
+    size: 0x100000
+    type: rom

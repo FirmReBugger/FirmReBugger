@@ -1,0 +1,24 @@
+diff --git a/icicle/Cargo.toml b/icicle/Cargo.toml
+index dfe4170..9b78f80 100644
+--- a/icicle/Cargo.toml
++++ b/icicle/Cargo.toml
+@@ -16,6 +16,7 @@ tracing = { version = "0.1.37", default-features = false, features = ["release_m
+ tracing-subscriber = { version = "0.3.17", default-features = false, features = ["fmt", "env-filter", "ansi"] }
+ once_cell = "1.17.1"
+ bytemuck = "1.13.1"
++firmrebugger = { path = "../firmrebugger"}
+ 
+ [build-dependencies]
+ cc = "1.0.79"
+diff --git a/icicle/src/lib.rs b/icicle/src/lib.rs
+index 3e58194..07cadb3 100644
+--- a/icicle/src/lib.rs
++++ b/icicle/src/lib.rs
+@@ -83,6 +83,7 @@ impl Context {
+         arm::add_arm_extras(&mut vm);
+         let vars = arm::map_uc_to_varnodes(&vm);
+         let regs = arm::SpecialRegs::get(&mut vm);
++        unsafe { firmrebugger::init_config(&mut vm); }
+ 
+         vm.env = Box::new(unicorn_api::FuzzwareEnvironment::new());
+ 

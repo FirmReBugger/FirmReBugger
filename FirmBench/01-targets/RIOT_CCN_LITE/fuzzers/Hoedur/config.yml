@@ -1,0 +1,32 @@
+interrupt:
+  mode: round-robin
+  trigger:
+    on-infinite-sleep: true
+    interval: 1000
+
+memory_maps:
+  - name: dynamically_added_crash_region_100000a0
+    address: 0xfffb000
+    size: 0xa000
+    type: ram
+  - name: mmio
+    address: 0x40000000
+    size: 0x20000000
+    type: mmio
+  - name: nvic
+    address: 0xe0000000
+    size: 0x10005000
+    type: ram
+  - name: ram
+    address: 0x20000000
+    size: 0x100000
+    type: ram
+  - name: text
+    address: 0x0
+    size: 0x2f000
+    file:
+      path: ccn-lite-relay.bin
+    type: rom
+
+symbols:
+  - ccn-lite-relay.elf

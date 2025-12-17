@@ -1,0 +1,14 @@
+entry_point: 0x800365d
+fork_points:
+  - 0x8008f6a
+include:
+  - ./cortexm_memory.yml
+initial_sp: 0x20005000
+isr_vector: 0x800365d
+memory_map:
+  flash:
+    base_addr: 0x8000000
+    file: Gateway.bin
+    permissions: r-x
+    size: 0x2000000
+rules: rules.txt

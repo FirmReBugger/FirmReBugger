@@ -1,0 +1,17 @@
+./Soldering_Iron.elf
+-sram_size
+256k
+-flash_size
+68k
+-sram2_base
+0
+-sram2_size
+4k
+-cpu
+cortex-m3
+-machine
+embedded_fuzz
+-d
+nochain
+-fuzz_input
+@@

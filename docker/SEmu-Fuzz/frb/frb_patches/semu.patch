@@ -1,0 +1,20 @@
+--- uc.c	2025-08-14 11:39:40.876023758 +0000
++++ uc.c	2025-08-14 11:39:15.546832224 +0000
+@@ -26,6 +26,7 @@
+ #include "qemu/target/riscv/unicorn.h"
+ #include "qemu/target/s390x/unicorn.h"
+ #include "qemu/target/tricore/unicorn.h"
++#include "qemu/include/qemu/firmrebugger.c"
+ 
+ #include "qemu/include/qemu/queue.h"
+ #include "qemu-common.h"
+@@ -420,6 +421,9 @@
+         uc->cpu_model = INT_MAX; // INT_MAX means the default cpu model.
+ 
+         *result = uc;
++        //Firmrebugger
++        printf("pre init firmrebugger \n");
++        firmrebugger_init_config(uc);
+ 
+         return UC_ERR_OK;
+     } else {

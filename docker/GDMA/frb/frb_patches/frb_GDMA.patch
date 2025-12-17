@@ -1,0 +1,58 @@
+diff --git a/Makefile b/Makefile
+index f3355c27..f7578b1e 100644
+--- a/Makefile
++++ b/Makefile
+@@ -25,6 +25,12 @@ UC_GET_OBJ = $(shell for i in \
+     echo '$(3)'$$i; \
+     fi; done; echo)
+ 
++# FIRMREBUGER include tinycc
++TCC_INCLUDE = /home/user/GDMA/tinycc/
++TCC_LIB = /home/user/GDMA/tinycc/
++TCC_CFLAGS = -I$(TCC_INCLUDE)
++TCC_LDFLAGS = -L$(TCC_LIB) -ltcc -ldl
++
+ UC_TARGET_OBJ = $(filter-out qemu/../%,$(call UC_GET_OBJ,obj-,qemu/Makefile.objs, qemu/))
+ UC_TARGET_OBJ += $(call UC_GET_OBJ,obj-,qemu/qom/Makefile.objs, qemu/qom/)
+ UC_TARGET_OBJ += $(call UC_GET_OBJ,obj-y,qemu/util/Makefile.objs, qemu/util/)
+@@ -143,7 +149,7 @@ MACOS_UNIVERSAL ?= no
+ ifeq ($(UNICORN_DEBUG),yes)
+ CFLAGS += -g
+ else
+-CFLAGS += -O3 -g -DNDEBUG -march=native
++CFLAGS += -O3 -g -DNDEBUG -march=native $(TCC_CFLAGS)
+ UNICORN_CFLAGS += -O3 -g -DNDEBUG -march=native
+ UNICORN_QEMU_FLAGS += --disable-debug-info
+ endif
+@@ -307,7 +313,7 @@ $(LIBRARY): $(UC_OBJ_ALL)
+ ifeq ($(UNICORN_SHARED),yes)
+ ifeq ($(V),0)
+ 	$(call log,GEN,$(LIBRARY))
+-	@$(CC) $(CFLAGS) -shared $(UC_OBJ_ALL) -o $(LIBRARY) $($(LIBNAME)_LDFLAGS)
++	@$(CC) $(CFLAGS) -shared $(UC_OBJ_ALL) -o $(LIBRARY) $($(LIBNAME)_LDFLAGS) $(TCC_LDFLAGS)
+ 	@-ln -sf $(LIBRARY) $(LIBRARY_SYMLINK)
+ else
+ 	$(CC) $(CFLAGS) -shared $(UC_OBJ_ALL) -o $(LIBRARY) $($(LIBNAME)_LDFLAGS)
+diff --git a/uc.c b/uc.c
+index 89594054..92e8eadb 100644
+--- a/uc.c
++++ b/uc.c
+@@ -31,6 +31,7 @@
+ #include "qemu/target-ppc/unicorn.h"
+ 
+ #include "qemu/include/qemu/queue.h"
++#include "qemu/include/qemu/firmrebugger.c"
+ 
+ #if defined(FUZZWARE_FUZZING_STUBS)
+ unsigned char *cov_area_ptr_arm;
+@@ -326,6 +327,10 @@ uc_err uc_open(uc_arch arch, uc_mode mode, uc_engine **result)
+ 
+         if (uc->reg_reset)
+             uc->reg_reset(uc);
++        
++        //Firmrebugger
++        printf("pre init firmrebugger \n");
++        firmrebugger_init_config(uc);
+ 
+         return UC_ERR_OK;
+     }

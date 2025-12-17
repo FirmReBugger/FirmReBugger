@@ -1,0 +1,14 @@
+entry_point: 0x80003a1
+fork_points:
+  - 0x800303a
+include:
+  - ./cortexm_memory.yml
+initial_sp: 0x20010000
+isr_vector: 0x80003a1
+memory_map:
+  flash:
+    base_addr: 0x8000000
+    file: uEmu.3Dprinter.bin
+    permissions: r-x
+    size: 0x2000000
+rules: rules.txt

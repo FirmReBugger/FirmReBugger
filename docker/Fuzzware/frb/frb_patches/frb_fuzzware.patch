@@ -1,0 +1,73 @@
+diff --git a/Makefile b/Makefile
+index f3355c27..c0e3ff64 100644
+--- a/Makefile
++++ b/Makefile
+@@ -17,6 +17,11 @@ UNAME_S := $(shell uname -s)
+ # If you want to use 16 job threads, use "-j16".
+ SMP_MFLAGS := -j4
+ 
++TCC_INCLUDE = /home/user/fuzzware/tinycc/
++TCC_LIB = /home/user/fuzzware/tinycc/
++TCC_CFLAGS = -I$(TCC_INCLUDE)
++TCC_LDFLAGS = -L$(TCC_LIB) -ltcc -ldl
++
+ UC_GET_OBJ = $(shell for i in \
+     $$(grep '$(1)' $(2) | sed '/^\#/d' | \
+     grep '\.o' | cut -d '=' -f 2); do \
+@@ -143,7 +148,7 @@ MACOS_UNIVERSAL ?= no
+ ifeq ($(UNICORN_DEBUG),yes)
+ CFLAGS += -g
+ else
+-CFLAGS += -O3 -g -DNDEBUG -march=native
++CFLAGS += -O3 -g -DNDEBUG -march=native $(TCC_CFLAGS)
+ UNICORN_CFLAGS += -O3 -g -DNDEBUG -march=native
+ UNICORN_QEMU_FLAGS += --disable-debug-info
+ endif
+@@ -289,14 +294,13 @@ $(LIBNAME)_LDFLAGS += -lm
+ 
+ all: unicorn
+ 	$(MAKE) -C samples
+-
+ qemu/config-host.mak: qemu/configure
+ 	cd qemu && \
+ 	./configure --cc="${CC}" --extra-cflags="$(UNICORN_CFLAGS)" --target-list="$(UNICORN_TARGETS)" ${UNICORN_QEMU_FLAGS}
+ 	@printf "$(UNICORN_ARCHS)" > config.log
+ 
+ uc.o: qemu/config-host.mak FORCE
+-	$(MAKE) -C qemu $(SMP_MFLAGS)
++	$(MAKE) -C qemu $(SMP_MFLAGS) 
+ 
+ $(UC_TARGET_OBJ) list.o: uc.o
+ 	@echo "--- $^ $@" > /dev/null
+@@ -307,7 +311,7 @@ $(LIBRARY): $(UC_OBJ_ALL)
+ ifeq ($(UNICORN_SHARED),yes)
+ ifeq ($(V),0)
+ 	$(call log,GEN,$(LIBRARY))
+-	@$(CC) $(CFLAGS) -shared $(UC_OBJ_ALL) -o $(LIBRARY) $($(LIBNAME)_LDFLAGS)
++	@$(CC) $(CFLAGS) -shared $(UC_OBJ_ALL) -o $(LIBRARY) $($(LIBNAME)_LDFLAGS) $(TCC_LDFLAGS)
+ 	@-ln -sf $(LIBRARY) $(LIBRARY_SYMLINK)
+ else
+ 	$(CC) $(CFLAGS) -shared $(UC_OBJ_ALL) -o $(LIBRARY) $($(LIBNAME)_LDFLAGS)
+diff --git a/uc.c b/uc.c
+index 1402fb0a..a19f9025 100644
+--- a/uc.c
++++ b/uc.c
+@@ -31,6 +31,7 @@
+ #include "qemu/target-ppc/unicorn.h"
+ 
+ #include "qemu/include/qemu/queue.h"
++#include "qemu/include/qemu/firmrebugger.c"
+ 
+ #if defined(FUZZWARE_FUZZING_STUBS)
+ unsigned char *cov_area_ptr_arm;
+@@ -327,6 +328,10 @@ uc_err uc_open(uc_arch arch, uc_mode mode, uc_engine **result)
+         if (uc->reg_reset)
+             uc->reg_reset(uc);
+ 
++        //Firmrebugger
++        printf("pre init firmrebugger \n");
++        firmrebugger_init_config(uc);
++
+         return UC_ERR_OK;
+     }
+     else

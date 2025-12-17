@@ -1,0 +1,16 @@
+./uEmu.uTaskerV1.4_USB_STM32429ZI.elf
+-sram_size
+256k
+-flash_size
+88k
+-flash_base
+0x8000000
+-machine
+embedded_fuzz
+-allow_flash_write
+-sram2_size
+4k
+-sram2_base
+0
+-fuzz_input
+@@

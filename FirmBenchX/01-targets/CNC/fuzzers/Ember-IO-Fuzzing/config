@@ -1,0 +1,13 @@
+../CNCX.elf
+-sram_size
+192k
+-flash_size
+2048k
+-sram2_base
+0x10000000
+-sram2_size
+64k
+-machine
+embedded_fuzz
+-fuzz_input
+@@

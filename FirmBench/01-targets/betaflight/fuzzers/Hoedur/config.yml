@@ -1,0 +1,35 @@
+board:
+  init_nsvtor: 0x8000000
+
+interrupt:
+  mode: round-robin
+  trigger:
+    on-infinite-sleep: true
+    interval: 1000
+
+memory_maps:
+  - name: mmio
+    address: 0x40000000
+    size: 0x20000000
+    type: mmio
+  - name: ram
+    address: 0x20000000
+    size: 0x100000
+    type: ram
+  - name: text
+    address: 0x8000000
+    size: 0x8a400
+    file:
+      path: betaflight.bin
+    type: rom
+  - name: boot
+    address: 0x1fff0000
+    size: 0x10000
+    type: ram
+
+exit_hooks:
+  - name: __NVIC_SystemReset.lto_priv.0.lto_priv.0
+    symbol: __NVIC_SystemReset.lto_priv.0.lto_priv.0
+
+symbols:
+  - betaflight.elf

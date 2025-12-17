@@ -1,0 +1,37 @@
+board:
+  init_nsvtor: 0x8000000
+
+interrupt:
+  mode: round-robin
+  trigger:
+    on-infinite-sleep: true
+    interval: 1000
+
+memory_maps:
+  - name: mmio
+    address: 0x40000000
+    size: 0x20000000
+    type: mmio
+  - name: ram
+    address: 0x20000000
+    size: 0x10000
+    type: ram
+  - name: text
+    address: 0x8000000
+    size: 0xf000
+    file:
+      path: uEmu.zephyrsocketcan.bin
+      length: 0xf000
+    type: rom
+  - name: rodata
+    address: 0x800f000
+    size: 0x13000
+    permission:
+      executable: false
+    file:
+      path: uEmu.zephyrsocketcan.bin
+      seek: 0xf000
+    type: rom
+
+symbols:
+  - uuEmu.zephyrsocketcan.elf

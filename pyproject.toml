@@ -1,0 +1,19 @@
+[project]
+name = "firmrebugger"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.8.10"
+dependencies = [
+    "docker>=7.1.0",
+    "lifelines>=0.27.8",
+    "matplotlib>=3.7.5",
+    "panadas>=0.2",
+    "pyyaml>=6.0.2",
+    "tabulate>=0.9.0",
+    "upsetplot>=0.9.0",
+    "zstandard>=0.23.0",
+]
+
+[project.scripts]
+firmrebugger = "firmrebugger.main:main"

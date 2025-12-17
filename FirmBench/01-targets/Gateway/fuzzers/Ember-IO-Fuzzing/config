@@ -1,0 +1,11 @@
+./Gateway.elf
+-sram_size
+256k
+-flash_size
+44k
+-cpu
+cortex-m3
+-machine
+embedded_fuzz
+-fuzz_input
+@@

@@ -1,0 +1,124 @@
+--- qemu-7.1.0-old/meson.build	2024-11-28 05:43:29.056306135 +0000
++++ qemu-7.1.0/meson.build	2024-10-11 04:15:35.122941621 +0000
+@@ -3417,7 +3417,10 @@
+     arch_deps += hw.dependencies()
+ 
+     arch_srcs += config_devices_h[target]
++    link_args += ['-I/home/user/hoedur/tinycc/']
++    link_args += ['-L/home/user/hoedur/tinycc/']
+     link_args += ['@block.syms', '@qemu.syms']
++    link_args += ['-ltcc', '-ldl']
+   else
+     abi = config_target['TARGET_ABI_DIR']
+     target_type='user'
+diff -ruN qemu-7.1.0-old/accel/tcg/meson.build qemu-7.1.0/accel/tcg/meson.build
+--- qemu-7.1.0-old/accel/tcg/meson.build	2023-09-14 15:24:44.239441564 +0000
++++ qemu-7.1.0/accel/tcg/meson.build	2023-09-14 15:26:17.371926953 +0000
+@@ -7,6 +7,7 @@
+   'tcg-runtime.c',
+   'translate-all.c',
+   'translator.c',
++  'firmrebugger.c',
+ ))
+ tcg_ss.add(when: 'CONFIG_USER_ONLY', if_true: files('user-exec.c'))
+ tcg_ss.add(when: 'CONFIG_SOFTMMU', if_false: files('user-exec-stub.c'))
+diff -ruN qemu-7.1.0-old/accel/tcg/tcg-runtime.c qemu-7.1.0/accel/tcg/tcg-runtime.c
+--- qemu-7.1.0-old/accel/tcg/tcg-runtime.c	2023-09-14 15:24:44.243441586 +0000
++++ qemu-7.1.0/accel/tcg/tcg-runtime.c	2023-09-14 15:25:56.407822408 +0000
+@@ -148,3 +148,8 @@
+ {
+     cpu_loop_exit_atomic(env_cpu(env), GETPC());
+ }
++
++//Firmrebugger
++void HELPER(firmrebugger_helper)(CPUArchState *env, target_ulong addr) {
++  firmrebugger_init_config(env, addr);
++}
+diff -ruN qemu-7.1.0-old/accel/tcg/tcg-runtime.h qemu-7.1.0/accel/tcg/tcg-runtime.h
+--- qemu-7.1.0-old/accel/tcg/tcg-runtime.h	2023-09-14 15:24:44.243441586 +0000
++++ qemu-7.1.0/accel/tcg/tcg-runtime.h	2023-09-14 15:26:08.103881054 +0000
+@@ -14,6 +14,8 @@
+ 
+ DEF_HELPER_FLAGS_2(mulsh_i64, TCG_CALL_NO_RWG_SE, s64, s64, s64)
+ DEF_HELPER_FLAGS_2(muluh_i64, TCG_CALL_NO_RWG_SE, i64, i64, i64)
++//firmrebugger
++DEF_HELPER_FLAGS_2(firmrebugger_helper, TCG_CALL_NO_WG, void, env, tl)
+ 
+ DEF_HELPER_FLAGS_2(clz_i32, TCG_CALL_NO_RWG_SE, i32, i32, i32)
+ DEF_HELPER_FLAGS_2(ctz_i32, TCG_CALL_NO_RWG_SE, i32, i32, i32)
+# diff -ruN qemu-7.1.0-old/accel/tcg/translator.c qemu-7.1.0/accel/tcg/translator.c
+# --- qemu-7.1.0-old/accel/tcg/translator.c	2023-09-14 15:24:44.243441586 +0000
+# +++ qemu-7.1.0/accel/tcg/translator.c	2023-09-14 15:25:53.263806503 +0000
+# @@ -114,6 +114,10 @@
+#          // HOEDUR: tcg instruction start hook
+#          gen_tcg_pc_hook(insn_start_hook, db);
+ 
+# +        //firmrebugger
+# +        TCGv pc_next_v = tcg_const_tl(db->pc_next);
+# +        gen_helper_firmrebugger_helper(cpu_env,pc_next_v);
+# +
+#          /* Disassemble one instruction.  The translate_insn hook should
+#             update db->pc_next and db->is_jmp to indicate what should be
+#             done next -- either exiting this loop or locate the start of
+--- qemu-7.1.0-old/accel/tcg/translator.c	2024-10-30 15:57:48.009134835 +0000
++++ qemu-7.1.0/accel/tcg/translator.c	2024-12-06 05:40:28.626205611 +0000
+@@ -51,6 +51,8 @@
+ #endif
+ }
+ 
++
++
+ // HOEDUR: START
+ #include <tcg/tcg-internal.h>
+ static void gen_tcg_pc_hook(tcg_hook_t *hook, DisasContextBase *db)
+@@ -70,6 +72,12 @@
+ }
+ // HOEDUR: END
+ 
++//typedef void (*func_ptr_t)(void);
++//typedef struct {
++//    uint32_t address;
++//    func_ptr_t bug_func;
++//} context_struct;
++
+ void translator_loop(const TranslatorOps *ops, DisasContextBase *db,
+                      CPUState *cpu, TranslationBlock *tb, int max_insns)
+ {
+@@ -102,6 +110,10 @@
+     // HOEDUR: tcg basic block start hook
+     gen_tcg_pc_hook(tb_start_hook, db);
+ 
++    //context_struct *bug_struct;
++    //gen_helper_firmrebugger_helper(cpu_env,pc_next_v, bug_struct);
++    //uint32_t frb_hook_num = firmrebugger_get_hooks();
++
+     while (true) {
+         db->num_insns++;
+         ops->insn_start(db, cpu);
+@@ -114,6 +126,15 @@
+         // HOEDUR: tcg instruction start hook
+         gen_tcg_pc_hook(insn_start_hook, db);
+ 
++        //firmrebugger
++        TCGv pc_next_v = tcg_const_tl(db->pc_next);
++        //for (size_t i = 0; i < frb_hook_num; ++i) {
++        //    if (bug_struct[i].address == pc_next_v) {
++        //        firmrebugger_hook(cpu_env, pc_next_v);
++        //    }
++        //}
++        gen_helper_firmrebugger_helper(cpu_env,pc_next_v);
++
+         /* Disassemble one instruction.  The translate_insn hook should
+            update db->pc_next and db->is_jmp to indicate what should be
+            done next -- either exiting this loop or locate the start of
+--- qemu-7.1.0/accel/tcg/translate-all.c	2025-01-20 05:45:02.752372307 +0000
++++ qemu-7.1.0/accel/tcg/translate-all.c	2025-01-20 05:45:06.212352786 +0000
+@@ -1507,7 +1507,7 @@
+                           max_insns);
+             // HOEDUR: panic on insn overflows
+             // otherwise we may end up with timing issues in trace-mode
+-            abort();
++            //abort();
+             goto tb_overflow;
+ 
+         default:

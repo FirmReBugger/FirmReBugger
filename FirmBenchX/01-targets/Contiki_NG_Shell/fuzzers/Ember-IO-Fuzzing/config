@@ -1,0 +1,13 @@
+./contiki_shellX.elf
+-machine
+embedded_fuzz
+-sram_size
+1024k
+-flash_base
+0x202000
+-flash_size
+568k
+-vtor_override
+0x202000
+-fuzz_input
+@@

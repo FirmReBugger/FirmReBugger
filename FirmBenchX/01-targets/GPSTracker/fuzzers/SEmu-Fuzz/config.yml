@@ -1,0 +1,14 @@
+entry_point: 0x00083888
+fork_points:
+  - 0x000848d4
+include:
+  - ./cortexm_memory.yml
+initial_sp: 0x20088000
+isr_vector: 0x00083888
+memory_map:
+  flash:
+    base_addr: 0x80000
+    file: GPSTrackerX.bin
+    permissions: r-x
+    size: 0x2000000
+rules: rules.txt

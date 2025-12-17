@@ -1,0 +1,9 @@
+./uEmu.zephyrsocketcan.elf
+-sram_size
+64k
+-flash_size
+134k
+-machine
+embedded_fuzz
+-fuzz_input
+@@

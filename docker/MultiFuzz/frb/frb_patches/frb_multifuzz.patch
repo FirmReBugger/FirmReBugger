@@ -1,0 +1,22 @@
+diff --git a/hail-fuzz/Cargo.toml b/hail-fuzz/Cargo.toml
+index 6cced13..8abedd5 100644
+--- a/hail-fuzz/Cargo.toml
++++ b/hail-fuzz/Cargo.toml
+@@ -26,3 +26,4 @@ icicle-cortexm = { path = "../icicle-cortexm" }
+ byteorder = "1.5.0"
+ tar = "0.4.40"
+ flate2 = "1.0.27"
++firmrebugger = { path = "../firmrebugger" }
+\ No newline at end of file
+diff --git a/hail-fuzz/src/main.rs b/hail-fuzz/src/main.rs
+index 5d47a1d..4982595 100644
+--- a/hail-fuzz/src/main.rs
++++ b/hail-fuzz/src/main.rs
+@@ -444,6 +444,7 @@ pub fn setup_vm(
+         }
+         vm.add_injector(resizer);
+     }
++    unsafe { firmrebugger::init_config(&mut vm); }
+ 
+     debugging::enable_checks(&mut vm)?;
+ 

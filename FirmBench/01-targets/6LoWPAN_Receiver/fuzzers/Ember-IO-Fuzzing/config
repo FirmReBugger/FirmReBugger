@@ -1,0 +1,15 @@
+./HAL.atmel_6lowpan_udp_rx.elf
+-sram_size
+256k
+-flash_size
+72k
+-flash_base
+0x0
+-periph_base
+0x805000
+-periph_size
+40k
+-machine
+embedded_fuzz
+-fuzz_input
+@@

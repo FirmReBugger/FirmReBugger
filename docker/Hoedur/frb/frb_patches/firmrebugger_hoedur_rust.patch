@@ -1,0 +1,39 @@
+diff --git a/qemu-sys/build.rs b/qemu-sys/build.rs
+index 6239778..61b0464 100644
+--- a/qemu-sys/build.rs
++++ b/qemu-sys/build.rs
+@@ -15,6 +15,7 @@ fn main() {
+     let qemu_dir = out_dir.join("qemu-7.1.0");
+     let build_dir = out_dir.join("build");
+     let bindings_dir = PathBuf::from(BINDINGS_DIR);
++    
+ 
+     // get QEMU
+     if !qemu_dir.is_dir() {
+@@ -43,6 +44,7 @@ fn main() {
+         let patches = [
+             patches_dir.join("hoedur.patch"),
+             patches_dir.join("5cb993ff131fca2abef3ce074a20258fd6fce557.patch"),
++            PathBuf::from("/home/user/hoedur/frb_patches/firmrebugger_qemu.patch"),
+         ];
+         for patch in patches {
+             let file = File::open(patch).expect("Failed to open patch file");
+@@ -57,6 +59,18 @@ fn main() {
+         }
+     }
+ 
++    
++    let destination_dir = &qemu_dir.join("accel").join("tcg");
++    let destination_dir_h = &qemu_dir.join("include").join("tcg");
++    let source_c = PathBuf::from("/home/user/hoedur/frb_patches/firmrebugger.c");
++    let source_h = PathBuf::from("/home/user/hoedur/frb_patches/firmrebugger.h");
++    
++    
++    fs::copy(&source_c, &destination_dir.join("firmrebugger.c"))
++            .expect("COPYING FIRMREBUGGER.c PATCH FAILED");
++    fs::copy(&source_h, &destination_dir_h.join("firmrebugger.h"))
++            .expect("COPYING FIRMREBUGGER.h PATCH FAILED");
++
+     // create build dir
+     if !build_dir.is_dir() {
+         fs::create_dir(&build_dir).expect("Failed to create build dir");

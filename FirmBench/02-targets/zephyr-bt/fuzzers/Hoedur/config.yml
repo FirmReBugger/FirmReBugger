@@ -1,0 +1,27 @@
+board:
+  init_nsvtor: 0x8000000
+
+interrupt:
+  mode: round-robin
+  trigger:
+    on-infinite-sleep: true
+    interval: 1000
+
+memory_maps:
+  - name: mmio
+    address: 0x40000000
+    size: 0x20000000
+    type: mmio
+  - name: ram
+    address: 0x20000000
+    size: 0x100000
+    type: ram
+  - name: text
+    address: 0x8000000
+    size: 0x1d000
+    file:
+      path: "zephyr-CVE-2020-10066.bin"
+    type: rom
+
+symbols:
+  - "zephyr-CVE-2020-10066.elf"

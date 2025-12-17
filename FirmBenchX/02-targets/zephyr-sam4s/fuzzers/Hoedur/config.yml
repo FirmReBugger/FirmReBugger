@@ -1,0 +1,43 @@
+board:
+  init_nsvtor: 0x400000
+
+interrupt:
+  mode: round-robin
+  trigger:
+    on-infinite-sleep: true
+    interval: 1000
+
+memory_maps:
+  - name: bss
+    address: 0x20102000
+    size: 0x2000
+    type: ram
+  - name: mmio
+    address: 0x40000000
+    size: 0x20000000
+    type: mmio
+  - name: noinit
+    address: 0x20104000
+    size: 0x8400
+    type: ram
+  - name: ITM_DWT_BPU
+    address: 0xe0000000
+    size: 0x3000
+    type: mmio
+  - name: CTI
+    address: 0xe0042000
+    size: 0x1000
+    type: mmio
+  - name: ram
+    address: 0x20000000
+    size: 0x102000
+    type: ram
+  - name: text
+    address: 0x400000
+    size: 0x24000
+    file:
+      path: zephyr-CVE-2021-3322X.bin
+    type: rom
+
+symbols:
+  - zephyr-CVE-2021-3322X.elf

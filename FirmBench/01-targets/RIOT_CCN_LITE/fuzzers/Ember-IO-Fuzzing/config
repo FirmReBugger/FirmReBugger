@@ -1,0 +1,15 @@
+./ccn-lite-relay.elf
+-flash_base
+0x0
+-flash_size
+256k
+-sram_size
+192k
+-sram3_base
+0x10000000
+-sram3_size
+8k
+-machine
+embedded_fuzz
+-fuzz_input
+@@

@@ -1,0 +1,11 @@
+./Pretender.max32_rf_door_lock.elf
+-sram_size
+64k
+-flash_size
+68k
+-flash_base
+0
+-machine
+embedded_fuzz
+-fuzz_input
+@@

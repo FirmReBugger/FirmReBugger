@@ -1,0 +1,512 @@
+diff --git a/Makefile b/Makefile
+index 2a7b774b..a4d3a87a 100644
+--- a/Makefile
++++ b/Makefile
+@@ -21,6 +21,7 @@ LIBTCC1 = libtcc1.a
+ LINK_LIBTCC =
+ LIBS =
+ CFLAGS += $(CPPFLAGS)
++CFLAGS += -fPIC
+ VPATH = $(TOPSRC)
+ -LTCC = $(TOP)/$(LIBTCC)
+ 
+diff --git a/il-gen.c b/il-gen.c
+index bb670ccb..42e7b619 100644
+--- a/il-gen.c
++++ b/il-gen.c
+@@ -163,7 +163,7 @@ static void il_type_to_str(char *buf, int buf_size,
+     bt = t & VT_BTYPE;
+     buf[0] = '\0';
+     if (t & VT_UNSIGNED)
+-        pstrcat(buf, buf_size, "unsigned ");
++        tcc_pstrcat(buf, buf_size, "unsigned ");
+     switch(bt) {
+     case VT_VOID:
+         tstr = "void";
+@@ -192,7 +192,7 @@ static void il_type_to_str(char *buf, int buf_size,
+     case VT_LDOUBLE:
+         tstr = "float64";
+     add_tstr:
+-        pstrcat(buf, buf_size, tstr);
++        tcc_pstrcat(buf, buf_size, tstr);
+         break;
+     case VT_STRUCT:
+         tcc_error("structures not handled yet");
+@@ -200,28 +200,28 @@ static void il_type_to_str(char *buf, int buf_size,
+     case VT_FUNC:
+         s = sym_find((unsigned)t >> VT_STRUCT_SHIFT);
+         il_type_to_str(buf, buf_size, s->t, varstr);
+-        pstrcat(buf, buf_size, "(");
++        tcc_pstrcat(buf, buf_size, "(");
+         sa = s->next;
+         while (sa != NULL) {
+             il_type_to_str(buf1, sizeof(buf1), sa->t, NULL);
+-            pstrcat(buf, buf_size, buf1);
++            tcc_pstrcat(buf, buf_size, buf1);
+             sa = sa->next;
+             if (sa)
+-                pstrcat(buf, buf_size, ", ");
++                tcc_pstrcat(buf, buf_size, ", ");
+         }
+-        pstrcat(buf, buf_size, ")");
++        tcc_pstrcat(buf, buf_size, ")");
+         goto no_var;
+     case VT_PTR:
+         s = sym_find((unsigned)t >> VT_STRUCT_SHIFT);
+-        pstrcpy(buf1, sizeof(buf1), "*");
++        tcc_pstrcpy(buf1, sizeof(buf1), "*");
+         if (varstr)
+-            pstrcat(buf1, sizeof(buf1), varstr);
++            tcc_pstrcat(buf1, sizeof(buf1), varstr);
+         il_type_to_str(buf, buf_size, s->t, buf1);
+         goto no_var;
+     }
+     if (varstr) {
+-        pstrcat(buf, buf_size, " ");
+-        pstrcat(buf, buf_size, varstr);
++        tcc_pstrcat(buf, buf_size, " ");
++        tcc_pstrcat(buf, buf_size, varstr);
+     }
+  no_var: ;
+ }
+diff --git a/lib/bt-exe.c b/lib/bt-exe.c
+index 71c9c19c..9b68bb42 100644
+--- a/lib/bt-exe.c
++++ b/lib/bt-exe.c
+@@ -4,7 +4,7 @@
+ 
+ #define CONFIG_TCC_BACKTRACE_ONLY
+ #define ONE_SOURCE 1
+-#define pstrcpy tcc_pstrcpy
++#define tcc_pstrcpy tcc_tcc_pstrcpy
+ #include "../tccrun.c"
+ 
+ #ifndef _WIN32
+@@ -57,7 +57,7 @@ void __bt_exit(rt_context *p)
+ }
+ 
+ /* copy a string and truncate it. */
+-ST_FUNC char *pstrcpy(char *buf, size_t buf_size, const char *s)
++ST_FUNC char *tcc_pstrcpy(char *buf, size_t buf_size, const char *s)
+ {
+     int l = strlen(s);
+     if (l >= buf_size)
+diff --git a/libtcc.c b/libtcc.c
+index 33781e21..052e5445 100644
+--- a/libtcc.c
++++ b/libtcc.c
+@@ -146,7 +146,7 @@ PUB_FUNC void tcc_exit_state(TCCState *s1)
+ 
+ /********************************************************/
+ /* copy a string and truncate it. */
+-ST_FUNC char *pstrcpy(char *buf, size_t buf_size, const char *s)
++ST_FUNC char *tcc_pstrcpy(char *buf, size_t buf_size, const char *s)
+ {
+     char *q, *q_end;
+     int c;
+@@ -166,12 +166,12 @@ ST_FUNC char *pstrcpy(char *buf, size_t buf_size, const char *s)
+ }
+ 
+ /* strcat and truncate. */
+-ST_FUNC char *pstrcat(char *buf, size_t buf_size, const char *s)
++ST_FUNC char *tcc_pstrcat(char *buf, size_t buf_size, const char *s)
+ {
+     size_t len;
+     len = strlen(buf);
+     if (len < buf_size)
+-        pstrcpy(buf + len, buf_size - len, s);
++        tcc_pstrcpy(buf + len, buf_size - len, s);
+     return buf;
+ }
+ 
+@@ -738,7 +738,7 @@ ST_FUNC void tcc_open_bf(TCCState *s1, const char *filename, int initlen)
+     bf->buf_ptr = bf->buffer;
+     bf->buf_end = bf->buffer + initlen;
+     bf->buf_end[0] = CH_EOB; /* put eob symbol */
+-    pstrcpy(bf->filename, sizeof(bf->filename), filename);
++    tcc_pstrcpy(bf->filename, sizeof(bf->filename), filename);
+ #ifdef _WIN32
+     normalize_slashes(bf->filename);
+ #endif
+@@ -1172,7 +1172,7 @@ static int tcc_glob_so(TCCState *s1, const char *pattern, char *buf, int size)
+         if (2 != sscanf(p + (star - pattern), "%d.%d.%d", &v1, &v2, &v3))
+             continue;
+         if ((v1 = v1 * 1000 + v2) > v)
+-            v = v1, pstrcpy(buf, size, p);
++            v = v1, tcc_pstrcpy(buf, size, p);
+     }
+     globfree(&g);
+     return v;
+diff --git a/tcc.h b/tcc.h
+index 452a723a..384904d8 100644
+--- a/tcc.h
++++ b/tcc.h
+@@ -1195,8 +1195,8 @@ ST_DATA int nb_stk_data;
+ ST_DATA int g_debug;
+ 
+ /* public functions currently used by the tcc main function */
+-ST_FUNC char *pstrcpy(char *buf, size_t buf_size, const char *s);
+-ST_FUNC char *pstrcat(char *buf, size_t buf_size, const char *s);
++ST_FUNC char *tcc_pstrcpy(char *buf, size_t buf_size, const char *s);
++ST_FUNC char *tcc_pstrcat(char *buf, size_t buf_size, const char *s);
+ ST_FUNC char *pstrncpy(char *out, size_t buf_size, const char *s, size_t num);
+ PUB_FUNC char *tcc_basename(const char *name);
+ PUB_FUNC char *tcc_fileextension (const char *name);
+diff --git a/tccasm.c b/tccasm.c
+index 5dea167b..7afee8fe 100644
+--- a/tccasm.c
++++ b/tccasm.c
+@@ -797,9 +797,9 @@ static void asm_parse_directive(TCCState *s1, int global)
+             ident[0] = '\0';
+             next();
+             if (tok == TOK_STR)
+-                pstrcat(ident, sizeof(ident), tokc.str.data);
++                tcc_pstrcat(ident, sizeof(ident), tokc.str.data);
+             else
+-                pstrcat(ident, sizeof(ident), get_tok_str(tok, NULL));
++                tcc_pstrcat(ident, sizeof(ident), get_tok_str(tok, NULL));
+             tcc_warning_c(warn_unsupported)("ignoring .ident %s", ident);
+             next();
+         }
+@@ -872,9 +872,9 @@ static void asm_parse_directive(TCCState *s1, int global)
+             sname[0] = '\0';
+             while (tok != ';' && tok != TOK_LINEFEED && tok != ',') {
+                 if (tok == TOK_STR)
+-                    pstrcat(sname, sizeof(sname), tokc.str.data);
++                    tcc_pstrcat(sname, sizeof(sname), tokc.str.data);
+                 else
+-                    pstrcat(sname, sizeof(sname), get_tok_str(tok, NULL));
++                    tcc_pstrcat(sname, sizeof(sname), get_tok_str(tok, NULL));
+                 next();
+             }
+             if (tok == ',') {
+@@ -1202,7 +1202,7 @@ static void parse_asm_operands(ASMOperand *operands, int *nb_operands_ptr,
+                 skip(']');
+             }
+ 	    astr = parse_mult_str("string constant")->data;
+-            pstrcpy(op->constraint, sizeof op->constraint, astr);
++            tcc_pstrcpy(op->constraint, sizeof op->constraint, astr);
+             skip('(');
+             gexpr();
+             if (is_output) {
+diff --git a/tcccoff.c b/tcccoff.c
+index 56064cdd..69ee6ef5 100644
+--- a/tcccoff.c
++++ b/tcccoff.c
+@@ -250,8 +250,8 @@ ST_FUNC int tcc_output_coff(TCCState *s1, FILE *f)
+ 
+ 			p = strchr(str, ':');
+ 			if (!p) {
+-			    pstrcpy(func_name, sizeof(func_name), str);
+-			    pstrcpy(Func[nFuncs], sizeof(func_name), str);
++			    tcc_pstrcpy(func_name, sizeof(func_name), str);
++			    tcc_pstrcpy(Func[nFuncs], sizeof(func_name), str);
+ 			} else {
+ 			    len = p - str;
+ 			    if (len > sizeof(func_name) - 1)
+@@ -262,7 +262,7 @@ ST_FUNC int tcc_output_coff(TCCState *s1, FILE *f)
+ 			}
+ 
+ 			// save the file that it came in so we can sort later
+-			pstrcpy(AssociatedFile[nFuncs], sizeof(func_name),
++			tcc_pstrcpy(AssociatedFile[nFuncs], sizeof(func_name),
+ 				incl_files[incl_index - 1]);
+ 
+ 			func_addr = sym->n_value;
+@@ -425,7 +425,7 @@ ST_FUNC int tcc_output_coff(TCCState *s1, FILE *f)
+ 
+ 			p = strchr(str, ':');
+ 			if (!p) {
+-			    pstrcpy(func_name, sizeof(func_name), str);
++			    tcc_pstrcpy(func_name, sizeof(func_name), str);
+ 			} else {
+ 			    len = p - str;
+ 			    if (len > sizeof(func_name) - 1)
+diff --git a/tccdbg.c b/tccdbg.c
+index fadd2765..af1ff124 100644
+--- a/tccdbg.c
++++ b/tccdbg.c
+@@ -1176,7 +1176,7 @@ ST_FUNC void tcc_debug_start(TCCState *s1)
+         else
+         {
+             /* file info: full path + filename */
+-            pstrcat(buf, sizeof(buf), "/");
++            tcc_pstrcat(buf, sizeof(buf), "/");
+             section_sym = put_elf_sym(symtab_section, 0, 0,
+                                       ELFW(ST_INFO)(STB_LOCAL, STT_SECTION), 0,
+                                       text_section->sh_num, NULL);
+diff --git a/tccelf.c b/tccelf.c
+index e19bc202..623a457b 100644
+--- a/tccelf.c
++++ b/tccelf.c
+@@ -506,7 +506,7 @@ ST_FUNC addr_t get_sym_addr(TCCState *s1, const char *name, int err, int forc)
+ #endif
+         ) {
+         buf[0] = '_';
+-        pstrcpy(buf + 1, sizeof(buf) - 1, name);
++        tcc_pstrcpy(buf + 1, sizeof(buf) - 1, name);
+         name = buf;
+     }
+     sym_index = find_elf_sym(s1->symtab, name);
+@@ -536,7 +536,7 @@ LIBTCCAPI int tcc_add_symbol(TCCState *s1, const char *name, const void *val)
+     char buf[256];
+     if (s1->leading_underscore) {
+         buf[0] = '_';
+-        pstrcpy(buf + 1, sizeof(buf) - 1, name);
++        tcc_pstrcpy(buf + 1, sizeof(buf) - 1, name);
+         name = buf;
+     }
+     set_global_sym(s1, name, NULL, (addr_t)(uintptr_t)val); /* NULL: SHN_ABS */
+diff --git a/tccgen.c b/tccgen.c
+index d4106ac2..f53ce6ca 100644
+--- a/tccgen.c
++++ b/tccgen.c
+@@ -539,7 +539,7 @@ ST_FUNC void put_extern_sym2(Sym *sym, int sh_num,
+ 
+         if (tcc_state->leading_underscore && can_add_underscore) {
+             buf1[0] = '_';
+-            pstrcpy(buf1 + 1, sizeof(buf1) - 1, name);
++            tcc_pstrcpy(buf1 + 1, sizeof(buf1) - 1, name);
+             name = buf1;
+         }
+ 
+@@ -2606,25 +2606,25 @@ static void type_to_str(char *buf, int buf_size,
+     buf[0] = '\0';
+ 
+     if (t & VT_EXTERN)
+-        pstrcat(buf, buf_size, "extern ");
++        tcc_pstrcat(buf, buf_size, "extern ");
+     if (t & VT_STATIC)
+-        pstrcat(buf, buf_size, "static ");
++        tcc_pstrcat(buf, buf_size, "static ");
+     if (t & VT_TYPEDEF)
+-        pstrcat(buf, buf_size, "typedef ");
++        tcc_pstrcat(buf, buf_size, "typedef ");
+     if (t & VT_INLINE)
+-        pstrcat(buf, buf_size, "inline ");
++        tcc_pstrcat(buf, buf_size, "inline ");
+     if (bt != VT_PTR) {
+         if (t & VT_VOLATILE)
+-            pstrcat(buf, buf_size, "volatile ");
++            tcc_pstrcat(buf, buf_size, "volatile ");
+         if (t & VT_CONSTANT)
+-            pstrcat(buf, buf_size, "const ");
++            tcc_pstrcat(buf, buf_size, "const ");
+     }
+     if (((t & VT_DEFSIGN) && bt == VT_BYTE)
+         || ((t & VT_UNSIGNED)
+             && (bt == VT_SHORT || bt == VT_INT || bt == VT_LLONG)
+             && !IS_ENUM(t)
+             ))
+-        pstrcat(buf, buf_size, (t & VT_UNSIGNED) ? "unsigned " : "signed ");
++        tcc_pstrcat(buf, buf_size, (t & VT_UNSIGNED) ? "unsigned " : "signed ");
+ 
+     buf_size -= strlen(buf);
+     buf += strlen(buf);
+@@ -2664,41 +2664,41 @@ static void type_to_str(char *buf, int buf_size,
+     case VT_LDOUBLE:
+         tstr = "long double";
+     add_tstr:
+-        pstrcat(buf, buf_size, tstr);
++        tcc_pstrcat(buf, buf_size, tstr);
+         break;
+     case VT_STRUCT:
+         tstr = "struct ";
+         if (IS_UNION(t))
+             tstr = "union ";
+     tstruct:
+-        pstrcat(buf, buf_size, tstr);
++        tcc_pstrcat(buf, buf_size, tstr);
+         v = type->ref->v & ~SYM_STRUCT;
+         if (v >= SYM_FIRST_ANOM)
+-            pstrcat(buf, buf_size, "<anonymous>");
++            tcc_pstrcat(buf, buf_size, "<anonymous>");
+         else
+-            pstrcat(buf, buf_size, get_tok_str(v, NULL));
++            tcc_pstrcat(buf, buf_size, get_tok_str(v, NULL));
+         break;
+     case VT_FUNC:
+         s = type->ref;
+         buf1[0]=0;
+         if (varstr && '*' == *varstr) {
+-            pstrcat(buf1, sizeof(buf1), "(");
+-            pstrcat(buf1, sizeof(buf1), varstr);
+-            pstrcat(buf1, sizeof(buf1), ")");
++            tcc_pstrcat(buf1, sizeof(buf1), "(");
++            tcc_pstrcat(buf1, sizeof(buf1), varstr);
++            tcc_pstrcat(buf1, sizeof(buf1), ")");
+         }
+-        pstrcat(buf1, buf_size, "(");
++        tcc_pstrcat(buf1, buf_size, "(");
+         sa = s->next;
+         while (sa != NULL) {
+             char buf2[256];
+             type_to_str(buf2, sizeof(buf2), &sa->type, NULL);
+-            pstrcat(buf1, sizeof(buf1), buf2);
++            tcc_pstrcat(buf1, sizeof(buf1), buf2);
+             sa = sa->next;
+             if (sa)
+-                pstrcat(buf1, sizeof(buf1), ", ");
++                tcc_pstrcat(buf1, sizeof(buf1), ", ");
+         }
+         if (s->f.func_type == FUNC_ELLIPSIS)
+-            pstrcat(buf1, sizeof(buf1), ", ...");
+-        pstrcat(buf1, sizeof(buf1), ")");
++            tcc_pstrcat(buf1, sizeof(buf1), ", ...");
++        tcc_pstrcat(buf1, sizeof(buf1), ")");
+         type_to_str(buf, buf_size, &s->type, buf1);
+         goto no_var;
+     case VT_PTR:
+@@ -2711,19 +2711,19 @@ static void type_to_str(char *buf, int buf_size,
+             type_to_str(buf, buf_size, &s->type, buf1);
+             goto no_var;
+         }
+-        pstrcpy(buf1, sizeof(buf1), "*");
++        tcc_pstrcpy(buf1, sizeof(buf1), "*");
+         if (t & VT_CONSTANT)
+-            pstrcat(buf1, buf_size, "const ");
++            tcc_pstrcat(buf1, buf_size, "const ");
+         if (t & VT_VOLATILE)
+-            pstrcat(buf1, buf_size, "volatile ");
++            tcc_pstrcat(buf1, buf_size, "volatile ");
+         if (varstr)
+-            pstrcat(buf1, sizeof(buf1), varstr);
++            tcc_pstrcat(buf1, sizeof(buf1), varstr);
+         type_to_str(buf, buf_size, &s->type, buf1);
+         goto no_var;
+     }
+     if (varstr) {
+-        pstrcat(buf, buf_size, " ");
+-        pstrcat(buf, buf_size, varstr);
++        tcc_pstrcat(buf, buf_size, " ");
++        tcc_pstrcat(buf, buf_size, varstr);
+     }
+  no_var: ;
+ }
+diff --git a/tccpe.c b/tccpe.c
+index a77da08e..a3e82d79 100644
+--- a/tccpe.c
++++ b/tccpe.c
+@@ -990,7 +990,7 @@ static void pe_build_exports(struct pe_info *pe)
+ 
+ #if 1
+     /* automatically write exports to <output-filename>.def */
+-    pstrcpy(buf, sizeof buf, pe->filename);
++    tcc_pstrcpy(buf, sizeof buf, pe->filename);
+     strcpy(tcc_fileextension(buf), ".def");
+     op = fopen(buf, "wb");
+     if (NULL == op) {
+@@ -1696,7 +1696,7 @@ static int pe_load_def(TCCState *s1, int fd)
+         case 0:
+             if (0 != stricmp(p, "LIBRARY") || next == '\n')
+                 goto quit;
+-            pstrcpy(dllname, sizeof dllname, get_token(&line, &next));
++            tcc_pstrcpy(dllname, sizeof dllname, get_token(&line, &next));
+             ++state;
+             break;
+         case 1:
+diff --git a/tccpp.c b/tccpp.c
+index 380fb665..b067c121 100644
+--- a/tccpp.c
++++ b/tccpp.c
+@@ -101,7 +101,7 @@ ST_FUNC void skip(int c)
+ {
+     if (tok != c) {
+         char tmp[40];
+-        pstrcpy(tmp, sizeof tmp, get_tok_str(c, &tokc));
++        tcc_pstrcpy(tmp, sizeof tmp, get_tok_str(c, &tokc));
+         tcc_error("'%s' expected (got \"%s\")", tmp, get_tok_str(tok, &tokc));
+ 	}
+     next();
+@@ -1372,7 +1372,7 @@ static int parse_include(TCCState *s1, int do_next, int test)
+                 break;
+             if (tok == TOK_LINEFEED)
+                 tcc_error("'#include' expects \"FILENAME\" or <FILENAME>");
+-            pstrcat(name, sizeof name, get_tok_str(tok, &tokc));
++            tcc_pstrcat(name, sizeof name, get_tok_str(tok, &tokc));
+ 	}
+         c = p[0];
+         /* remove '<>|""' */
+@@ -1406,10 +1406,10 @@ static int parse_include(TCCState *s1, int do_next, int test)
+                 return 0;
+             else
+                 tcc_error("include file '%s' not found", name);
+-            pstrcpy(buf, sizeof buf, p);
+-            pstrcat(buf, sizeof buf, "/");
++            tcc_pstrcpy(buf, sizeof buf, p);
++            tcc_pstrcat(buf, sizeof buf, "/");
+         }
+-        pstrcat(buf, sizeof buf, name);
++        tcc_pstrcat(buf, sizeof buf, name);
+         e = search_cached_include(s1, buf, 0);
+         if (e && (define_find(e->ifndef_macro) || e->once)) {
+             /* no need to parse the include because the 'ifndef macro'
+@@ -1791,10 +1791,10 @@ ST_FUNC void tccpp_putfile(const char *filename)
+     buf[0] = 0;
+     if (!IS_ABSPATH(filename)) {
+         /* prepend directory from real file */
+-        pstrcpy(buf, sizeof buf, file->true_filename);
++        tcc_pstrcpy(buf, sizeof buf, file->true_filename);
+         *tcc_basename(buf) = 0;
+     }
+-    pstrcat(buf, sizeof buf, filename);
++    tcc_pstrcat(buf, sizeof buf, filename);
+ #ifdef _WIN32
+     normalize_slashes(buf);
+ #endif
+@@ -1803,7 +1803,7 @@ ST_FUNC void tccpp_putfile(const char *filename)
+     //printf("new file '%s'\n", buf);
+     if (file->true_filename == file->filename)
+         file->true_filename = tcc_strdup(file->filename);
+-    pstrcpy(file->filename, sizeof file->filename, buf);
++    tcc_pstrcpy(file->filename, sizeof file->filename, buf);
+     tcc_debug_newfile(tcc_state);
+ }
+ 
+diff --git a/tccrun.c b/tccrun.c
+index 6c0dab6d..000d2b87 100644
+--- a/tccrun.c
++++ b/tccrun.c
+@@ -708,7 +708,7 @@ static addr_t rt_printline (rt_context *rc, addr_t wanted_pc, bt_info *bi)
+             p = strchr(str, ':');
+             if (0 == p || (len = p - str + 1, len > sizeof func_name))
+                 len = sizeof func_name;
+-            pstrcpy(func_name, len, str);
++            tcc_pstrcpy(func_name, len, str);
+             func_addr = pc;
+             break;
+             /* line number info */
+@@ -751,10 +751,10 @@ static addr_t rt_printline (rt_context *rc, addr_t wanted_pc, bt_info *bi)
+ found:
+     i = last_incl_index;
+     if (i > 0) {
+-        pstrcpy(bi->file, sizeof bi->file, incl_files[--i]);
++        tcc_pstrcpy(bi->file, sizeof bi->file, incl_files[--i]);
+         bi->line = last_line_num;
+     }
+-    pstrcpy(bi->func, sizeof bi->func, func_name);
++    tcc_pstrcpy(bi->func, sizeof bi->func, func_name);
+     bi->func_pc = func_addr;
+     return func_addr;
+ }
+@@ -1053,9 +1053,9 @@ next_line:
+     filename = function = NULL, func_addr = 0;
+ found:
+     if (filename)
+-        pstrcpy(bi->file, sizeof bi->file, filename), bi->line = line;
++        tcc_pstrcpy(bi->file, sizeof bi->file, filename), bi->line = line;
+     if (function)
+-        pstrcpy(bi->func, sizeof bi->func, function);
++        tcc_pstrcpy(bi->func, sizeof bi->func, function);
+     bi->func_pc = func_addr;
+     return (addr_t)func_addr;
+ }
+@@ -1105,7 +1105,7 @@ int _tcc_backtrace(rt_frame *f, const char *fmt, va_list ap)
+                 break;
+             /* we try symtab symbols (no line number info) */
+             if (!!(a = rt_elfsym(rc2, pc, &bi.func_pc))) {
+-                pstrcpy(bi.func, sizeof bi.func, a);
++                tcc_pstrcpy(bi.func, sizeof bi.func, a);
+                 break;
+             }
+         }

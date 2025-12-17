@@ -1,0 +1,14 @@
+entry_point: 0x8015205
+fork_points:
+  - 0x800c088
+include:
+  - ./cortexm_memory.yml
+initial_sp: 0x2002fffc
+isr_vector: 0x8015205
+memory_map:
+  flash:
+    base_addr: 0x800c080
+    file: ./uEmu.uTaskerV1.4_USB_STM32429ZI.bin
+    permissions: r-x
+    size: 0x2000000
+rules: rules.txt

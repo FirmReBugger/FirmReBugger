@@ -1,0 +1,15 @@
+./gnrc_networking.elf
+-flash_base
+0x8000000
+-flash_size
+256k
+-sram_size
+192k
+-sram3_base
+0x1ffff700
+-sram3_size
+8k
+-machine
+embedded_fuzz
+-fuzz_input
+@@

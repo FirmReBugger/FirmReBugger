@@ -1,0 +1,14 @@
+entry_point: 0x0800b448
+fork_points:
+  - 0x08001e2a
+include:
+  - ./cortexm_memory.yml
+initial_sp: 0x2001ffff
+isr_vector: 0x0800b448
+memory_map:
+  flash:
+    base_addr: 0x8000000
+    file: CNCX.bin
+    permissions: r-x
+    size: 0x2000000
+rules: rules.txt

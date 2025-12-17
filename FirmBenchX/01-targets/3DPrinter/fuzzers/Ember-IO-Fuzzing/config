@@ -1,0 +1,14 @@
+./3DprinterX.elf
+-sram_size
+128k
+-flash_size
+92k
+-sram2_base
+0
+-sram2_size
+4k
+-machine
+embedded_fuzz
+-allow_flash_write
+-fuzz_input
+@@

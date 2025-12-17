@@ -1,0 +1,15 @@
+begin_point: 0x0800466a
+entry_point: 0x08000d44
+fork_points:
+  - 0x0800466a
+include:
+  - ./cortexm_memory.yml
+initial_sp: 0x20030000
+isr_vector: 0x08000d44
+memory_map:
+  flash:
+    base_addr: 0x8000000
+    file: ./PLCX.bin
+    permissions: r-x
+    size: 0x2000000
+rules: rules.txt

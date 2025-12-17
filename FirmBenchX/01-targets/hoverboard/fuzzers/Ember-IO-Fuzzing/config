@@ -1,0 +1,15 @@
+./hoverX.elf
+-sram_size
+1024k
+-flash_base
+0x8000000
+-flash_size
+119k
+-sram2_base
+0x803b000
+-sram2_size
+123k
+-machine
+embedded_fuzz
+-fuzz_input
+@@

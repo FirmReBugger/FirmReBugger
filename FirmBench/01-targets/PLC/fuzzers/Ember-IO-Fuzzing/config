@@ -1,0 +1,13 @@
+./PLC.elf
+-sram_size
+256k
+-flash_size
+28k
+-sram2_base
+0x0
+-sram2_size
+4k
+-machine
+embedded_fuzz
+-fuzz_input
+@@

@@ -1,0 +1,76 @@
+diff --git a/accel/tcg/tcg-runtime.c b/accel/tcg/tcg-runtime.c
+index dc046bff05..d310c3b403 100644
+--- a/accel/tcg/tcg-runtime.c
++++ b/accel/tcg/tcg-runtime.c
+@@ -936,3 +936,8 @@ void HELPER(qasan_store8)(CPUArchState *env, target_ulong addr) {
+ #endif
+ 
+ }
++
++void HELPER(firmrebugger_helper)(CPUArchState *env, target_ulong addr) {
++  firmrebugger_init_config(env, addr);
++
++}
+\ No newline at end of file
+diff --git a/accel/tcg/tcg-runtime.h b/accel/tcg/tcg-runtime.h
+index 754d54a9a7..f7dd7d88b0 100644
+--- a/accel/tcg/tcg-runtime.h
++++ b/accel/tcg/tcg-runtime.h
+@@ -338,6 +338,7 @@ DEF_HELPER_FLAGS_1(afl_maybe_log, TCG_CALL_NO_RWG, void, tl)
+ DEF_HELPER_FLAGS_3(afl_compcov_16, TCG_CALL_NO_RWG, void, tl, tl, tl)
+ DEF_HELPER_FLAGS_3(afl_compcov_32, TCG_CALL_NO_RWG, void, tl, tl, tl)
+ DEF_HELPER_FLAGS_3(afl_compcov_64, TCG_CALL_NO_RWG, void, tl, tl, tl)
++DEF_HELPER_FLAGS_2(firmrebugger_helper, TCG_CALL_NO_WG, void, env,tl)
+ DEF_HELPER_FLAGS_3(afl_cmplog_8, TCG_CALL_NO_RWG, void, tl, tl, tl)
+ DEF_HELPER_FLAGS_3(afl_cmplog_16, TCG_CALL_NO_RWG, void, tl, tl, tl)
+ DEF_HELPER_FLAGS_3(afl_cmplog_32, TCG_CALL_NO_RWG, void, tl, tl, tl)
+diff --git a/accel/tcg/translator.c b/accel/tcg/translator.c
+index 1ec267d5e1..30f8ae288f 100644
+--- a/accel/tcg/translator.c
++++ b/accel/tcg/translator.c
+@@ -20,6 +20,7 @@
+ #include "sysemu/replay.h"
+ 
+ #include "qemuafl/common.h"
++#include "qemuafl/firmrebugger.h"
+ 
+ /* Pairs with tcg_clear_temp_count.
+    To be called by #TranslatorOps.{translate_insn,tb_stop} if
+@@ -97,6 +98,9 @@ void translator_loop(const TranslatorOps *ops, DisasContextBase *db,
+             afl_setup();
+             gen_helper_afl_entry_routine(cpu_env);
+         }
++        //firmrebugger hook
++        TCGv pc_next_v = tcg_const_tl(db->pc_next);
++        gen_helper_firmrebugger_helper(cpu_env,pc_next_v);
+ 
+         /* Disassemble one instruction.  The translate_insn hook should
+            update db->pc_next and db->is_jmp to indicate what should be
+diff --git a/meson.build b/meson.build
+index 07bc23129a..3c9a57be97 100644
+--- a/meson.build
++++ b/meson.build
+@@ -2132,7 +2132,11 @@ foreach target : target_dirs
+     arch_deps += hw.dependencies()
+ 
+     arch_srcs += config_devices_h[target]
++    link_args += ['-I/home/user/ember/tinycc/']
++    link_args += ['-L/home/user/ember/tinycc/'] 
+     link_args += ['@block.syms', '@qemu.syms']
++    link_args += ['-ltcc', '-ldl']
++
+   else
+     abi = config_target['TARGET_ABI_DIR']
+     target_type='user'
+diff --git a/target/arm/meson.build b/target/arm/meson.build
+index ad6ef4a2f5..acda1a53cb 100644
+--- a/target/arm/meson.build
++++ b/target/arm/meson.build
+@@ -30,6 +30,7 @@ arm_ss.add(files(
+   'vfp_helper.c',
+   'cpu_tcg.c',
+   'ember.c',
++  'firmrebugger.c',
+ ))
+ arm_ss.add(zlib)
+ 

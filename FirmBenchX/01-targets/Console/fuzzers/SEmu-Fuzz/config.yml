@@ -1,0 +1,19 @@
+entry_point: 0x000009cc
+fork_points:
+  - 0x00002f08
+  - 0x00000fbc
+include:
+  - ./cortexm_memory.yml
+initial_sp: 0x1fff0200
+isr_vector: 0x000009cc
+memory_map:0x00002f08
+  bss:
+    base_addr: 0x1ffe0000
+    permissions: rWx
+    size: 0x20000
+  flash:
+    base_addr: 0x0
+    file: ./ConsoleX.bin
+    permissions: r-x
+    size: 0x2000000
+rules: rules.txt
