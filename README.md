@@ -1,5 +1,13 @@
 # FirmReBugger
 
+## Raven Creation
+
+We have made the process of incorporating a bug with a Raven, simple—we demonstrate the ease with which Ravens can be constructed using three case examples of common bug types:
+
+- Type Confusion
+- Stack Buffer Overflow
+- Dangling Pointer
+
 ## Install UV && install FirmReBugger
 
 ```bash
@@ -103,6 +111,28 @@ FirmReBugger/
 
 ## Raven Examples
 
+**Type Confusion** arises when a program erroneously interprets an incorrect type for a region of memory. As a consequence, the program may access fields, invoke functions, or perform operations that are invalid for the underlying data, leading to undefined behavior. Introspection of object types and pointer usage can help identify type confusion bugs.
+
+An illustrative example of a Raven is shown in the code below, based on the bug ID `MF01` reported by MultiFuzz in the **Zephyr SocketCAN** binary. In Zephyr's device model, each device is represented by a struct containing a pointer named `driver_api`. This pointer references a table of function pointers that define the operations supported by the device's driver, such as configuration or data transmission.
+
+```c
+context_struct hook_addresses[] = {
+    {0x08005e28, BUG_MF04},
+    ...
+}
+
+void BUG_MF04() {
+    report_reached("MF04");
+    //canbus fail to verify device type
+    uint32_t read_addr = frb_reg_state[0] + 0x4;
+    if (frb_mem_read(read_addr,4) != 0x0800f7e4){
+        report_detected_triggered("MF04");
+    }
+}
+```
+
+The CAN bus subcommands allow users to specify a target device for command execution. At runtime, the target device is resolved using the `z_impl_device_get_binding` function, which returns a pointer to a generic device struct. However, no type verification is performed to ensure that the selected device implements the CAN bus API. As a result, if a non-CAN device is specified (such as a GPIO device), the subcommand will erroneously perform CAN bus operations on an incompatible device struct.
+
 **Stack Buffer Overflow** occurs when data written to a buffer on the stack exceeds its allocated size, potentially corrupting adjacent memory. By introspecting buffer boundaries, sizes, and index calculations—along with placing unique reflection points—it is possible to identify buffer overflow bugs, as demonstrated in the following example.
 
 ```c
@@ -165,6 +195,8 @@ Later, in another interrupt, `MMA8652FC::getAxisReadings` is called, which invok
 Dangling pointers are particularly hard to detect because a stale pointer might be dereferenced at many locations throughout the program. To facilitate triage, the introspection function `frb_mem_write` overwrites such pointers with garbage data. Consequently, any later use of the dangling pointer will crash the program, making the bug easier to identify.
 
 To capture this bug in a Raven, observe that once `HAL_I2C_Mem_Read` returns (at `0x0800c9b0`), the pointer stored in `pBuffPtr` becomes invalid. With `frb_mem_write`, we overwrite this pointer with a sentinel value (`0xDEADBEEF`). Each time the pointer is subsequently accessed (e.g., at `0x0800bd02`), the Raven checks whether its value equals `0xDEADBEEF`. If so, this indicates that the pointer has been incorrectly used, precisely capturing the condition that triggers the bug.
+
+---
 
 ## Experiment Results
 
