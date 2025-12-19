@@ -13,7 +13,7 @@ RUN useradd -l -u $USERID -d /home/user user && \
 
 USER user
 
-COPY --chown=user:user docker/DICE/original/DICE-DMA-Emulation $FUZZER/build/DICE-DMA-Emulation
+COPY --chown=user:user ./docker/DICE/original/DICE-DMA-Emulation $FUZZER/build/DICE-DMA-Emulation
 WORKDIR $FUZZER/build/DICE-DMA-Emulation/p2im/
 RUN make -C afl/
 

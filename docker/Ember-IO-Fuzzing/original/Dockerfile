@@ -22,7 +22,13 @@ WORKDIR $FUZZER
 RUN git clone https://github.com/Ember-IO/Ember-IO-Fuzzing.git Ember-IO-Fuzzing
 WORKDIR $FUZZER/Ember-IO-Fuzzing
 ENV EMBER_BASE_DIR=$FUZZER/Ember-IO-Fuzzing
-RUN git submodule update --init --recursive
+
+RUN git submodule update --init
+WORKDIR AFLplusplus
+RUN git submodule update --init 
+WORKDIR qemu_mode
+RUN git submodule update --init 
+
 WORKDIR $FUZZER/Ember-IO-Fuzzing/AFLplusplus
 RUN make
 WORKDIR $FUZZER/Ember-IO-Fuzzing/AFLplusplus/qemu_mode

@@ -8,69 +8,77 @@ We have made the process of incorporating a bug with a Raven, simple—we demons
 - Stack Buffer Overflow
 - Dangling Pointer
 
-## Install UV && install FirmReBugger
+The examples can be seen [here](#raven-examples)
+
+
+## Quick Start 
+
+### Set up
+```bash
+echo core | sudo tee /proc/sys/kernel/core_pattern
+sudo sh -c 'echo 524288 > /proc/sys/fs/inotify/max_user_watches && echo 512 > /proc/sys/fs/inotify/max_user_instances'
+```
+
+### Requirements
 
 ```bash
-# Clone FirmReBugger
-git clone
-# Install UV
-pip install uv
-# Activate venv
-source .venv/bin/activate
-# Install FirmReBugger
+Install uv https://docs.astral.sh/uv/getting-started/installation/
+Install docker https://docs.docker.com/engine/install 
+sudo apt-get install automake texinfo unzip
+sudo apt install gcc-arm-none-eabi
+sudo apt install texlive-latex-base
+sudo apt install texlive-xetex texlive-fonts-recommended texlive-latex-extra
+```
+
+### Build all Fuzzers 
+
+```bash
+git clone https://github.com/FirmReBugger/FirmReBugger
 cd FirmReBugger
-uv pip install -e .
-# Help
-firmrebugger -h
+export FIRMREBUGGER_BASE_DIR=$(pwd)
+# Follow the steps and build all fuzzers
+uv run frb build
+# Follow the steps and build all frb versions of fuzzers
+uv run frb build --frb
 ```
 
----
+### Fuzzing
 
-## Quickstart buildingfuzzer
+```bash
+git clone https://github.com/FirmReBugger/FirmReBugger
+cd FirmReBugger
+export FIRMREBUGGER_BASE_DIR=$(pwd)
+uv run frb fuzz 24h 10 <output_dir>
+```
+
+### Commands
 
 ```bash
 cd FirmReBugger
-# Activate venv
-source .venv/bin/activate
-# Set FirmReBugger base directory
-export FIRMREBUGGER_BASE_DIR=./
-# Build fuzzer example
-firmrebugger build
-# Build FirmReBugger version of fuzzer example
-firmrebugger build --frb
+export FIRMREBUGGER_BASE_DIR=$(pwd)
+uv run frb --help
+uv run frb fuzz --help
+uv run frb build --help
+uv run frb bug-analyzer --help
+uv run frb charting-tool --help
 ```
 
----
-
-## Quickstart Fuzzing
+### Workflow
 
 ```bash
-# Activate venv
-source .venv/bin/activate
-# Fuzz example <time> <trials> <output_dir_name>
-firmrebugger fuzz 24h 10 results
-```
+cd FirmReBugger
+export FIRMREBUGGER_BASE_DIR=$(pwd)
+# Fuzz your choice of binaries with 
+uv run frb fuzz
+# Recommened to connect to the frb docker and manually run the bug analyzer as it can take a while eg. 
+docker run -it --mount type=bind,source=./,target=/benchmark frb:Ember-IO-Fuzzing /bin/bash
+cd <to_results_folder>
+uv run frb bug-analyzer .
 
----
-
-## Quickstart Bug Analyzer
-
-```bash
-# Activate venv
-source .venv/bin/activate
-# bug analyzer example <output_dir_name>
-firmrebugger bug-analyzer .
-```
-
----
-
-## Quickstart Charting tool
-
-```bash
-# Activate venv
-source .venv/bin/activate
-# Charting tool usage
-firmrebugger charting-tool
+# If you run the full process it can be done with 
+uv run frb fuzz --full
+# Visualize the data
+uv run frb charting-tool
 ```
 
 ---
@@ -157,8 +165,6 @@ The listing above shows a Raven that captures a real-world stack buffer overflow
 
 The Raven for bug `BUG_FW11` creates a reflection point at the program counter address where the buffer indexing occurs. Introspection then checks if the index exceeds the buffer bounds. At this critical location in execution (address `0x08004fa`), the buffer index (`settings.decimal_places`) is held in register `R2`. By checking if the value in `R2` is greater than 9, the Raven precisely captures the triggering condition for this stack buffer overflow bug.
 
----
-
 **Dangling Pointer** refers to a pointer that continues to reference freed memory or a stack frame that no longer exists. Dereferencing such pointers in C or C++ is considered undefined behavior and can result in unpredictable or erroneous program states. This is a common issue in manual memory management environments, particularly in C/C++ firmware.
 
 Identifying dangling pointer usage involves combining introspection at points where pointers become invalid with checks at locations where the invalid pointer may later be used.
@@ -204,13 +210,13 @@ Median bug survival times—both **R**eached and **T**riggered—measured over a
 
 ### FirmBench
 
-![Alt text](data/sec26cycle1-paper1276-pages-1-1.png)
-![Alt text](data/sec26cycle1-paper1276-pages-2-1.png)
+![Alt text](paper_results/sec26cycle1-paper1276-pages-1-1.png)
+![Alt text](paper_results/sec26cycle1-paper1276-pages-2-1.png)
 
 ### FirmBenchX
 
-![Alt text](data/sec26cycle1-paper1276-pages-3-1.png)
-![Alt text](data/sec26cycle1-paper1276-pages-4-1.png)
+![Alt text](paper_results/sec26cycle1-paper1276-pages-3-1.png)
+![Alt text](paper_results/sec26cycle1-paper1276-pages-4-1.png)
 
 ## Modification table
 

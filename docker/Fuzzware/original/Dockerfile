@@ -31,6 +31,7 @@ USER user
 # Clone the source code from GitHub
 RUN git clone https://github.com/fuzzware-fuzzer/fuzzware.git $FUZZER/repo
 WORKDIR $FUZZER/repo
+RUN git checkout e43dfbd38185ef4a374e1e9a6c9d930a9cc40653
 RUN git submodule update --init --recursive
 USER root
 # Install requirements from the repo

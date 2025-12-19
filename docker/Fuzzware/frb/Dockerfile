@@ -76,12 +76,15 @@ COPY --chown=user --from=fuzzware-modeling $WORKON_HOME/ $WORKON_HOME/
 # Install FirmReBugger
 USER root
 RUN pip3 install uv
-RUN pip3 install --upgrade pip setuptools wheel
 COPY --chown=user src $FUZZER/firmrebugger/
 COPY --chown=user pyproject.toml $FUZZER/firmrebugger/
 COPY --chown=user uv.lock $FUZZER/firmrebugger/
+COPY --chown=user README.md $FUZZER/firmrebugger/
+COPY --chown=user .python-version $FUZZER/firmrebugger/
 WORKDIR $FUZZER/firmrebugger
-RUN pip3 install -e .
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+RUN uv run frb -h
 
 USER user:user
 ENV FIRMREBUGGER_BASE_DIR=$FUZZER/firmrebugger

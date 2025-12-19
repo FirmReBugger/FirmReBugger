@@ -64,14 +64,26 @@ else
 
   cd DICE-DMA-Emulation || { echo "Failed to change directory to 'DICE-DMA-Emulation'"; exit 1; }
   git submodule update --init --recursive p2im
-  cd p2im/qemu
+  
+  # Apply the DICE patch from the p2im directory level
+  cd p2im
+  PATCH_FILE="$FIRMREBUGGER_BASE_DIR/docker/DICE/frb/frb_patches/DICE.patch"
+  
+  echo "[+] Applying DICE patch..."
+  git apply --unsafe-paths "$PATCH_FILE" || { 
+    echo "[!] Failed to apply DICE patch"
+    exit 1
+  }
+  echo "[+] DICE patch applied successfully"
+
+  # Now move to qemu directory for the rest of the setup
+  cd qemu
+  
   # Get fixes for debian build
   if [ ! -d build_scripts/debian ]; then
     git clone https://github.com/xgandiaga/DRIVERS.git
     mv DRIVERS/* ./build_scripts/ && rm -rf DRIVERS
   fi
-  
-  git apply --unsafe-paths $FIRMREBUGGER_BASE_DIR/docker/DICE/frb/frb_patches/DICE.patch
 
   cp -r "$FIRMREBUGGER_BASE_DIR/docker/DICE/frb/frb_patches/firmrebugger" src/qemu.git/include/ || { echo "Failed to copy patches to 'src/qemu.git/include/firmrebugger'"; exit 1; }
   cp "$FIRMREBUGGER_BASE_DIR/docker/DICE/frb/frb_patches/firmrebugger.c" src/qemu.git/hw/arm/firmrebugger.c || { echo "Failed to copy 'firmrebugger.c' to 'src/qemu.git/hw/arm/'"; exit 1; }

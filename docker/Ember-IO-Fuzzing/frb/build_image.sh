@@ -4,6 +4,7 @@ FUZZER_IMAGE="frb:Ember-IO-Fuzzing"
 docker buildx build \
   --tag "$FUZZER_IMAGE" \
   --load \
+  --no-cache \
   -f docker/Ember-IO-Fuzzing/frb/Dockerfile \
   . \
   || { echo "Failed to build Docker image '$FUZZER_IMAGE'"; exit 1; }

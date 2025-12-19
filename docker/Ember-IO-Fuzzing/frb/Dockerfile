@@ -31,10 +31,13 @@ USER root
 WORKDIR $FUZZER
 RUN git clone https://github.com/Ember-IO/Ember-IO-Fuzzing.git Ember-IO-Fuzzing
 WORKDIR $FUZZER/Ember-IO-Fuzzing
-RUN git checkout 1fbaf16eedfa3e4056906c939e920604a5bd5729
 ENV EMBER_BASE_DIR=$FUZZER/Ember-IO-Fuzzing
-RUN git submodule update --init --recursive
 
+RUN git submodule update --init
+WORKDIR AFLplusplus
+RUN git submodule update --init 
+WORKDIR qemu_mode
+RUN git submodule update --init 
 # Apply FirmReBugger patches
 COPY --chown=user docker/Ember-IO-Fuzzing/frb/frb_patches/frb_ember.patch $FUZZER/Ember-IO-Fuzzing/
 WORKDIR $FUZZER/Ember-IO-Fuzzing/AFLplusplus/qemu_mode/qemuafl
@@ -55,12 +58,15 @@ RUN ./build_qemu_support.sh
 # Install FirmReBugger
 USER root
 RUN pip3 install uv
-RUN pip3 install --upgrade pip setuptools wheel
 COPY --chown=user src $FUZZER/firmrebugger/
 COPY --chown=user pyproject.toml $FUZZER/firmrebugger/
 COPY --chown=user uv.lock $FUZZER/firmrebugger/
+COPY --chown=user README.md $FUZZER/firmrebugger/
+COPY --chown=user .python-version $FUZZER/firmrebugger/
 WORKDIR $FUZZER/firmrebugger
-RUN pip3 install -e .
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:/home/user/.local/bin:$PATH"
+RUN uv run frb -h
 
 USER user:user
 ENV EMBER_BASE_DIR=$FUZZER/Ember-IO-Fuzzing

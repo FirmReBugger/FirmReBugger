@@ -15,7 +15,7 @@ RUN useradd -l -u $USERID -d /home/user user && \
     chown -R user:user /home/user && \
     echo "user ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers
 
-FROM rust:latest AS build-multifuzz
+FROM rust:1.88 AS build-multifuzz
 USER root
 ENV FUZZER=/home/user/multifuzz
 RUN apt-get update && \
@@ -33,6 +33,5 @@ COPY --from=build-multifuzz $FUZZER/MultiFuzz/target/release/hail-fuzz $FUZZER/M
 COPY --from=build-multifuzz $FUZZER/MultiFuzz/ghidra $FUZZER/MultiFuzz/ghidra
 ENV GHIDRA_SRC=$FUZZER/MultiFuzz/ghidra
 
-ENV MULTI=$FUZZER/MultiFuzz/target/release//hail-fuzz
 USER user:user
 WORKDIR $FUZZER/firmbench_target

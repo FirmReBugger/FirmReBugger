@@ -31,6 +31,7 @@ ENV FUZZER=/home/user/hoedur
 RUN git clone https://github.com/fuzzware-fuzzer/hoedur.git $FUZZER/
 RUN git clone https://github.com/fuzzware-fuzzer/hoedur-experiments.git         $FUZZER/hoedur-experiments 
 WORKDIR $FUZZER
+RUN git checkout a021fd064e5d831a427a25b17975779eef05c45b
 RUN git am $FUZZER/hoedur-experiments/scripts/hoedur/patches/dict/0001-enable-dictionary.patch
 # install hoedur (emulator + fuzzer)
 RUN cargo install --path $FUZZER/hoedur \

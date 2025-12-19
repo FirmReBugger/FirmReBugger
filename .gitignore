@@ -9,15 +9,10 @@ wheels/
 # Virtual environments
 .venv
 
+# DICE build
+DICE-DMA-Emulation
+report/
+
 # Benchmark results
 **/fuzzing_out/*
 !**/fuzzing_out/.gitkeep
-
-# DICE Built artifacts
-**/DICE-DMA-Emulation/
-
-# Custom Scripts
-generate_custom_survival_plot.py
-
-# Report output
-report/

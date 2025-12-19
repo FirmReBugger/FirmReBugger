@@ -3,17 +3,25 @@ name = "firmrebugger"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.8.10"
+authors = [
+    { name = "FirmReBugger", email = "FirmReBugger@gmail.com" }
+]
+requires-python = ">=3.12"
 dependencies = [
+    "click>=8.3.1",
     "docker>=7.1.0",
-    "lifelines>=0.27.8",
-    "matplotlib>=3.7.5",
-    "panadas>=0.2",
-    "pyyaml>=6.0.2",
-    "tabulate>=0.9.0",
+    "lifelines>=0.30.0",
+    "matplotlib>=3.10.8",
+    "pandas>=2.3.3",
+    "pyyaml>=6.0.3",
     "upsetplot>=0.9.0",
-    "zstandard>=0.23.0",
+    "zstandard>=0.25.0",
 ]
 
 [project.scripts]
-firmrebugger = "firmrebugger.main:main"
+firmrebugger = "firmrebugger.cli:main"
+frb = "firmrebugger.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

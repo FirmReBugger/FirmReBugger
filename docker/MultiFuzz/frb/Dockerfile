@@ -4,7 +4,7 @@ ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y && \
-    apt-get install -y python3 python3-pip tmux build-essential git wget && \
+    apt-get install -y python3 python3-pip tmux build-essential git wget curl && \
     pip3 install setuptools
 
 ENV FUZZER=/home/user/multifuzz
@@ -26,7 +26,7 @@ RUN git apply /tinycc/frb_tcc.patch
 RUN ./configure && \
     make
 
-FROM rust:latest AS build-multifuzz
+FROM rust:1.88 AS build-multifuzz
 USER root
 ENV FUZZER=/home/user/multifuzz
 RUN apt-get update && \
@@ -41,6 +41,7 @@ COPY --chown=user docker/MultiFuzz/frb/frb_patches/frb_multifuzz.patch .
 RUN git apply frb_multifuzz.patch
 RUN git submodule update --init ghidra
 COPY --from=tcc-build /tinycc $FUZZER/tinycc
+RUN ls $FUZZER/tinycc
 RUN cargo build --release
 
 FROM fuzzer-base
@@ -51,13 +52,19 @@ COPY --from=build-multifuzz $FUZZER/MultiFuzz/ghidra $FUZZER/MultiFuzz/ghidra
 # Install FirmReBugger
 USER root
 RUN pip3 install uv
-RUN pip3 install --upgrade pip setuptools wheel
-COPY --chown=user . $FUZZER/firmrebugger/
+COPY --chown=user src $FUZZER/firmrebugger/
+COPY --chown=user pyproject.toml $FUZZER/firmrebugger/
+COPY --chown=user uv.lock $FUZZER/firmrebugger/
+COPY --chown=user README.md $FUZZER/firmrebugger/
+COPY --chown=user .python-version $FUZZER/firmrebugger/
 WORKDIR $FUZZER/firmrebugger
-RUN pip3 install --ignore-installed -e .
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+RUN uv run frb -h
 
 USER user:user
 ENV GHIDRA_SRC=$FUZZER/MultiFuzz/ghidra
 ENV MULTIFUZZ_DIR=$FUZZER/MultiFuzz
+ENV MULTIFUZZ_BASE_DIR=$FUZZER/MultiFuzz/
 ENV FIRMREBUGGER_BASE_DIR=$FUZZER/firmrebugger
 WORKDIR $FUZZER/firmbench_target
