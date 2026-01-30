@@ -22,35 +22,48 @@ def get_fuzzers(fuzzers_dir):
         sys.exit(1)
 
 
-def build_fuzzer_docker(fuzzer, frb=False):
-    """Build a single fuzzer and return success status"""
-    print(f"Building Docker image for {fuzzer}...")
-    if frb:
-        builder_path = os.path.join(
-            FIRMREBUGGER_BASE_DIR, "docker", fuzzer, "frb", "build_image.sh"
-        )
-    else:
-        builder_path = os.path.join(
-            FIRMREBUGGER_BASE_DIR, "docker", fuzzer, "original", "build_image.sh"
-        )
+def build_fuzzer_docker(fuzzer):
+    print(f"Building Docker images for {fuzzer}...")
 
-    cmd = f"{builder_path}"
-    print(f"Running command: {cmd}")
-    try:
-        subprocess.run(cmd, shell=True, check=True)
-        print(f"{fuzzer} built successfully.")
-        return True, None
-    except subprocess. CalledProcessError as e: 
-        error_msg = f"Return code: {e.returncode}, Command: {e.cmd}"
-        print(f"Error building {fuzzer}. {error_msg}")
-        return False, error_msg
-    except Exception as e:
-        error_msg = str(e)
-        print(f"Unexpected error building {fuzzer}: {e}")
-        return False, error_msg
+    # Paths for the build scripts
+    non_frb_builder_path = os.path.join(
+        FIRMREBUGGER_BASE_DIR, "docker", fuzzer, "original", "build_image.sh"
+    )
+    frb_builder_path = os.path.join(
+        FIRMREBUGGER_BASE_DIR, "docker", fuzzer, "frb", "build_image.sh"
+    )
+
+    # Helper to build a Docker image and handle errors
+    def run_build(build_script, version):
+        cmd = f"{build_script}"
+        print(f"Building {version} version: Running command: {cmd}")
+        try:
+            subprocess.run(cmd, shell=True, check=True)
+            print(f"{version} version of {fuzzer} built successfully.")
+            return True, None
+        except subprocess.CalledProcessError as e:
+            error_msg = f"Return code: {e.returncode}, Command: {e.cmd}"
+            print(f"Error building {version} version of {fuzzer}. {error_msg}")
+            return False, error_msg
+        except Exception as e:
+            error_msg = str(e)
+            print(f"Unexpected error building {version} version of {fuzzer}: {e}")
+            return False, error_msg
+
+    non_frb_success, non_frb_error = run_build(non_frb_builder_path, "Original")
+    if not non_frb_success:
+        return False, f"Error in original build: {non_frb_error}"
+
+    # Build the FRB version next
+    frb_success, frb_error = run_build(frb_builder_path, "FRB")
+    if not frb_success:
+        return False, f"Error in FRB build: {frb_error}"
+
+    # Both builds succeeded
+    return True, None
 
 
-def build_fuzzers(frb=False):
+def build_fuzzers():
     global FIRMREBUGGER_BASE_DIR
     FIRMREBUGGER_BASE_DIR = get_frb_base_dir()
     fuzzer_docker_dir = f"{FIRMREBUGGER_BASE_DIR}/docker"
@@ -67,7 +80,7 @@ def build_fuzzers(frb=False):
     results = {}
 
     def safe_build(fuzzer):
-        success, error = build_fuzzer_docker(fuzzer, frb=frb)
+        success, error = build_fuzzer_docker(fuzzer)
         return fuzzer, success, error
 
     with concurrent.futures.ThreadPoolExecutor() as executor:

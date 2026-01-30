@@ -2,6 +2,8 @@ import os
 import subprocess
 import pandas as pd
 from firmrebugger.charting_tool_utils.summarize_data import summarize_data
+import numpy as np
+import scipy.stats as stats
 
 
 def value_to_color(value, min_value=0, max_value=10):
@@ -12,7 +14,7 @@ def value_to_color(value, min_value=0, max_value=10):
         "#def0e5",
         "#cfead8",
         "#bfe4cb",
-        "#b0ddbd",
+        "#b0ddbe",
         "#a1d7b0",
         "#91d1a3",
         "#82cb96",
@@ -44,7 +46,6 @@ def minutes_to_hm(minutes):
 
 
 def generate_table_pdf(output_report, table_code, table):
-    # Define the output directory and file name
     output_dir = f"{output_report}/{table}/summary_table"
     tex_file = f"table{table}.tex"
     pdf_file = f"table{table}.pdf"
@@ -55,19 +56,16 @@ def generate_table_pdf(output_report, table_code, table):
 \documentclass{{article}}
 \usepackage{{graphicx}}
 \usepackage[table,xcdraw]{{xcolor}}
-\usepackage[a4paper,margin=1in]{{geometry}}
+\usepackage[a4paper,margin=0.5in,landscape]{{geometry}}
 \pagestyle{{empty}}
 \usepackage{{pdflscape}}
 \newcommand{{\missing}}{{\makebox[2em][c]{{--}}}}
 \begin{{document}}
-%\begin{{landscape}}
     {table_code}
-%\end{{landscape}}
 \end{{document}}
 """
     with open(tex_path, "w") as f:
         f.write(latex_code)
-    print(f"Generating Latex tables at: {tex_path}")
     subprocess.run(
         ["pdflatex", "-output-directory", output_dir, tex_path],
         capture_output=True,
@@ -93,7 +91,54 @@ def escape_latex(text):
     return text
 
 
-def reshape_and_convert_to_latex(combined_df, expected_fuzzers=None):
+def count_table_rows(combined_df):
+    """Count the number of rows that will be in the final table."""
+    row_count = 0
+    for binary, group in combined_df.groupby("Binary"):
+        for bug_id, bug_group in group.groupby("BugID"):
+            if "ERROR" in bug_id:
+                continue
+            row_count += 1
+    return row_count
+
+
+def split_dataframe_by_binaries(combined_df, max_rows_per_table=25):
+    """
+    Split the dataframe into chunks, keeping binaries together.
+    Returns a list of dataframes, each representing one table.
+    """
+    chunks = []
+    current_chunk = []
+    current_row_count = 0
+
+    grouped_data = list(combined_df.groupby("Binary"))
+
+    for binary, group in grouped_data:
+        binary_row_count = 0
+        for bug_id, bug_group in group.groupby("BugID"):
+            if "ERROR" not in bug_id:
+                binary_row_count += 1
+
+        if (
+            current_row_count > 0
+            and current_row_count + binary_row_count > max_rows_per_table
+        ):
+            chunks.append(pd.concat(current_chunk, ignore_index=True))
+            current_chunk = []
+            current_row_count = 0
+
+        current_chunk.append(group)
+        current_row_count += binary_row_count
+
+    if current_chunk:
+        chunks.append(pd.concat(current_chunk, ignore_index=True))
+
+    return chunks
+
+
+def reshape_and_convert_to_latex(
+    combined_df, expected_fuzzers=None, table_number=1, total_tables=1
+):
     desired_order = [
         "Ember-IO-Fuzzing",
         "Fuzzware",
@@ -102,14 +147,20 @@ def reshape_and_convert_to_latex(combined_df, expected_fuzzers=None):
         "SplITS",
         "Hoedur",
         "MultiFuzz",
+        "GDMA",
     ]
 
     if expected_fuzzers is None:
         present_fuzzers = combined_df["Fuzzer"].unique()
         fuzzers = [f for f in desired_order if f in present_fuzzers]
     else:
-        # Force expected_fuzzers into desired_order, only keeping those present in expected_fuzzers
         fuzzers = [f for f in desired_order if f in expected_fuzzers]
+
+    table_label = "fuzzing-results"
+    caption_text = "Fuzzing Results"
+    if total_tables > 1:
+        table_label += f"-{table_number}"
+        caption_text += f" (Part {table_number} of {total_tables})"
 
     latex_table = (
         r"\begin{table*}[t]"
@@ -145,11 +196,10 @@ def reshape_and_convert_to_latex(combined_df, expected_fuzzers=None):
     latex_table += "\nBinary & Bug ID & " + fuzzer_headers + r" \\"
     latex_table += "\n & & " + sub_headers + r" \\ \hline"
 
-    # Group data by Binary
     grouped_data = combined_df.groupby("Binary")
-    grouped_data_list = list(grouped_data)  # Convert to list to check the last group
+    grouped_data_list = list(grouped_data) 
 
-    first_row = True  # Track if this is the first row for any Binary
+    first_row = True
 
     for idx, (binary, group) in enumerate(grouped_data_list):
         for bug_id, bug_group in group.groupby("BugID"):
@@ -157,8 +207,6 @@ def reshape_and_convert_to_latex(combined_df, expected_fuzzers=None):
                 continue
             row_data = []
 
-            # For each fuzzer, extract Reached, Triggered, Count
-            # Calculate minimums only from non-missing values
             valid_reached = bug_group[bug_group["MedianReachedTime"] != "-"][
                 "MedianReachedTime"
             ]
@@ -174,7 +222,6 @@ def reshape_and_convert_to_latex(combined_df, expected_fuzzers=None):
             if not valid_triggered.empty:
                 min_triggered = float(valid_triggered.min())
 
-            # Process all expected fuzzers, not just those present in bug_group
             for fuzzer in fuzzers:
                 fuzzer_row = bug_group[bug_group["Fuzzer"] == fuzzer]
                 if not fuzzer_row.empty:
@@ -182,7 +229,6 @@ def reshape_and_convert_to_latex(combined_df, expected_fuzzers=None):
                         ["MedianReachedTime", "MedianTriggeredTime", "TriggeredCount"]
                     ]
 
-                    # Convert reached and triggered times to HH:MM format
                     reached_hm = (
                         minutes_to_hm(float(reached)) if reached != "-" else r"\missing"
                     )
@@ -192,7 +238,6 @@ def reshape_and_convert_to_latex(combined_df, expected_fuzzers=None):
                         else r"\missing"
                     )
 
-                    # Apply bolding if the time is equal to the minimum reached or triggered time
                     if (
                         reached != "-"
                         and float(reached) == min_reached
@@ -211,19 +256,15 @@ def reshape_and_convert_to_latex(combined_df, expected_fuzzers=None):
                     if triggered_hm == str(float("inf")):
                         triggered_hm = r"\missing"
 
-                    # Apply the color for the hit count (TriggeredCount)
                     hit_color = value_to_color(count)
                     count = hit_color
 
                 else:
-                    # Always provide 3 columns even when fuzzer data is missing
-                    # Use a consistent format with background color for missing data
                     reached_hm, triggered_hm = r"\missing", r"\missing"
                     count = (
-                        r"\cellcolor[HTML]{F5F5F5}N/A"  # Light gray for missing data
+                        r"\cellcolor[HTML]{F5F5F5}N/A"
                     )
 
-                # Add the formatted times and count to row_data
                 row_data.extend([str(reached_hm), str(triggered_hm), str(count)])
 
             bug_id_cell = (
@@ -239,22 +280,20 @@ def reshape_and_convert_to_latex(combined_df, expected_fuzzers=None):
             else:
                 latex_table += f"\n & {bug_id_cell} & " + " & ".join(row_data) + r" \\"
 
-        # Add \hline at the end of each binary group, but not after the last binary
         if idx != len(grouped_data_list) - 1:
             latex_table += r" \hline"
 
-        first_row = True  # Reset for next binary
+        first_row = True
 
-    # Close the table
     latex_table += (
         "\n"
         + r"\end{tabular}"
         + "\n"
         + r"}"
         + "\n"
-        + r"\caption{Fuzzing Results}"
+        + rf"\caption{{{caption_text}}}"
         + "\n"
-        + r"\label{tab:fuzzing-results}"
+        + rf"\label{{tab:{table_label}}}"
         + "\n"
         + r"\end{table*}"
     )
@@ -262,8 +301,9 @@ def reshape_and_convert_to_latex(combined_df, expected_fuzzers=None):
     return latex_table
 
 
-def generate_table(frb_reports, output_report):
+def generate_table(frb_reports, output_report, max_rows_per_table=40):
     for target, binaries in frb_reports.items():
+        print(f"Processing target: {target} binarys: {list(binaries.keys())}")
         all_reports_df = []
         for binary, output_reports in binaries.items():
             for report in output_reports:
@@ -275,10 +315,74 @@ def generate_table(frb_reports, output_report):
             continue
 
         combined_df = pd.concat(all_reports_df, ignore_index=True)
-        combined_df = combined_df.map(
+        combined_df = combined_df.applymap(
             lambda x: escape_latex(str(x)) if isinstance(x, str) else x
         )
 
+        timeout = 24 * 60 * 60
+
+        significant_wins = {}
+
+        for binary, group in combined_df.groupby("Binary"):
+            fuzzer_groups = group.groupby("Fuzzer")["MedianTriggeredTime"].apply(list)
+            fuzzer_groups = fuzzer_groups[
+                fuzzer_groups.apply(lambda l: any(t < timeout for t in l))
+            ]
+            if len(fuzzer_groups) < 2:
+                continue
+
+            medians = fuzzer_groups.apply(
+                lambda l: np.median([t for t in l if t < timeout])
+            )
+            winner = medians.idxmin()
+            winner_times = np.array([t for t in fuzzer_groups[winner] if t < timeout])
+
+            win_significant = True
+            for fuzzer, times in fuzzer_groups.items():
+                if fuzzer == winner:
+                    continue
+                comp_times = np.array([t for t in times if t < timeout])
+                if len(winner_times) < 2 or len(comp_times) < 2:
+                    win_significant = False
+                    break
+                stat, p = stats.mannwhitneyu(
+                    winner_times, comp_times, alternative="less"
+                )
+                if p >= 0.05:
+                    win_significant = False
+                    break
+            if win_significant:
+                significant_wins[winner] = significant_wins.get(winner, 0) + 1
+
+        for fuzzer, count in sorted(
+            significant_wins.items(), key=lambda x: x[1], reverse=True
+        ):
+            print(f"{fuzzer}: {count}")
+
         fuzzers = list(combined_df["Fuzzer"].drop_duplicates())
-        latex_code = reshape_and_convert_to_latex(combined_df, fuzzers)
-        generate_table_pdf(output_report, latex_code, target)
+        pd.set_option("display.max_rows", None)
+        pd.set_option("display.max_columns", None)
+        pd.set_option("display.width", None)
+        pd.set_option("display.max_colwidth", None)
+        print(combined_df)
+
+        total_rows = count_table_rows(combined_df)
+        print(f"Total rows in table: {total_rows}")
+
+        if total_rows > max_rows_per_table:
+            chunks = split_dataframe_by_binaries(combined_df, max_rows_per_table)
+            total_tables = len(chunks)
+            print(f"Splitting table into {total_tables} parts")
+
+            all_latex_codes = []
+            for i, chunk_df in enumerate(chunks, start=1):
+                latex_code = reshape_and_convert_to_latex(
+                    chunk_df, fuzzers, table_number=i, total_tables=total_tables
+                )
+                all_latex_codes.append(latex_code)
+
+            combined_latex = "\n\n\\clearpage\n\n".join(all_latex_codes)
+            generate_table_pdf(output_report, combined_latex, target)
+        else:
+            latex_code = reshape_and_convert_to_latex(combined_df, fuzzers)
+            generate_table_pdf(output_report, latex_code, target)

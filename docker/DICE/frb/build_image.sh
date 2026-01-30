@@ -51,42 +51,15 @@ QEMU_BIN="${FIRMREBUGGER_BASE_DIR}/docker/DICE/frb/DICE-DMA-Emulation/p2im/qemu/
 if [ -f "$QEMU_BIN" ]; then
   echo "[+] '$QEMU_BIN' already exists. Skipping QEMU build."
 else
-  echo "[+] '$QEMU_BIN' not found. Starting QEMU build..."
-
-  cd "${FIRMREBUGGER_BASE_DIR}/docker/DICE/frb" || { echo "Failed to change directory to '${FIRMREBUGGER_BASE_DIR}/docker/DICE/frb'"; exit 1; }
-
-  # Clone DICE-DMA-Emulation if needed
-  if [ ! -d "DICE-DMA-Emulation" ]; then
-    git clone https://github.com/RiS3-Lab/DICE-DMA-Emulation.git || { echo "Failed to clone DICE-DMA-Emulation repo"; exit 1; }
-  else
-    echo "[+] 'DICE-DMA-Emulation' already exists, skipping git clone."
-  fi
-
-  cd DICE-DMA-Emulation || { echo "Failed to change directory to 'DICE-DMA-Emulation'"; exit 1; }
-  git submodule update --init --recursive p2im
-  
-  # Apply the DICE patch from the p2im directory level
-  cd p2im
-  PATCH_FILE="$FIRMREBUGGER_BASE_DIR/docker/DICE/frb/frb_patches/DICE.patch"
-  
-  echo "[+] Applying DICE patch..."
-  git apply --unsafe-paths "$PATCH_FILE" || { 
-    echo "[!] Failed to apply DICE patch"
-    exit 1
-  }
-  echo "[+] DICE patch applied successfully"
+  cp -r "${FIRMREBUGGER_BASE_DIR}/docker/DICE/original/DICE-DMA-Emulation" "${FIRMREBUGGER_BASE_DIR}/docker/DICE/frb/DICE-DMA-Emulation"
 
   # Now move to qemu directory for the rest of the setup
-  cd qemu
-  
-  # Get fixes for debian build
-  if [ ! -d build_scripts/debian ]; then
-    git clone https://github.com/xgandiaga/DRIVERS.git
-    mv DRIVERS/* ./build_scripts/ && rm -rf DRIVERS
-  fi
+  cd "$FIRMREBUGGER_BASE_DIR/docker/DICE/frb/DICE-DMA-Emulation/p2im/qemu" || { echo "Failed to change directory to '$FIRMREBUGGER_BASE_DIR/docker/DICE/frb/DICE-DMA-Emulation/p2im/qemu'"; exit 1; }
 
   cp -r "$FIRMREBUGGER_BASE_DIR/docker/DICE/frb/frb_patches/firmrebugger" src/qemu.git/include/ || { echo "Failed to copy patches to 'src/qemu.git/include/firmrebugger'"; exit 1; }
   cp "$FIRMREBUGGER_BASE_DIR/docker/DICE/frb/frb_patches/firmrebugger.c" src/qemu.git/hw/arm/firmrebugger.c || { echo "Failed to copy 'firmrebugger.c' to 'src/qemu.git/hw/arm/'"; exit 1; }
+
+  patch -p0 < "$FIRMREBUGGER_BASE_DIR/docker/DICE/frb/frb_patches/frb_dice.patch" || { echo "Failed to apply 'frb_dice.patch'"; exit 1; }
 
   # TinyCC setup
   if [ ! -d src/qemu.git/tinycc ]; then
@@ -108,4 +81,6 @@ fi
 cd "$FIRMREBUGGER_BASE_DIR/"
 
 docker buildx build --tag "$FUZZER_IMAGE" --load -f "${FIRMREBUGGER_BASE_DIR}/docker/DICE/frb/Dockerfile" . || { echo "Failed to build Docker image '$FUZZER_IMAGE'"; exit 1; }
+rm -rf "${FIRMREBUGGER_BASE_DIR}/docker/DICE/frb/DICE-DMA-Emulation"
+rm -rf "${FIRMREBUGGER_BASE_DIR}/docker/DICE/original/DICE-DMA-Emulation"
 echo "[+] Docker image '$FUZZER_IMAGE' built successfully."

@@ -9,15 +9,6 @@ from upsetplot import UpSet
 
 
 def prep_data_for_upset_plot(all_bugs_triggered, bugs_triggered):
-    ASTERISK_FUZZERS = {"SEmu-Fuzz", "Fuzzware", "SplITS"}
-    fuzzer_rename = {
-        f: (
-            "Ember-IO"
-            if f == "Ember-IO-Fuzzing"
-            else (f + "*" if f in ASTERISK_FUZZERS else f)
-        )
-        for f in bugs_triggered.keys()
-    }
     fuzzer_rename_map = {f: newf for f, newf in fuzzer_rename.items()}
     fuzzer_list = list(fuzzer_rename.values())
 
@@ -47,7 +38,6 @@ def list_all_triggered_bugs(dfs):
     all_fuzzers = set()
 
     for df in dfs:
-        # Standardize column names just in case (strip spaces)
         df = df.rename(columns={c: c.strip() for c in df.columns})
 
         for _, row in df.iterrows():
@@ -87,7 +77,6 @@ def upset_plot(df):
     for ax in fig.axes:
         leg = ax.get_legend()
         if leg:
-            # leg.remove()
             leg.set_bbox_to_anchor((0.2, 0.9), transform=fig.transFigure)
 
     fig.axes[2].set_xticks([])

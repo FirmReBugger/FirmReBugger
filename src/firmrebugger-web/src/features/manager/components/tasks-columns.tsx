@@ -1,0 +1,427 @@
+import { type ColumnDef } from '@tanstack/react-table'
+import { Trash2, CircleStop, ArrowUp, Search, MoreHorizontal, CheckCircle2, FileCheck } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Switch } from '@/components/ui/switch'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  DropdownMenuLabel,
+} from '@/components/ui/dropdown-menu'
+import { DataTableColumnHeader } from '@/components/data-table'
+import { type Task } from '../data/schema'
+import { formatTime } from './tasks-mutate-drawer'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+
+let deleteTaskCallback: ((id: string) => void) | null = null
+let stopTaskCallback: ((id: string) => void) | null = null
+let moveUpCallback: ((id: string) => void) | null = null
+let queueTriagingCallback: ((id: string) => void) | null = null
+let toggleAutoTriagingCallback: ((id: string, value: boolean) => void) | null = null
+let allTasks: Task[] = []
+
+export function setTaskCallbacks(
+  deleteFn: (id: string) => void,
+  stopFn: (id: string) => void,
+  moveUpFn: (id: string) => void,
+  queueTriagingFn: (id: string) => void,
+  toggleAutoTriagingFn: (id: string, value: boolean) => void,
+  tasks: Task[]
+) {
+  deleteTaskCallback = deleteFn
+  stopTaskCallback = stopFn
+  moveUpCallback = moveUpFn
+  queueTriagingCallback = queueTriagingFn
+  toggleAutoTriagingCallback = toggleAutoTriagingFn
+  allTasks = tasks
+}
+
+export const tasksColumns: ColumnDef<Task>[] = [
+  {
+    accessorKey: 'status',
+    header: () => <div className='pl-4'>Status</div>,
+    enableSorting: true,
+    sortingFn: (rowA, rowB) => {
+      const statusOrder = {
+        running: 0,
+        queued: 1,
+        completed: 2,
+        stopped: 3,
+        errored: 4,
+      }
+      const statusA = rowA.original.status
+      const statusB = rowB.original.status
+      const orderA = statusOrder[statusA as keyof typeof statusOrder] ?? 999
+      const orderB = statusOrder[statusB as keyof typeof statusOrder] ?? 999
+      
+      if (orderA !== orderB) {
+        return orderA - orderB
+      }
+      
+      const posA = rowA.original.queuePosition ?? 999999
+      const posB = rowB.original.queuePosition ?? 999999
+      return posA - posB
+    },
+    cell: ({ row }) => {
+      const status = row.getValue('status') as string
+      const statusConfig = {
+        running: { label: 'Running', className: 'bg-blue-500 hover:bg-blue-600 text-white' },
+        queued: { label: 'Queued', className: 'bg-gray-500 hover:bg-gray-600 text-white' },
+        stopping: { label: 'Stopping', className: 'bg-yellow-400 hover:bg-yellow-500 text-white' },
+        completed: { label: 'Completed', className: 'bg-green-500 hover:bg-green-600 text-white' },
+        stopped: { label: 'Stopped', className: 'bg-yellow-500 hover:bg-yellow-600 text-white' },
+        errored: { label: 'Errored', className: 'bg-red-500 hover:bg-red-600 text-white' },
+      }
+      const config = statusConfig[status as keyof typeof statusConfig] || { 
+        label: status, 
+        className: 'bg-gray-500 text-white' 
+      }
+      return (
+        <div className='w-[100px] pl-4'>
+          <Badge className={config.className}>
+            {config.label}
+          </Badge>
+        </div>
+      )
+    },
+  },
+  {
+    accessorKey: 'mode',
+    header: () => <div className='pl-4'>Mode</div>,
+    enableSorting: false,
+    cell: ({ row }) => {
+      const mode = row.getValue('mode') as string
+      return (
+        <div className='w-[100px] pl-4'>
+          {mode}
+        </div>
+      )
+    },
+  },
+  {
+    accessorKey: 'fuzzer',
+    header: () => <div className='pl-4'>Fuzzer</div>,
+    enableSorting: false,
+    cell: ({ row }) => {
+      const fuzzer = String(row.getValue('fuzzer'))
+      return (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className='w-[120px] pl-4 truncate'>{fuzzer}</div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>{fuzzer}</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )
+    },
+  },
+  {
+    accessorKey: 'binary',
+    header: () => <div className='pl-4'>Binary</div>,
+    enableSorting: false,
+    cell: ({ row }) => {
+      const binary = row.getValue('binary') as string
+      const benchmark = row.original.benchmark
+      return (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <div className='w-[120px] pl-4'>
+                <div className='text-xs text-muted-foreground'>{benchmark}</div>
+                <div className='truncate'>{binary}</div>
+              </div>
+            </TooltipTrigger>
+            <TooltipContent>
+              <p className='text-xs text-muted-foreground'>{benchmark}</p>
+              <p>{binary}</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )
+    },
+  },
+  {
+    accessorKey: 'runs',
+    header: () => <div className='pl-4'>Runs</div>,
+    enableSorting: false,
+    cell: ({ row }) => <div className='w-[100px] font-mono pl-4'>{row.getValue('runs')}</div>,
+  },
+  {
+    accessorKey: 'completedAt',
+    id: 'time',
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title='Time' />
+    ),
+    sortingFn: (rowA, rowB) => {
+      const completedA = rowA.original.completedAt
+      const completedB = rowB.original.completedAt
+      
+      if (completedA && completedB) {
+        const timeA = completedA instanceof Date ? completedA.getTime() : new Date(completedA).getTime()
+        const timeB = completedB instanceof Date ? completedB.getTime() : new Date(completedB).getTime()
+        return timeA - timeB
+      }
+      
+      if (completedA && !completedB) return -1
+      if (!completedA && completedB) return 1
+      
+      return rowA.original.progress - rowB.original.progress
+    },
+    cell: ({ row }) => {
+      const progress = row.original.progress ?? 0
+      const totalTime = row.original.time
+      const status = row.original.status
+      const mode = row.original.mode
+      const elapsedTime = row.original.elapsedTime ?? 0
+      
+      let timeRemaining = Math.max(0, totalTime - elapsedTime)
+      if (progress >= 100) {
+        timeRemaining = 0
+      }
+      
+      const barColorClass = 
+        status === 'completed' ? 'bg-green-500' :
+        status === 'stopped' ? 'bg-yellow-500' :
+        status === 'stopping' ? 'bg-yellow-400' :
+        'bg-primary'
+      
+      return (
+        <div className='flex flex-col items-center gap-2 w-full min-w-[250px]'>
+          <div className='w-full h-2 bg-muted rounded-full overflow-hidden'>
+            <div
+              className={`h-full transition-all duration-300 ${barColorClass}`}
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+          {status === 'running' && mode === 'Triaging' && (
+            <span className='text-xs text-muted-foreground font-mono whitespace-nowrap'>
+              {progress.toFixed(1)}% complete
+            </span>
+          )}
+          {status === 'running' && mode !== 'Triaging' && (
+            <span className='text-xs text-muted-foreground font-mono whitespace-nowrap'>
+              {formatTime(timeRemaining)} remaining
+            </span>
+          )}
+          {status === 'stopping' && (
+            <span className='text-xs text-muted-foreground font-mono whitespace-nowrap'>
+              stopping...
+            </span>
+          )}
+          {status === 'queued' && mode === 'Triaging' && (
+            <span className='text-xs text-muted-foreground font-mono whitespace-nowrap'>
+              queued
+            </span>
+          )}
+          {status === 'queued' && mode !== 'Triaging' && (
+            <span className='text-xs text-muted-foreground font-mono whitespace-nowrap'>
+              {formatTime(totalTime)} queued
+            </span>
+          )}
+          {(status === 'completed' || status === 'stopped') && (
+            <span className='text-xs text-muted-foreground font-mono whitespace-nowrap'>
+              {formatTime(totalTime)} {status}
+            </span>
+          )}
+        </div>
+      )
+    },
+  },
+  {
+    id: 'actions',
+    header: () => <div className='w-[60px]'></div>,
+    cell: ({ row }) => {
+      const status = row.original.status
+      const isQueued = status === 'queued'
+      const isActive = status === 'running' || status === 'queued'
+      const isFinished = status === 'completed' || status === 'stopped'
+      const mode = row.original.mode
+      const isTriagingMode = mode === 'Triaging'
+      const autoQueueTriaging = isTriagingMode ? false : (row.original.autoQueueTriaging ?? true)
+      const triaged = row.original.triaged ?? false
+      
+      return (
+        <div className='flex items-center justify-center gap-2' onClick={(e) => e.stopPropagation()}>
+          {isActive && autoQueueTriaging && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <CheckCircle2 className='h-4 w-4 text-green-500' />
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Auto-triaging enabled</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+          {isFinished && triaged && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <FileCheck className='h-4 w-4 text-blue-500' />
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Triaged</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+          <DropdownMenu modal={false}>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant='ghost'
+                size='icon'
+                className='h-8 w-8'
+                onClick={(e) => {
+                  e.stopPropagation()
+                }}
+              >
+                <MoreHorizontal className='h-4 w-4' />
+                <span className='sr-only'>Open menu</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align='end' className='w-56' onClick={(e) => e.stopPropagation()}>
+              {isActive && (
+                <>
+                  <DropdownMenuLabel>Actions</DropdownMenuLabel>
+                  {isQueued && (
+                    <DropdownMenuItem
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        moveUpCallback?.(row.original.id)
+                      }}
+                    >
+                      <ArrowUp className='mr-2 h-4 w-4' />
+                      Move Up
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuItem
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      stopTaskCallback?.(row.original.id)
+                    }}
+                  >
+                    <CircleStop className='mr-2 h-4 w-4' />
+                    Stop
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel>Settings</DropdownMenuLabel>
+                  <div className='px-2 py-1.5'>
+                    <div className='flex items-center justify-between'>
+                      <div className='flex items-center gap-2'>
+                        <Search className='h-4 w-4' />
+                        <span className='text-sm'>Auto-queue triaging</span>
+                      </div>
+                      <Switch
+                        checked={autoQueueTriaging}
+                        onCheckedChange={(checked) => {
+                          toggleAutoTriagingCallback?.(row.original.id, checked)
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        disabled={isTriagingMode}
+                      />
+                    </div>
+                  </div>
+                </>
+              )}
+              {isFinished && (
+                <>
+                  {(() => {
+                    const hasRunningTriaging = allTasks.some(task => 
+                      task.binary === row.original.binary &&
+                      task.fuzzer === row.original.fuzzer &&
+                      task.mode === 'Triaging' &&
+                      (task.status === 'running' || task.status === 'queued')
+                    )
+                    return (
+                      <DropdownMenuItem
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          if (!hasRunningTriaging) {
+                            queueTriagingCallback?.(row.original.id)
+                          }
+                        }}
+                        disabled={hasRunningTriaging}
+                        className={hasRunningTriaging ? 'opacity-50 cursor-not-allowed' : ''}
+                      >
+                        <Search className='mr-2 h-4 w-4' />
+                        Queue Triaging
+                        {hasRunningTriaging && (
+                          <span className='ml-2 text-xs text-muted-foreground'>(running)</span>
+                        )}
+                      </DropdownMenuItem>
+                    )
+                  })()}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      deleteTaskCallback?.(row.original.id)
+                    }}
+                    className='text-destructive focus:text-destructive'
+                  >
+                    <Trash2 className='mr-2 h-4 w-4' />
+                    Delete
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+      )
+    },
+    enableSorting: false,
+    enableHiding: false,
+  },
+]
+
+export function getSortableColumns(): ColumnDef<Task>[] {
+  return tasksColumns
+    .filter((column: any) => column.accessorKey !== 'mode')
+    .map((column: any) => {
+      if (column.id === 'actions') {
+        return column
+      }
+      
+      if (column.sortingFn) {
+        return { ...column, enableSorting: true }
+      }
+      
+      const accessorKey = column.accessorKey
+      
+      if (!accessorKey) {
+        return column
+      }
+      
+      return {
+        ...column,
+        enableSorting: true,
+        header: ({ column: col }: any) => (
+          <DataTableColumnHeader column={col} title={getColumnTitle(accessorKey)} />
+        ),
+      }
+    }) as ColumnDef<Task>[]
+}
+
+function getColumnTitle(accessorKey: string): string {
+  const titles: Record<string, string> = {
+    status: 'Status',
+    mode: 'Mode',
+    fuzzer: 'Fuzzer',
+    binary: 'Binary',
+    runs: 'Runs',
+    completedAt: 'Time',
+  }
+  return titles[accessorKey] || accessorKey.charAt(0).toUpperCase() + accessorKey.slice(1)
+}

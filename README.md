@@ -1,15 +1,18 @@
 # FirmReBugger
+A benchmark framework for monolithic firmware fuzzers.
 
 ## Raven Creation
 
 We have made the process of incorporating a bug with a Raven, simple—we demonstrate the ease with which Ravens can be constructed using three case examples of common bug types:
 
-- Type Confusion
-- Stack Buffer Overflow
-- Dangling Pointer
+- [Stack Buffer Overflow](#stack-buffer-overflow)
+- [Type Confusion](#type-confusion)
+- [Dangling Pointer](#danling-pointer)
 
-The examples can be seen [here](#raven-examples)
-
+## Full Paper Results
+The full table of our experiemnts are detailed in `paper_results`
+- [FirmBench](paper_results/FirmBench.pdf)
+- [FirmBenchX](paper_results/FirmBench.pdf)
 
 ## Quick Start 
 
@@ -28,6 +31,7 @@ sudo apt-get install automake texinfo unzip
 sudo apt install gcc-arm-none-eabi
 sudo apt install texlive-latex-base
 sudo apt install texlive-xetex texlive-fonts-recommended texlive-latex-extra
+sudo apt install npm
 ```
 
 ### Build all Fuzzers 
@@ -38,17 +42,17 @@ cd FirmReBugger
 export FIRMREBUGGER_BASE_DIR=$(pwd)
 # Follow the steps and build all fuzzers
 uv run frb build
-# Follow the steps and build all frb versions of fuzzers
-uv run frb build --frb
+# If a fuzzer fails to build, retry building it individually.
+uv run frb build
 ```
 
 ### Fuzzing
 
 ```bash
-git clone https://github.com/FirmReBugger/FirmReBugger
 cd FirmReBugger
 export FIRMREBUGGER_BASE_DIR=$(pwd)
-uv run frb fuzz 24h 10 <output_dir>
+uv run frb fuzz --help
+uv run frb fuzz -t 24h -n 10 -o <output_dir>
 ```
 
 ### Commands
@@ -63,7 +67,18 @@ uv run frb bug-analyzer --help
 uv run frb charting-tool --help
 ```
 
-### Workflow
+### Workflow webapp 
+It is recommneded to run FirmReBugger through the webapp
+```bash
+uv run frb app --help
+uv run frb app -p <port>
+```
+
+- **Report** shows you a summary of your fuzzing campaigns with FirmReBugger.
+
+- **Job manager** lets you schedule jobs (Triaging or Fuzzing) all automatically.
+
+### Workflow CLI
 
 ```bash
 cd FirmReBugger
@@ -71,17 +86,23 @@ export FIRMREBUGGER_BASE_DIR=$(pwd)
 # Fuzz your choice of binaries with 
 uv run frb fuzz
 # Recommened to connect to the frb docker and manually run the bug analyzer as it can take a while eg. 
-docker run -it --mount type=bind,source=./,target=/benchmark frb:Ember-IO-Fuzzing /bin/bash
+docker run -it --mount type=bind,source=./,target=/benchmark frb:<fuzzer> /bin/bash
 cd <to_results_folder>
 uv run frb bug-analyzer .
 
-# If you run the full process it can be done with 
-uv run frb fuzz --full
 # Visualize the data
 uv run frb charting-tool
 ```
 
----
+### Adding a new fuzzer
+- Add your fuzzer to the docker folder. With both original for fuzzing and frb version for triaging (with the FirmReBugger patches).
+- Add a runner in `src/firmrebugger/fuzzer_runners`
+- In `src/<Benchmark>/<Binary>/fuzzers`, add your fuzzer folder and configs etc.
+
+### Adding a new binary with ravens
+- In a selected benchmark (FirmBench/ FirmBenchDMA/ FirmBenchX) add a folder of the binary name. 
+- Ravens are stored in `bug_descriptor.c`
+- Following the existing folder structure with `<Benchmark>/<Binary>/fuzzers/<fuzzer>/fuzzing_out/<output_dir>`
 
 ## Folder Structure
 
@@ -89,13 +110,12 @@ uv run frb charting-tool
 FirmReBugger/
 ├── docker/
 ├── FirmBench/
-│   ├── 01-targets/
 │   │   └── <Binary>/
 │   │       └── fuzzers/
 │   │           └── <Fuzzer>/
 │   │               └── fuzzing_out/
 │   │                   └── <output_name>/
-│   └── 02-targets/
+│   └── <Binary>/
 │       └── ...
 ├── FirmBenchDMA/
 ├── FirmBenchX/
@@ -112,34 +132,14 @@ FirmReBugger/
 │       ├── utils/
 │       ├── __init__.py
 │       └── main.py
+│   └── firmrebugger-web
 ├── uv.lock
 ```
 
----
 
 ## Raven Examples
 
-**Type Confusion** arises when a program erroneously interprets an incorrect type for a region of memory. As a consequence, the program may access fields, invoke functions, or perform operations that are invalid for the underlying data, leading to undefined behavior. Introspection of object types and pointer usage can help identify type confusion bugs.
-
-An illustrative example of a Raven is shown in the code below, based on the bug ID `MF01` reported by MultiFuzz in the **Zephyr SocketCAN** binary. In Zephyr's device model, each device is represented by a struct containing a pointer named `driver_api`. This pointer references a table of function pointers that define the operations supported by the device's driver, such as configuration or data transmission.
-
-```c
-context_struct hook_addresses[] = {
-    {0x08005e28, BUG_MF04},
-    ...
-}
-
-void BUG_MF04() {
-    report_reached("MF04");
-    //canbus fail to verify device type
-    uint32_t read_addr = frb_reg_state[0] + 0x4;
-    if (frb_mem_read(read_addr,4) != 0x0800f7e4){
-        report_detected_triggered("MF04");
-    }
-}
-```
-
-The CAN bus subcommands allow users to specify a target device for command execution. At runtime, the target device is resolved using the `z_impl_device_get_binding` function, which returns a pointer to a generic device struct. However, no type verification is performed to ensure that the selected device implements the CAN bus API. As a result, if a non-CAN device is specified (such as a GPIO device), the subcommand will erroneously perform CAN bus operations on an incompatible device struct.
+### Stack Buffer Overflow
 
 **Stack Buffer Overflow** occurs when data written to a buffer on the stack exceeds its allocated size, potentially corrupting adjacent memory. By introspecting buffer boundaries, sizes, and index calculations—along with placing unique reflection points—it is possible to identify buffer overflow bugs, as demonstrated in the following example.
 
@@ -164,6 +164,33 @@ _Listing: Stack buffer overflow example. A Raven crafted for bug "FW11" in the `
 The listing above shows a Raven that captures a real-world stack buffer overflow (Bug ID: FW11) in the `CNC` binary, originally identified by fuzzware. The vulnerability occurs in the `printFloat` function, where user-controlled input sets the value of `settings.decimal_places`. This value is later used as an index into a stack-allocated buffer of size 10. Without bounds checking, values greater than 9 cause a stack buffer overflow.
 
 The Raven for bug `BUG_FW11` creates a reflection point at the program counter address where the buffer indexing occurs. Introspection then checks if the index exceeds the buffer bounds. At this critical location in execution (address `0x08004fa`), the buffer index (`settings.decimal_places`) is held in register `R2`. By checking if the value in `R2` is greater than 9, the Raven precisely captures the triggering condition for this stack buffer overflow bug.
+
+### Type Confusion
+
+**Type Confusion** arises when a program erroneously interprets an incorrect type for a region of memory. As a consequence, the program may access fields, invoke functions, or perform operations that are invalid for the underlying data, leading to undefined behavior. Introspection of object types and pointer usage can help identify type confusion bugs.
+
+An illustrative example of a Raven is shown in the code below, based on the bug ID `MF01` reported by MultiFuzz in the **Zephyr SocketCAN** binary. In Zephyr's device model, each device is represented by a struct containing a pointer named `driver_api`. This pointer references a table of function pointers that define the operations supported by the device's driver, such as configuration or data transmission.
+
+```c
+context_struct hook_addresses[] = {
+    {0x08005e28, BUG_MF04},
+    ...
+}
+
+void BUG_MF04() {
+    report_reached("MF04");
+    //canbus fail to verify device type
+    uint32_t read_addr = frb_reg_state[0] + 0x4;
+    if (frb_mem_read(read_addr,4) != 0x0800f7e4){
+        report_detected_triggered("MF04");
+    }
+}
+```
+
+The CAN bus subcommands allow users to specify a target device for command execution. At runtime, the target device is resolved using the `z_impl_device_get_binding` function, which returns a pointer to a generic device struct. However, no type verification is performed to ensure that the selected device implements the CAN bus API. As a result, if a non-CAN device is specified (such as a GPIO device), the subcommand will erroneously perform CAN bus operations on an incompatible device struct.
+
+
+### Danling Pointer
 
 **Dangling Pointer** refers to a pointer that continues to reference freed memory or a stack frame that no longer exists. Dereferencing such pointers in C or C++ is considered undefined behavior and can result in unpredictable or erroneous program states. This is a common issue in manual memory management environments, particularly in C/C++ firmware.
 
@@ -202,21 +229,11 @@ Dangling pointers are particularly hard to detect because a stale pointer might 
 
 To capture this bug in a Raven, observe that once `HAL_I2C_Mem_Read` returns (at `0x0800c9b0`), the pointer stored in `pBuffPtr` becomes invalid. With `frb_mem_write`, we overwrite this pointer with a sentinel value (`0xDEADBEEF`). Each time the pointer is subsequently accessed (e.g., at `0x0800bd02`), the Raven checks whether its value equals `0xDEADBEEF`. If so, this indicates that the pointer has been incorrectly used, precisely capturing the condition that triggers the bug.
 
----
 
 ## Experiment Results
 
 Median bug survival times—both **R**eached and **T**riggered—measured over a 24-hour period across 10 trials for the FirmBench and FirmBenchX set, reported in HH:MM. “Hit” denotes the percentage of trials in which the bug was successfully triggered. Bug IDs highlighted in grey indicate false positives, while the best-performing times are shown in bold. “N/A” denotes evaluations that are not applicable to the target. Table and statistics were generated using the Analysis Bench.
 
-### FirmBench
-
-![Alt text](paper_results/sec26cycle1-paper1276-pages-1-1.png)
-![Alt text](paper_results/sec26cycle1-paper1276-pages-2-1.png)
-
-### FirmBenchX
-
-![Alt text](paper_results/sec26cycle1-paper1276-pages-3-1.png)
-![Alt text](paper_results/sec26cycle1-paper1276-pages-4-1.png)
 
 ## Modification table
 

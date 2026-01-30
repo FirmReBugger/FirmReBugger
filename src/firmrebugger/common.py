@@ -32,11 +32,10 @@ def menu(title, options):
         selected = []
         current_selection = 0
         select_all = False
-        
-        # Check terminal size
+
         height, width = stdscr.getmaxyx()
-        required_height = len(options) + 3  # +3 for title and instructions
-        
+        required_height = len(options) + 3
+
         if height < required_height or width < 80:
             stdscr.clear()
             error_msg = f"Terminal too small! Need at least {required_height} rows and 80 columns."
@@ -48,9 +47,11 @@ def menu(title, options):
                 stdscr.addstr(3, 0, "Press any key to exit...")
                 stdscr.getch()
             except curses.error:
-                pass  # Terminal is really too small, just exit
-            raise RuntimeError(f"Terminal too small. Need at least {required_height} rows and 80 columns (current: {height}x{width})")
-        
+                pass
+            raise RuntimeError(
+                f"Terminal too small. Need at least {required_height} rows and 80 columns (current: {height}x{width})"
+            )
+
         while True:
             try:
                 stdscr.clear()
@@ -66,14 +67,18 @@ def menu(title, options):
                     selected_marker = "[X]" if option in selected else "[ ]"
                     if idx == current_selection:
                         stdscr.addstr(
-                            idx + 3, 0, f"> {selected_marker} {option}", curses.A_REVERSE
+                            idx + 3,
+                            0,
+                            f"> {selected_marker} {option}",
+                            curses.A_REVERSE,
                         )
                     else:
                         stdscr.addstr(idx + 3, 0, f"  {selected_marker} {option}")
             except curses.error as e:
-                # Terminal was resized or is too small
                 height, width = stdscr.getmaxyx()
-                raise RuntimeError(f"Terminal too small or rendering error. Need at least {required_height} rows and 80 columns (current: {height}x{width})")
+                raise RuntimeError(
+                    f"Terminal too small or rendering error. Need at least {required_height} rows and 80 columns (current: {height}x{width})"
+                )
 
             key = stdscr.getch()
 
@@ -104,7 +109,9 @@ def menu(title, options):
     except RuntimeError:
         raise
     except Exception as e:
-        raise RuntimeError(f"Error displaying menu: {e}. This may be due to terminal size constraints.")
+        raise RuntimeError(
+            f"Error displaying menu: {e}. This may be due to terminal size constraints."
+        )
 
 
 def get_frb_base_dir():

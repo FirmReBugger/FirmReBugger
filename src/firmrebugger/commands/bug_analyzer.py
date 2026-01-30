@@ -46,7 +46,6 @@ def tar_folder(folder_paths):
 
         archive_name = path.rstrip(os.sep).split(os.sep)[-1] + ".tar.gz"
         try:
-            # print(f"Creating archive for {path}: {archive_name}")
             with tarfile.open(archive_name, "w:gz") as tar:
                 tar.add(path, arcname=os.path.basename(path))
             print(f"Archive {archive_name} created successfully. at {path}")
@@ -107,7 +106,7 @@ def generate_frb_report(fuzzing_results_dir, descriptor_path):
         "Fuzzer": fuzzer,
         "Target": target,
         "Number-Trials": bench_info["num_trials"],
-        "Trial-Time": bench_info["total_time"],  # time in seconds
+        "Trial-Time": bench_info["total_time"],
         "Campaign": {},
     }
 
@@ -151,13 +150,12 @@ def generate_frb_report(fuzzing_results_dir, descriptor_path):
     # print(data)
 
     with open(f"{fuzzing_results_dir}/frb_report.json", "w") as json_file:
-        json.dump(data, json_file, indent=4)  # Save the JSON data to the file
+        json.dump(data, json_file, indent=4)
 
     print("Summary of the analysis:")
     print(summarize_data(f"{fuzzing_results_dir}/frb_report.json"))
     print("\n")
 
-    # Tar the output directories for fuzzers that use alot of space
     if (
         "Fuzzware-Icicle" in fuzzer
         or "SplITS" in fuzzer
@@ -168,9 +166,8 @@ def generate_frb_report(fuzzing_results_dir, descriptor_path):
         tar_folder(output_dirs)
 
 
-def run_bug_analyzer(fuzzing_results_dir):
+def run_bug_analyzer(fuzzing_results_dir, descriptor_path):
     print("Starting Bug Analyzer...")
-    descriptor_path = f"{fuzzing_results_dir}/../../../../bug_descriptor.c"
     descriptor_path = os.path.abspath(descriptor_path)
 
     if not os.path.isfile(descriptor_path):

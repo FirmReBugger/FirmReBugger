@@ -21,16 +21,24 @@ WORKDIR $FUZZER/build/DICE-DMA-Emulation/p2im/qemu/src/install/debian64/qemu/bin
 RUN patchelf --replace-needed librt.so.1 /lib/x86_64-linux-gnu/librt.so.1 qemu-system-gnuarmeclipse
 
 # Install FirmReBugger
-USER root
-RUN pip3 install uv
-RUN pip3 install --upgrade pip setuptools wheel
-COPY --chown=user src $FUZZER/firmrebugger/
-COPY --chown=user pyproject.toml $FUZZER/firmrebugger/
-COPY --chown=user uv.lock $FUZZER/firmrebugger/
-WORKDIR $FUZZER/firmrebugger
-RUN pip3 install -e .
+USER user
+# Install `uv`
+RUN pip3 install --user uv
+ENV PATH=$PATH:/home/user/.local/bin
 
-USER user:user
+# Copy FirmReBugger source files to the FUZZER directory
+COPY --chown=user ./src /firmrebugger/
+COPY --chown=user ./pyproject.toml /firmrebugger/
+COPY --chown=user ./uv.lock /firmrebugger/
+COPY --chown=user ./README.md /firmrebugger/
+COPY --chown=user ./.python-version /firmrebugger/
+
+# Install UV and run FirmReBugger installation script
+WORKDIR /firmrebugger/target
+RUN uv run frb -h
+
 ENV DICE_BASE_DIR=$FUZZER/build/DICE-DMA-Emulation
 ENV DICE_QEMU=/home/user/DICE/build/DICE-DMA-Emulation/p2im/qemu/src/install/debian64/qemu/bin/qemu-system-gnuarmeclipse 
-WORKDIR /benchmark
+ENV FIRMREBUGGER_BASE_DIR=/firmrebugger
+
+ENTRYPOINT ["uv", "run", "frb", "bug-analyzer", "."]

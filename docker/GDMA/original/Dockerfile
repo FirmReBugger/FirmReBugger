@@ -20,7 +20,7 @@ ENV PATH="${PATH}:/home/user/.cargo/bin"
 ENV LD_LIBRARY_PATH="/home/user/.cargo/bin/"
 
 # Modeling container
-FROM fuzzware-base as fuzzware-modeling
+FROM fuzzware-base AS fuzzware-modeling
 USER root
 # First copy and install requirements
 RUN git clone -b DMA --recurse-submodules https://github.com/fuzzware-fuzzer/fuzzware.git /tmp/fuzzware

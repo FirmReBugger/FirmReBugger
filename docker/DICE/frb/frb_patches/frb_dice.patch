@@ -1,0 +1,111 @@
+--- build_scripts/build-qemu.sh	2026-01-05 02:02:22.000000000 +0000
++++ build_scripts/build-qemu-frb.sh	2026-01-05 03:41:52.677093569 +0000
+@@ -2229,6 +2229,17 @@
+ 
+ mkdir -p "${build_folder_path}/${APP_LC_NAME}"
+ 
++# ------ Configure tinycc -----
++
++if [ ! -f "${git_folder_path}/tinycc/libtcc.a" ]
++then
++  echo "${work_folder_path}/${QEMU_FOLDER_NAME}/tinycc"
++  echo "Building TinyCC..."
++  cd "${work_folder_path}/${QEMU_FOLDER_NAME}/tinycc"
++  ./configure
++  make clean all
++fi
++
+ # ----- Configure QEMU. -----
+ 
+ if [ ! -f "${build_folder_path}/${APP_LC_NAME}/config-host.mak" ]
+
+--- src/qemu.git/Makefile	2025-12-19 08:28:40.000000000 +0000
++++ src/qemu.git/Makefile-frb	2026-01-05 03:48:05.911048450 +0000
+@@ -2,7 +2,7 @@
+ 
+ # Always point to the root of the build tree (needs GNU make).
+ BUILD_DIR=$(CURDIR)
+-
++CFLAGS += -I/Host/Work/qemu/qemu.git/tinycc
+ # All following code might depend on configuration variables
+ ifneq ($(wildcard config-host.mak),)
+ # Put the all: rule here so that config-host.mak can contain dependencies.
+@@ -79,6 +79,7 @@
+ $(call set-vpath, $(SRC_PATH))
+ 
+ LIBS+=-lz $(LIBS_TOOLS)
++LIBS += -L/Host/Work/qemu/qemu.git/tinycc -ltcc
+ 
+ HELPERS-$(CONFIG_LINUX) = qemu-bridge-helper$(EXESUF)
+
+--- src/qemu.git/hw/arm/Makefile.objs	2025-12-19 08:28:40.000000000 +0000
++++ src/qemu.git/hw/arm/Makefile.objs-frb	2026-01-05 03:50:46.545712700 +0000
+@@ -20,6 +20,7 @@
+ 
+ # [GNU ARM Eclipse]
+ obj-y += armv7m.o peri-mod.o pm_interrupt.o
++obj-y += firmrebugger.o
+ # Cortex-M files
+ obj-$(CONFIG_GNU_ARM_ECLIPSE) += cortexm-mcu.o cortexm-helper.o cortexm-board.o
+ obj-$(CONFIG_STM32) += stm32-mcu.o stm32-mcus.o stm32-boards.o stm32-olimex-boards.o
+@@ -30,3 +31,9 @@
+ obj-$(CONFIG_XMC) += xmc-mcus.o xmc-boards.o
+ obj-$(CONFIG_SAM) += sam-mcus.o sam-boards.o
+ # [GNU ARM Eclipse]
++# Add TinyCC include path for firmrebugger.o only
++firmrebugger.o: CFLAGS += -Itinycc
++
++# Add TinyCC library and path globally for the linker
++LDFLAGS += -L/Host/Work/qemu/qemu.git/tinycc
++LIBS += -ltcc -ldl
+
+--- src/qemu.git/target-arm/helper.h	2025-12-19 08:28:40.000000000 +0000
++++ src/qemu.git/target-arm/helper.hfrb	2026-01-05 04:00:12.195336279 +0000
+@@ -126,6 +126,7 @@
+ DEF_HELPER_2(vfp_tosid, i32, f64, ptr)
+ DEF_HELPER_2(vfp_tosizs, i32, f32, ptr)
+ DEF_HELPER_2(vfp_tosizd, i32, f64, ptr)
++DEF_HELPER_2(firmrebugger_helper, void, env, tl)
+ 
+ DEF_HELPER_3(vfp_toshs_round_to_zero, i32, f32, i32, ptr)
+ DEF_HELPER_3(vfp_tosls_round_to_zero, i32, f32, i32, ptr)
+
+--- src/qemu.git/target-arm/translate.c	2025-12-19 08:28:50.000000000 +0000
++++ src/qemu.git/target-arm/translate.cfrb	2026-01-05 04:06:05.153438179 +0000
+@@ -35,6 +35,7 @@
+ #include "exec/helper-proto.h"
+ #include "exec/helper-gen.h"
+ 
++#include "firmrebugger/firmrebugger.h"
+ #include "trace-tcg.h"
+ 
+ #if defined(CONFIG_GNU_ARM_ECLIPSE)
+@@ -11365,6 +11366,10 @@
+         }
+ 
+         if (dc->thumb) {
++            //firmrebugger
++            TCGv pc_const = tcg_const_tl(dc->pc);
++            gen_helper_firmrebugger_helper(cpu_env, pc_const);
++            tcg_temp_free(pc_const);
+             disas_thumb_insn(env, dc);
+             if (dc->condexec_mask) {
+                 dc->condexec_cond = (dc->condexec_cond & 0xe)
+@@ -11375,6 +11380,10 @@
+                 }
+             }
+         } else {
++           //firmrebugger
++            TCGv pc_const = tcg_const_tl(dc->pc);
++            gen_helper_firmrebugger_helper(cpu_env, pc_const);
++            tcg_temp_free(pc_const);
+             unsigned int insn = arm_ldl_code(env, dc->pc, dc->bswap_code);
+             dc->pc += 4;
+             disas_arm_insn(dc, insn);
+@@ -11917,3 +11926,6 @@
+ }
+ 
+ 
++void helper_firmrebugger_helper(CPUArchState *env, target_ulong addr) {
++    firmrebugger_init_config(env, addr);
++}

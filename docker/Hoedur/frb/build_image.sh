@@ -13,6 +13,7 @@ fi
 docker buildx build \
   --tag "$HOEDUR_IMAGE" \
   --load \
+  --no-cache \
   -f $FIRMREBUGGER_BASE_DIR/docker/Hoedur/frb/Dockerfile \
   . \
   || { echo "Failed to build Docker image '$HOEDUR_IMAGE'"; exit 1; }

@@ -37,37 +37,33 @@ def check_frb_report_exists(output_path):
     if os.path.exists(frb_report_path):
         return frb_report_path
     else:
-        # Skip silently if report doesn't exist
         return None
 
 
 def init_working_dirs(benchmark):
     benchmark_path = os.path.join(FIRMREBUGGER_BASE_DIR, benchmark)
     frb_reports = {}
-    selected_targets = menu("Select target(s)", sorted(os.listdir(benchmark_path)))
+    selected_targets = menu("Select binaries(s)", sorted(os.listdir(benchmark_path)))
+    binary_collection = {}
 
-    for target in sorted(selected_targets):
-        target_path = os.path.join(benchmark_path, target)
-        binary_collection = {}
-        for binary in sorted(os.listdir(target_path)):
-            binary_path = os.path.join(target_path, binary)
-            fuzzers_path = os.path.join(binary_path, "fuzzers")
-            report_paths = []
-            for fuzzer in sorted(os.listdir(fuzzers_path)):
-                fuzzing_out_path = os.path.join(fuzzers_path, fuzzer, "fuzzing_out")
-                selected_out = multiple_results_check(fuzzing_out_path)
-                if selected_out:
-                    report_path = check_frb_report_exists(
-                        os.path.join(fuzzing_out_path, selected_out)
-                    )
-                    if report_path is not None:
-                        report_paths.append(report_path)
-            if report_paths:
-                binary_collection[binary] = sorted(report_paths)
-        if binary_collection:
-            frb_reports[target] = binary_collection
-    print(frb_reports)
-    return frb_reports
+    for binary in sorted(selected_targets):
+        binary_path = os.path.join(benchmark_path, binary)
+        fuzzers_path = os.path.join(binary_path, "fuzzers")
+        report_paths = []
+        for fuzzer in sorted(os.listdir(fuzzers_path)):
+            fuzzing_out_path = os.path.join(fuzzers_path, fuzzer, "fuzzing_out")
+            selected_out = multiple_results_check(fuzzing_out_path)
+            if selected_out:
+                report_path = check_frb_report_exists(
+                    os.path.join(fuzzing_out_path, selected_out)
+                )
+                if report_path is not None:
+                    report_paths.append(report_path)
+        if report_paths:
+            binary_collection[binary] = sorted(report_paths)   
+    if binary_collection:
+        frb_reports[benchmark] = binary_collection
+        return frb_reports 
 
 
 def run_charting_tool():
@@ -78,7 +74,7 @@ def run_charting_tool():
         ["FirmBench", "FirmBenchDMA", "FirmBenchX"],
     )
     for bench in selected_benchmarks:
-        report_path = f"{FIRMREBUGGER_BASE_DIR}/report/{bench}"
+        report_path = f"{FIRMREBUGGER_BASE_DIR}/frb_report/{bench}"
         frb_reports = init_working_dirs(bench)
         # Generate LaTeX tables for each target
         generate_table(frb_reports, report_path)

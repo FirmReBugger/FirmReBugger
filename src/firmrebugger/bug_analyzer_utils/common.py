@@ -5,6 +5,7 @@ import subprocess
 import re
 import sys
 import io
+import json
 
 
 def extract_bug_ids(file_path):
@@ -103,6 +104,8 @@ def periodic_printer(run_data, stop_event, progress, crash):
 
     crash_str = "Crash" if crash else "Reached"
     prev_lines_printed = 0
+    final_print_done = False  
+
     while not stop_event.is_set() and progress["completed"] < progress["total"]:
         lines_to_print = 1 + count_lines_of_bug_info(run_data)
 
@@ -127,26 +130,28 @@ def periodic_printer(run_data, stop_event, progress, crash):
         prev_lines_printed = lines_to_print
         stop_event.wait(5)
 
-    for _ in range(prev_lines_printed):
-        sys.stdout.write("\x1b[1A")
-    for _ in range(prev_lines_printed):
-        sys.stdout.write("\x1b[2K")
-        sys.stdout.write("\x1b[1B")
-    for _ in range(prev_lines_printed):
-        sys.stdout.write("\x1b[1A")
-    sys.stdout.flush()
+        if progress["completed"] == progress["total"]:
+            final_print_done = True
 
-    # Print the final summary
-    print(
-        f"[Progress {crash_str}] Completed: {progress['total']}/{progress['total']} | "
-        f"{progress['Fuzzer']} | "
-        f"{progress['Target']} | "
-        f"{progress['run_name']} | "
-        f"Total Ungrouped crashes: {progress['ungrouped_crashes']} |"
-    )
-    print_bug_info(run_data)
-    sys.stdout.flush()
+    if not final_print_done:
+        for _ in range(prev_lines_printed):
+            sys.stdout.write("\x1b[1A")
+        for _ in range(prev_lines_printed):
+            sys.stdout.write("\x1b[2K")
+            sys.stdout.write("\x1b[1B")
+        for _ in range(prev_lines_printed):
+            sys.stdout.write("\x1b[1A")
+        sys.stdout.flush()
 
+        print(
+            f"[Progress {crash_str}] Completed: {progress['total']}/{progress['total']} | "
+            f"{progress['Fuzzer']} | "
+            f"{progress['Target']} | "
+            f"{progress['run_name']} | "
+            f"Total Ungrouped crashes: {progress['ungrouped_crashes']} |"
+        )
+        print_bug_info(run_data)
+        sys.stdout.flush()
 
 # Update if mutliple bugs were triggered
 def append_to_multi_bugs_triggered(run_data, seed_path):
@@ -224,29 +229,48 @@ def update_bug_data(
 
 # Get benchmark information from the result directory
 def get_bench_info(result_dir):
+    frb_info_json = os.path.join(result_dir, "frb_info.json")
+    
+    # Try frb_info.json first (new format)
+    if os.path.exists(frb_info_json):
+        with open(frb_info_json, "r") as f:
+            bench_info = json.load(f)
+        
+        result = {
+            "fuzzer": bench_info.get("fuzzer"),
+            "target": bench_info.get("binary"),
+            "num_trials": bench_info.get("runs"),
+            "total_time": bench_info.get("duration"),
+        }
+        return result
+    
+    # Fall back to old frb_bench_info.yml format
     frb_bench_info = os.path.join(result_dir, "frb_bench_info.yml")
-    with open(frb_bench_info, "r") as f:
-        bench_info = yaml.safe_load(f)
-    result = {}
-    mapping = {
-        "Fuzzer": "fuzzer",
-        "Target": "target",
-        "Num_Trials": "num_trials",
-        "Total_Time": "total_time",
-    }
-    for k, v in mapping.items():
-        # Find matching key ignoring case and underscores
-        for key in bench_info:
-            if key.lower().replace("_", "") == k.lower().replace("_", ""):
-                val = bench_info[key]
-                # Convert to int if appropriate
-                if v in ["num_trials", "total_time"]:
-                    try:
-                        val = int(val)
-                    except Exception:
-                        pass
-                result[v] = val
-    return result
+    if os.path.exists(frb_bench_info):
+        with open(frb_bench_info, "r") as f:
+            bench_info = yaml.safe_load(f)
+        result = {}
+        mapping = {
+            "Fuzzer": "fuzzer",
+            "Target": "target",
+            "Num_Trials": "num_trials",
+            "Total_Time": "total_time",
+        }
+        for k, v in mapping.items():
+            # Find matching key ignoring case and underscores
+            for key in bench_info:
+                if key.lower().replace("_", "") == k.lower().replace("_", ""):
+                    val = bench_info[key]
+                    # Convert to int if appropriate
+                    if v in ["num_trials", "total_time"]:
+                        try:
+                            val = int(val)
+                        except Exception:
+                            pass
+                    result[v] = val
+        return result
+    
+    raise FileNotFoundError(f"Neither frb_info.json nor frb_bench_info.yml found in {result_dir}")
 
 
 # Run seed to get time and reached/triggered info

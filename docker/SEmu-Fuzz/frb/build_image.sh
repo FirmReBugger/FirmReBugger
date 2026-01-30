@@ -4,6 +4,7 @@ FUZZER_IMAGE="frb:SEmu-Fuzz"
 docker buildx build \
   --tag "$FUZZER_IMAGE" \
   --load \
+  --no-cache \
   -f docker/SEmu-Fuzz/frb/Dockerfile \
   . \
   || { echo "Failed to build Docker image '$FUZZER_IMAGE'"; exit 1; }

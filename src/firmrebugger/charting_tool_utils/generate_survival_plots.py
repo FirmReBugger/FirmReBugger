@@ -16,18 +16,12 @@ def calc_survival(
     ax, data: List[int], bug, trial_time: int, fuzzer_name, color="tab:blue"
 ):
     data = [x / 3600 if x is not None else None for x in data]
-    # print(f"Plotting survival curve for {fuzzer_name} on {bug} with data:")
-    # print(data)
     df = pd.DataFrame(data)
     T = df.fillna(trial_time)
     E = df.notnull()
 
     kmf = KaplanMeierFitter()
     kmf.fit(T, E)
-
-    # Takes a long time to calculate the surv_time_var
-    # surv_time_mean, surv_time_var = rmst(kmf, t=trial_time, return_variance=True)
-    # surv_time_var = abs(surv_time_var)
 
     surv_time_mean = rmst(kmf, t=trial_time)
     kmf.plot_survival_function(
@@ -40,11 +34,9 @@ def calc_survival(
 def process_data(json_data):
     bug_survival_data = {}
 
-    # Loop through the runs and gather survival times for each bug
     for run_name, run_data in json_data.get("Campaign", {}).items():
         for bug in run_data:
             if "ERROR" in bug.get("bug_id", ""):
-                # print(f"Skipping bug with ERROR in ID: {bug.get('bug_id')}")
                 continue
             if (
                 isinstance(bug, dict)
@@ -72,8 +64,6 @@ def set_ax_visuals(ax, max_time, bug_id):
 
     for spine in ax.spines.values():
         spine.set_visible(False)
-    # ax.spines['bottom'].set_visible(True)
-    # ax.spines['left'].set_visible(True)
     return ax
 
 
@@ -98,7 +88,7 @@ def plot_grid_survival(fuzzers_data, max_time, output_dir, binary):
     MAX_COLS = 5
     num_bugs = len(next(iter(fuzzers_data[0].values())))
     ncols = min(MAX_COLS, num_bugs)
-    nrows = math.ceil(num_bugs / ncols)  # Calculate the number of rows required
+    nrows = math.ceil(num_bugs / ncols)
     if ncols != 1:
         fig = plt.figure(figsize=(4 * ncols, 3 * nrows))
     else:
@@ -127,7 +117,6 @@ def plot_grid_survival(fuzzers_data, max_time, output_dir, binary):
             if row is nrows - 1 and row != 0 and remaining_plots < MAX_COLS:
                 break
             if col + 3 < ngrid:
-                # print(f"{row},{col+1}:{col + 3}")
                 ax = fig.add_subplot(spec[row, col + 1 : col + 3])
                 plot_survival(
                     fuzzers_data, ax, fuzzer_colors, bug_count, max_time, legend_handles

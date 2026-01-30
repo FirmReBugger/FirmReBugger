@@ -8,14 +8,12 @@ def compute_median_survival(group, duration_col, event_col):
     uncensored_times = group.loc[group[event_col] == 1, duration_col].values
     censored_times = group.loc[group[event_col] == 0, duration_col].values
 
-    # Add `inf` to the uncensored times
     uncensored_times = list(uncensored_times) + [float("inf")] * len(censored_times)
 
-    # If no uncensored events, return infinity
     if len(uncensored_times) == 0:
-        return float("inf")  # No events happened, return infinity
+        return float("inf")
 
-    return np.median(uncensored_times)  # Compute median of the adjusted times
+    return np.median(uncensored_times)
 
 
 def summarize_data(json_file):
@@ -43,28 +41,25 @@ def summarize_data(json_file):
 
             bug_id = trial.get("bug_id")
             if bug_id is None:
-                continue  # Skip if bug_id is missing
+                continue
 
-            # For triggered events
             if trial.get("triggered") is not None:
-                triggered_event_observed = 1  # Event occurred
+                triggered_event_observed = 1
                 triggered_duration = trial["triggered"]
                 trigger_count[bug_id] = (
                     trigger_count.get(bug_id, 0) + 1
-                )  # Increment trigger count
+                )
             else:
-                triggered_event_observed = 0  # Event not occurred (censored)
-                triggered_duration = MAX_TRIAL_TIME  # Censoring at max trial time
+                triggered_event_observed = 0 
+                triggered_duration = MAX_TRIAL_TIME 
 
-            # For reached events
             if trial.get("reached") is not None:
                 reached_duration = trial["reached"]
-                reached_event_observed = 1  # Event occurred
+                reached_event_observed = 1 
             else:
-                reached_duration = MAX_TRIAL_TIME  # Censoring at max trial time
-                reached_event_observed = 0  # Event not reached (censored)
+                reached_duration = MAX_TRIAL_TIME
+                reached_event_observed = 0
 
-            # Append the data to the list
             data.append(
                 {
                     "Binary": json_data["Target"],
@@ -77,10 +72,8 @@ def summarize_data(json_file):
                 }
             )
 
-    # Create DataFrame from the collected data
     df = pd.DataFrame(data)
 
-    # Compute manual median survival times for triggered and reached events
     triggered_medians = df.groupby(["Binary", "Fuzzer", "BugID"]).apply(
         lambda x, **kwargs: compute_median_survival(
             x, "triggered_duration", "triggered_event_observed"
@@ -95,7 +88,6 @@ def summarize_data(json_file):
         include_groups=False,
     )
 
-    # Create DataFrame with results
     medians_df = pd.DataFrame(
         {
             "Binary": triggered_medians.index.get_level_values("Binary"),
@@ -113,7 +105,6 @@ def summarize_data(json_file):
     medians_df["MedianReachedTime"] = np.ceil(medians_df["MedianReachedTime"] / 60)
     medians_df["MedianTriggeredTime"] = np.ceil(medians_df["MedianTriggeredTime"] / 60)
 
-    # Check if ungrouped crashes exist
     binary = medians_df["Binary"].unique()
     fuzzer = medians_df["Fuzzer"].unique()
     if len(total_ungrouped_crashes) > 0:
@@ -124,7 +115,6 @@ def summarize_data(json_file):
 
 
 if __name__ == "__main__":
-    # Set up argument parser
     parser = argparse.ArgumentParser(
         description="Calculate bug statistics from JSON data."
     )
@@ -132,8 +122,6 @@ if __name__ == "__main__":
         "json_file", type=str, help="Path to the JSON file containing bug data."
     )
 
-    # Parse the arguments
     args = parser.parse_args()
 
-    # Run the summarize_data function with the provided JSON file
     print(summarize_data(args.json_file))

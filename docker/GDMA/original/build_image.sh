@@ -10,6 +10,6 @@ else
   docker buildx build --tag "$FUZZWARE_IMAGE" --load -f $FIRMREBUGGER_BASE_DIR/docker/Fuzzware/original/Dockerfile . || { echo "Failed to build Docker image '$FUZZWARE_IMAGE'"; exit 1; }
 fi
 
-docker buildx build --tag "$GDMA_IMAGE" --load -f $FIRMREBUGGER_BASE_DIR/docker/GDMA/original/Dockerfile . || { echo "Failed to build Docker image '$GDMA_IMAGE'"; exit 1; }
+docker buildx build --no-cache --tag "$GDMA_IMAGE" --load -f $FIRMREBUGGER_BASE_DIR/docker/GDMA/original/Dockerfile . || { echo "Failed to build Docker image '$GDMA_IMAGE'"; exit 1; }
 
 echo "[+] Docker image '$GDMA_IMAGE' built successfully."

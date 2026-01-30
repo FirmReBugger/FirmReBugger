@@ -4,6 +4,7 @@ FUZZER_IMAGE="frb:Fuzzware"
 docker buildx build \
   --tag "$FUZZER_IMAGE" \
   --load \
+  --no-cache \
   -f docker/Fuzzware/frb/Dockerfile \
   . \
   || { echo "Failed to build Docker image '$FUZZER_IMAGE'"; exit 1; }

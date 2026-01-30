@@ -4,7 +4,7 @@ ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y && \
-    apt-get install -y python3 python3-pip tmux build-essential git wget && \
+    apt-get install -y python3 python3-pip tmux build-essential git wget curl clang llvm-dev libclang-dev pkg-config libglib2.0-dev libpixman-1-dev git && \
     pip3 install setuptools
 
 ENV FUZZER=/home/user/multifuzz
@@ -15,11 +15,15 @@ RUN useradd -l -u $USERID -d /home/user user && \
     chown -R user:user /home/user && \
     echo "user ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers
 
-FROM rust:1.88 AS build-multifuzz
-USER root
+# install Rust
+USER user
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --no-modify-path && \
+    ~/.cargo/bin/rustup install 1.88.0 && \
+    ~/.cargo/bin/rustup default 1.88.0
+ENV PATH="${PATH}:/home/user/.cargo/bin"
+
 ENV FUZZER=/home/user/multifuzz
-RUN apt-get update && \
-    apt-get install -y clang llvm-dev libclang-dev pkg-config libglib2.0-dev libpixman-1-dev git
+
 WORKDIR $FUZZER
 RUN git clone https://github.com/MultiFuzz/MultiFuzz MultiFuzz
 WORKDIR $FUZZER/MultiFuzz
@@ -27,10 +31,7 @@ RUN git submodule update --init --recursive
 RUN git submodule update --init ghidra
 RUN cargo build --release
 
-FROM fuzzer-base
-ENV FUZZER=/home/user/multifuzz
-COPY --from=build-multifuzz $FUZZER/MultiFuzz/target/release/hail-fuzz $FUZZER/MultiFuzz/target/release/hail-fuzz
-COPY --from=build-multifuzz $FUZZER/MultiFuzz/ghidra $FUZZER/MultiFuzz/ghidra
+
 ENV GHIDRA_SRC=$FUZZER/MultiFuzz/ghidra
 
 USER user:user

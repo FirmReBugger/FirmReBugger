@@ -59,7 +59,8 @@ else
     fi
 
     cd DICE-DMA-Emulation || { echo "Failed to change directory to 'DICE-DMA-Emulation'"; exit 1; }
-    git submodule update --init --recursive p2im
+    git rm mips-emulator
+    git submodule update --init --recursive
 
     git apply ./DICE-Patches/DICE-P2IM.patch --unsafe-paths --directory ./p2im/qemu/src/qemu.git/
     cd p2im/qemu || { echo "Failed to change directory to 'p2im/qemu'"; exit 1; }

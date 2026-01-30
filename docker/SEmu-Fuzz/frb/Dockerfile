@@ -1,24 +1,8 @@
-FROM ubuntu:22.04 as fuzzer-base
-ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
+FROM frb_original:SEmu-Fuzz AS fuzzer-base
 
-RUN apt-get update
-RUN apt-get install -y python3-pip automake sudo git vim clang cmake llvm wget unzip build-essential
-RUN apt-get install -y gnuplot binutils-arm-none-eabi
-RUN apt-get install -y build-essential python3-dev automake cmake git flex bison libglib2.0-dev libpixman-1-dev python3-setuptools cargo libgtk-3-dev
-RUN apt-get install -y lld-12 llvm-12 llvm-12-dev clang-12 || apt-get install -y lld llvm llvm-dev clang
-RUN apt-get install -y gcc-$(gcc --version|head -n1|sed 's/\..*//'|sed 's/.* //')-plugin-dev libstdc++-$(gcc --version|head -n1|sed 's/\..*//'|sed 's/.* //')-dev
-RUN apt-get install -y ninja-build
-
-# Prepare non-root user
 ENV FUZZER=/home/user/SEmu-Fuzz
-ARG USERID=1000
-RUN useradd -l -u $USERID -d /home/user user && \
-    mkdir -p $FUZZER /home/user/.cache && \
-    chown -R user:user /home/user && \
-    echo "user ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers
 
-# TinyCC build 
-FROM fuzzer-base AS tcc-build
+FROM frb_original:SEmu-Fuzz AS semu-firmrebugger
 USER root
 RUN git clone https://github.com/TinyCC/tinycc.git $FUZZER/tinycc
 WORKDIR $FUZZER/tinycc
@@ -29,26 +13,12 @@ RUN ./configure && \
     make
 RUN make install
 
-WORKDIR /opt
-RUN git config --global core.longpaths true && \
-    git clone https://github.com/IoTS-P/AFLplusplus.git
-
-WORKDIR /opt/AFLplusplus
-RUN make || exit 1
-RUN make install || exit 1
-
-WORKDIR /opt/AFLplusplus/unicorn_mode
-RUN git clone https://github.com/IoTS-P/unicornafl.git
-
 WORKDIR /opt/AFLplusplus/unicorn_mode/unicornafl
-RUN git clone https://github.com/IoTS-P/unicorn.git
-
 # FirmRebugger installation
 COPY --chown=user docker/SEmu-Fuzz/frb/frb_patches/firmrebugger.c unicorn/qemu/include/qemu/firmrebugger.c
 COPY --chown=user docker/SEmu-Fuzz/frb/frb_patches/firmrebugger.h unicorn/qemu/include/qemu/firmrebugger.h
 
 WORKDIR /opt/AFLplusplus/unicorn_mode/unicornafl
-# Make Unicorn with default flags (system TinyCC install will be found)
 RUN cp ../../include/config.h ./include && \
     make clean && \
     rm -rf build_python && \
@@ -73,25 +43,23 @@ RUN rm -rf build_python && \
 
 RUN echo "[+] Success to build AFL!"
 
-RUN git clone https://github.com/IoTS-P/SEmu-Fuzz.git $FUZZER/build/SEmu-Fuzz
-
 RUN chown -R user:user /home/user
 # Install FirmReBugger
-USER root
-RUN pip3 install uv
-COPY --chown=user src $FUZZER/firmrebugger/
-COPY --chown=user pyproject.toml $FUZZER/firmrebugger/
-COPY --chown=user uv.lock $FUZZER/firmrebugger/
-COPY --chown=user README.md $FUZZER/firmrebugger/
-COPY --chown=user .python-version $FUZZER/firmrebugger/
-WORKDIR $FUZZER/firmrebugger
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.local/bin:$PATH"
+USER user
+RUN pip3 install --user uv
+ENV PATH=$PATH:/home/user/.local/bin
+COPY --chown=user ./src /firmrebugger/
+COPY --chown=user ./pyproject.toml /firmrebugger/
+COPY --chown=user ./uv.lock /firmrebugger/
+COPY --chown=user ./README.md /firmrebugger/
+COPY --chown=user ./.python-version /firmrebugger/
+WORKDIR /firmrebugger/target
 RUN uv run frb -h
 
-USER user
 ENV PATH="$PATH:/home/user/.local/bin"
 RUN pip3 install --user intelhex
 RUN pip3 install --user $FUZZER/build/SEmu-Fuzz/
+ENV FIRMREBUGGER_BASE_DIR=/firmrebugger
 
-WORKDIR /home/user/SEmu-Fuzz/firmbench_target
+ENTRYPOINT ["uv", "run", "frb", "bug-analyzer", "."]
+
