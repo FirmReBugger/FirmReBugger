@@ -31,7 +31,7 @@ sudo apt-get install automake texinfo unzip
 sudo apt install gcc-arm-none-eabi
 sudo apt install texlive-latex-base
 sudo apt install texlive-xetex texlive-fonts-recommended texlive-latex-extra
-sudo apt install npm
+install npm (npm >= 22.0.0)
 ```
 
 ### Build all Fuzzers 
@@ -70,6 +70,11 @@ uv run frb charting-tool --help
 ### Workflow webapp 
 It is recommneded to run FirmReBugger through the webapp
 ```bash
+# If you want to rebuild the front end 
+cd src/firmrebugger-web
+npm run build 
+
+# Otherwise just run the webapp
 uv run frb app --help
 uv run frb app -p <port>
 ```

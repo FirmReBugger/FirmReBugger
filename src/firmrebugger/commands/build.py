@@ -68,6 +68,8 @@ def build_fuzzers():
     FIRMREBUGGER_BASE_DIR = get_frb_base_dir()
     fuzzer_docker_dir = f"{FIRMREBUGGER_BASE_DIR}/docker"
     fuzzers = get_fuzzers(fuzzer_docker_dir)
+    user_id = os.environ.get("USERID", "1000")
+    print(f"[+] Using USERID={user_id} for Docker builds")
     if not fuzzers:
         print(f"No fuzzers found in directory: {fuzzer_docker_dir}")
         sys.exit(1)

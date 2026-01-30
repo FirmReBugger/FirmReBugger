@@ -7,9 +7,9 @@ if docker image inspect "$FUZZWARE_IMAGE" > /dev/null 2>&1; then
 else
   echo "Docker image '$FUZZWARE_IMAGE' does NOT exist locally."
 
-  docker buildx build --tag "$FUZZWARE_IMAGE" --load -f $FIRMREBUGGER_BASE_DIR/docker/Fuzzware/original/Dockerfile . || { echo "Failed to build Docker image '$FUZZWARE_IMAGE'"; exit 1; }
+  docker buildx build --tag "$FUZZWARE_IMAGE" --load --build-arg USERID="${USERID:-1000}" -f $FIRMREBUGGER_BASE_DIR/docker/Fuzzware/original/Dockerfile . || { echo "Failed to build Docker image '$FUZZWARE_IMAGE'"; exit 1; }
 fi
 
-docker buildx build --no-cache --tag "$HOEDUR_IMAGE" --load -f $FIRMREBUGGER_BASE_DIR/docker/Hoedur/original/Dockerfile . || { echo "Failed to build Docker image '$HOEDUR_IMAGE'"; exit 1; }
+docker buildx build --no-cache --tag "$HOEDUR_IMAGE" --load --build-arg USERID="${USERID:-1000}" -f $FIRMREBUGGER_BASE_DIR/docker/Hoedur/original/Dockerfile . || { echo "Failed to build Docker image '$HOEDUR_IMAGE'"; exit 1; }
 
 echo "[+] Docker image '$HOEDUR_IMAGE' built successfully."

@@ -49,7 +49,7 @@ if [ -f "$QEMU_BIN" ]; then
   echo "[+] '$QEMU_BIN' already exists. Skipping QEMU build."
 else
   echo "[+] '$QEMU_BIN' not found. Starting QEMU build..."
-    # Build the docker image for p2im qemu build 
+    # Build the docker image for p2im qemu build
     cd "$FIRMREBUGGER_BASE_DIR/docker/DICE/original" || { echo "Failed to change directory to '$FIRMREBUGGER_BASE_DIR/docker/DICE/original'"; exit 1; }
 
     if [ ! -d "DICE-DMA-Emulation" ]; then
@@ -65,7 +65,7 @@ else
     git apply ./DICE-Patches/DICE-P2IM.patch --unsafe-paths --directory ./p2im/qemu/src/qemu.git/
     cd p2im/qemu || { echo "Failed to change directory to 'p2im/qemu'"; exit 1; }
 
-    # Get fixes for debian build 
+    # Get fixes for debian build
     git clone https://github.com/xgandiaga/DRIVERS.git
     mv DRIVERS/* ./build_scripts/ && rm -rf DRIVERS
 
@@ -73,5 +73,5 @@ else
 
 fi
 
-docker buildx build --tag "$FUZZER_IMAGE" --load -f $FIRMREBUGGER_BASE_DIR/docker/DICE/original/Dockerfile . || { echo "Failed to build Docker image '$FUZZER_IMAGE'"; exit 1; }
+docker buildx build --tag "$FUZZER_IMAGE" --load --build-arg USERID="${USERID:-1000}" -f $FIRMREBUGGER_BASE_DIR/docker/DICE/original/Dockerfile . || { echo "Failed to build Docker image '$FUZZER_IMAGE'"; exit 1; }
 echo "[+] Docker image '$FUZZER_IMAGE' built successfully."

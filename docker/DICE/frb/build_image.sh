@@ -80,7 +80,7 @@ fi
 
 cd "$FIRMREBUGGER_BASE_DIR/"
 
-docker buildx build --tag "$FUZZER_IMAGE" --load -f "${FIRMREBUGGER_BASE_DIR}/docker/DICE/frb/Dockerfile" . || { echo "Failed to build Docker image '$FUZZER_IMAGE'"; exit 1; }
+docker buildx build --tag "$FUZZER_IMAGE" --load --build-arg USERID="${USERID:-1000}" -f "${FIRMREBUGGER_BASE_DIR}/docker/DICE/frb/Dockerfile" . || { echo "Failed to build Docker image '$FUZZER_IMAGE'"; exit 1; }
 rm -rf "${FIRMREBUGGER_BASE_DIR}/docker/DICE/frb/DICE-DMA-Emulation"
 rm -rf "${FIRMREBUGGER_BASE_DIR}/docker/DICE/original/DICE-DMA-Emulation"
 echo "[+] Docker image '$FUZZER_IMAGE' built successfully."
