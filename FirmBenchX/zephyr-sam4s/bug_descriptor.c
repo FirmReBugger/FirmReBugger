@@ -4,7 +4,7 @@
 
 extern uint32_t reg_state[16];
 extern uint32_t frb_mem_read(uint32_t read_addr, size_t size);
-extern void frb_report_detected_triggered(char *bug_id);
+extern void report_detected_triggered(char *bug_id);
 extern void frb_report_reached(char *bug_id);
 
 typedef void (*func_ptr_t)(void);
@@ -15,7 +15,7 @@ typedef struct {
 } context_struct;
 
 static void report_detected_triggered(char *bug_id) {
-  frb_report_detected_triggered(bug_id);
+  report_detected_triggered(bug_id);
 }
 
 static void report_reached(char *bug_id) { frb_report_reached(bug_id); }
@@ -42,21 +42,22 @@ static void print_reg_state(uint32_t *reg_state) {
 
 void on_CVE_2021_3322() {
   // Check for NULL ptr in pkt->frags
-  report_reached("H53");
+  report_reached("FW52");
   uint32_t frags = frb_mem_read(reg_state[0] + 0x10, 4);
   if (frags == 0) {
-    report_detected_triggered("H53");
+    report_detected_triggered("FW52");
   }
 }
 
 void check_compressed_hdr_size(uint32_t compressed_hdr_size) {
-  report_reached("H54");
+  // CVE-2021-3323
+  report_reached("FW53");
   uint32_t net_buf = reg_state[6];
   uint32_t pkt_buf_len_addr = (net_buf + 0x8) + 0x4;
   uint32_t pkt_buf_len = frb_mem_read(pkt_buf_len_addr, 2);
 
   if (pkt_buf_len < compressed_hdr_size) {
-    report_reached("H54");
+    report_reached("FW53");
   }
 }
 
@@ -72,16 +73,16 @@ void on_CVE_2021_3323_callsite_2() {
 
 void on_CVE_2021_3320() {
   // Check for unexpected frame type
-  report_reached("H56");
+  report_reached("FW50");
   if (reg_state[3] == 2) {
-    report_detected_triggered("H56");
+    report_detected_triggered("FW50");
   }
 }
 
 uint32_t mhr_src_addr_ptr = false;
 
 void on_CVE_2021_3319() {
-  report_reached("H57");
+  report_reached("FW49");
   // Catch NULL return from validate_addr outside IEEE802154_ADDR_MODE_NONE
   // https://github.com/zephyrproject-rtos/zephyr/blob/0aaae4a039cab54df84c1f0371d44d6045ff58d8/subsys/net/l2/ieee802154/ieee802154_frame.c#L120
 
@@ -99,19 +100,19 @@ void on_CVE_2021_3319() {
   } else if (reg_state[15] == 0x0040d41a) {
     // Source address pointer assignment path triggered
     if (mhr_src_addr_ptr) {
-      report_detected_triggered("H57");
+      report_detected_triggered("FW49");
     }
   } else if (reg_state[15] == 0x0040d416) {
     // Destination address (NULL assignment only reached in buggy case)
-    report_detected_triggered("H57");
+    report_detected_triggered("FW49");
   }
 }
 
 void on_CVE_2021_3321() {
   // Check for size underflow in memmove call from ieee802154_reassemble
-  report_reached("H55");
+  report_reached("FW51");
   if (reg_state[2] > 0xf0000000 && reg_state[14] == 0x00403c78) {
-    report_detected_triggered("H55");
+    report_detected_triggered("FW51");
   }
 }
 
@@ -142,6 +143,13 @@ void on_net_buf_simple_pull() {
   }
 }
 
+void on_net_6lo_uncompress() {
+  report_reached("FP_FRB43");
+  if (reg_state[6] == 0) {
+    report_detected_triggered("FP_FRB43");
+  }
+}
+
 context_struct context_array[] = {{0x00406c58, on_CVE_2021_3322},
                                   {0x00406c96, on_CVE_2021_3323_callsite_1},
                                   {0x00406c9e, on_CVE_2021_3323_callsite_2},
@@ -153,7 +161,8 @@ context_struct context_array[] = {{0x00406c58, on_CVE_2021_3322},
                                   {0x0040d130, on_CVE_2021_3320},
                                   {0x0040d4c4, on_ieee802154_validate_frame},
                                   {0x0040d110, on_ieee802154_recv},
-                                  {0x0040d070, on_net_buf_simple_pull}};
+                                  {0x0040d070, on_net_buf_simple_pull},
+                                  {0x00406c7a, on_net_6lo_uncompress}};
 
 void send_context_struct(const context_struct **arr, size_t *size) {
   *arr = context_array;

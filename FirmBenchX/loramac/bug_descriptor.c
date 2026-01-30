@@ -5,7 +5,7 @@ extern uint32_t reg_state[16];
 extern uint32_t frb_mem_read(uint32_t read_addr, size_t size);
 extern void frb_mem_write(uint32_t write_addr, uint32_t value);
 extern void frb_report_reached(char *bug_id);
-extern void frb_report_detected_triggered(char *bug_id);
+extern void report_detected_triggered(char *bug_id);
 
 static void print_reg_state(uint32_t *reg_state) {
   printf("Register State:\n");
@@ -35,13 +35,12 @@ typedef struct {
 } context_struct;
 
 static void report_detected_triggered(char *bug_id) {
-  frb_report_detected_triggered(bug_id);
+  report_detected_triggered(bug_id);
 }
 
 static void report_reached(char *bug_id) { frb_report_reached(bug_id); }
 
 void BUG_H18() {
-  // CVE-2022-39274
   report_reached("H18");
   if (reg_state[6] == 0) {
     report_detected_triggered("H18");
@@ -85,8 +84,13 @@ void on_GetLastFcntDown() {
 // }
 
 void mcpsidication_failed() {
-  report_reached("FP_FRB31");
-  report_detected_triggered("FP_FRB31");
+  report_reached("FP_FRB58");
+  report_detected_triggered("FP_FRB58");
+}
+
+void spi_trans_failed() {
+  report_reached("FP_FRB40");
+  report_detected_triggered("FP_FRB40");
 }
 
 context_struct context_array[] = {
@@ -96,7 +100,8 @@ context_struct context_array[] = {
     {0x080081fc, on_GetLastFcntDown},
     // {0x0800ded0, on_sys_dlist_remove},
     // {0x0800bb00, check_buf_struct},
-    {0x080030b2, mcpsidication_failed}};
+    {0x080030b2, mcpsidication_failed},
+    {0x08003dcc, spi_trans_failed}};
 
 void send_context_struct(const context_struct **arr, size_t *size) {
   *arr = context_array;

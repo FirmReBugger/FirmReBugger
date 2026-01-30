@@ -20,39 +20,25 @@ static void report_reached(char* bug_id) {
     frb_report_reached(bug_id);
 }
 
-void modbus1() {
-    report_reached("DI1");
-    uint32_t res = reg_state[2] + reg_state[3];
-    if (reg_state[3] > 0x200045e4) {
-        report_detected_triggered("DI1");
-    }
-}
-
-void  modbus2() {
-    report_reached("DI2");
-    if (reg_state[3] >= 0x100) {
-        report_detected_triggered("DI2");
-    }
-}
-
-void modbus3() {
-    report_reached("DI3");
-    uint32_t res = reg_state[3] + reg_state[1];
-    if (res > 0x200045e4) {
-        report_detected_triggered("DI3");
+void BUG_FP_FW39() {
+    report_reached("FP_FW39");
+    // (FP) Missing USB Initialization
+    if (frb_mem_read(0x2000057C,4) == 0) {
+        report_detected_triggered("FP_FW39");
     }
 }
 
 context_struct context_array[] = {
-    {0x0800289c, modbus1},
-    {0x080028e0, modbus2},
-    {0x0800297e, modbus3}
+    {0x08001f9c, BUG_FP_FW39}
 };
 
 void send_context_struct(const context_struct **arr, size_t *size) {
     *arr = context_array;
     *size = sizeof(context_array) / sizeof(context_array[0]);
 }
+
+
+
 // static void print_reg_state(uint32_t *reg_state){
 //     printf("Register State:\n");
 //     printf("r0:  0x%08X\n", reg_state[0]);
