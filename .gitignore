@@ -11,7 +11,6 @@ wheels/
 
 # DICE build
 DICE-DMA-Emulation
-report/
 
 # Benchmark results
 **/fuzzing_out/*
