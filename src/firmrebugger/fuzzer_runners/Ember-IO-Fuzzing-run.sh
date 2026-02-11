@@ -15,12 +15,8 @@ timeout "$time_duration" "$EMBER_BASE_DIR/AFLplusplus/afl-fuzz" \
   -o "$trial_name" \
   -t 150 \
   -Q \
-  "${CONFIG_ARGS[@]}" > "$trial_name/fuzzer.log" 2>&1
+  "${CONFIG_ARGS[@]}"
 
 exit_code=$?
-
-if [ $exit_code -eq 124 ]; then
-  echo "afl-fuzz timed out after $time_duration seconds." >> "$trial_name/fuzzer.log"
-fi
 
 exit $exit_code

@@ -51,11 +51,11 @@ def fuzz(fuzzing_time, num_trials, fuzzing_output_name, benchmark='FirmBench', f
             benchmark=benchmark,
             output_dir=fuzzing_output_name,
             runs=int(num_trials),
-            core_idx=1, # Changes later 
+            core_idx=1, # Changes later
             container_name=f"tmp-name"
         )
 
-        print(f"[CLI fuzz] Starting task {task.task_id} (core={core_idx})...")
+        print(f"[CLI fuzz] Starting task {task.task_id}")
         task.start()
         if task.process:
             task.process.join()
@@ -74,5 +74,3 @@ def fuzz(fuzzing_time, num_trials, fuzzing_output_name, benchmark='FirmBench', f
         print(f"[CLI fuzz] Warning: failed to finalize job info: {e}")
 
     return final_status
-
-

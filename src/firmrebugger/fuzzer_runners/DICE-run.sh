@@ -15,13 +15,9 @@ program=$(sed -n 's/^[[:space:]]*program[[:space:]]*=[[:space:]]*//p' config.cfg
 
 sed -i "s/^\(run[[:space:]]*=[[:space:]]*\).*/\1$trial_name/" config.cfg
 
-timeout --foreground "$time_duration" python3 "$DICE_BASE_DIR/DICE-Evaluation/ARM/Fuzzing/fuzz.py" -c config.cfg > "$trial_name/fuzzer.log" 2>&1
+timeout --foreground "$time_duration" python3 "$DICE_BASE_DIR/DICE-Evaluation/ARM/Fuzzing/fuzz.py" -c config.cfg
 pkill -9 -f afl-fuzz
 
 exit_code=$?
-
-if [ $exit_code -eq 124 ]; then
-  echo "afl-fuzz timed out after $time_duration seconds." >> "$trial_name/fuzzer.log"
-fi
 
 exit $exit_code

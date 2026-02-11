@@ -31,6 +31,7 @@ sudo apt-get install automake texinfo unzip
 sudo apt install gcc-arm-none-eabi
 sudo apt install texlive-latex-base
 sudo apt install texlive-xetex texlive-fonts-recommended texlive-latex-extra
+sudo apt install binutils-arm-none-eabi gcc-arm-none-eabi
 install npm (npm >= 22.0.0)
 ```
 
