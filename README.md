@@ -86,7 +86,7 @@ uv run frb app -p <port>
 
 #### Recommended workflow:
 1. Go to the Job Manager tab to schedule fuzzing jobs.
-2. After fuzzing completes, use the same tab to triage results. In the completed jobs, click the “More Options” button and select Triage---this will automatically queue the bug analyzer.
+2. If auto triaging is enabled, after fuzzing completes FirmReBugger will automatically queue triaging jobs, otherwise you can queue it manually through the "Finished Jobs" section.
 3. Switch to the Report tab to analyze and visualize outcomes.
 
 ### Workflow CLI
