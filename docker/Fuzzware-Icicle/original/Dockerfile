@@ -4,6 +4,8 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
     apt-get upgrade -y && \
     apt-get install -y python3 python3-pip automake tmux redis wget autoconf sudo htop cmake clang vim unzip git binutils-arm-none-eabi curl && \
+    apt-get install -y gcc-10 g++-10 && \
+    update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100 --slave /usr/bin/g++ g++ /usr/bin/g++-10 && \
     pip3 install virtualenv virtualenvwrapper cython setuptools
 RUN pip3 install -U maturin==0.12.0
 
@@ -63,4 +65,3 @@ COPY --chown=user --from=fuzzware-icicle-modeling $WORKON_HOME/ $WORKON_HOME/
 USER user:user
 ENV GHIDRA_SRC=$FUZZER/ghidra
 WORKDIR $FUZZER/firmbench_target
-
