@@ -120,16 +120,26 @@ def fuzz_cmd(time, num_trials, output_name):
 
 
 @main.command()
-@click.option(
-    "--user-id",
-    default=1000,
-    type=int,
-    help="User ID to pass to Docker build as the USERID build-arg (default: 1000)",
-)
-def build(user_id):
+def build():
     """Build fuzzers with Docker."""
     if not check_docker_nosudo():
         sys.exit(1)
+
+    # Determine which UID to use for Docker builds:
+    env_uid = os.environ.get("USERID")
+    if env_uid is not None:
+        try:
+            user_id = int(env_uid)
+        except ValueError:
+            try:
+                user_id = os.getuid()
+            except AttributeError:
+                user_id = 1000
+    else:
+        try:
+            user_id = os.getuid()
+        except AttributeError:
+            user_id = 1000
 
     os.environ["USERID"] = str(user_id)
     click.echo(f"[+] Building Docker images with USERID={user_id}")

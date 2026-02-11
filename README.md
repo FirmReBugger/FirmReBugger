@@ -103,6 +103,8 @@ uv run frb bug-analyzer .
 # Visualize the data
 uv run frb charting-tool
 ```
+### Trouble shooting
+- If fuzzing sessions die prematurely, check the logs at `/home/user/FirmReBugger/<benchmark>/fuzzers/<fuzzer>/fuzzing_out/<output_name>/fuzzing_out`.
 
 ### Adding a new fuzzer
 - Add your fuzzer to the docker folder. With both original for fuzzing and frb version for triaging (with the FirmReBugger patches).
