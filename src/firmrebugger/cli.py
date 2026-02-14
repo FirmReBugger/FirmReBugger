@@ -77,7 +77,7 @@ def fuzz_cmd(time, num_trials, output_name):
     fuzzing_time_seconds = parse_fuzzing_time(time)
 
     base_dir = get_frb_base_dir()
-    benchmarks = ["FirmBench, FirmBenchDMA, FirmBenchX"]
+    benchmarks = ["FirmBench", "FirmBenchDMA", "FirmBenchX"]
     selected_bench = menu("Select benchmark", benchmarks)
     if not selected_bench:
         click.echo("No benchmark selected, aborting.")
