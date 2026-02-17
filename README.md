@@ -12,7 +12,7 @@ We have made the process of incorporating a bug with a Raven, simple—we demons
 ## Full Paper Results
 The full table of our experiemnts are detailed in `paper_results`
 - [FirmBench](paper_results/FirmBench.pdf)
-- [FirmBenchX](paper_results/FirmBench.pdf)
+- [FirmBenchX](paper_results/FirmBenchX.pdf)
 
 ## Quick Start 
 
