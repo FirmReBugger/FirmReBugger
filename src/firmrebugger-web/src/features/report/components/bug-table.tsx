@@ -196,7 +196,7 @@ export function BugTable({ benchmark, openDrawer, onOpenChange, onDataUpdate }: 
   }
 
   const formatValue = (val: number | null, hasSuccess: boolean = false) => {
-    if (val === null) return 'null';
+    if (val === null) return '✗';
     if (!isFinite(val)) return 'infinite';
     console.log('Has Success:', hasSuccess);
 

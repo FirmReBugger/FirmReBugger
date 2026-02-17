@@ -184,7 +184,7 @@ export function UpSetPlot({ benchmark, tableData }: UpSetPlotProps) {
           <div>
             <CardTitle>Bug UpSet Plot - {benchmark}</CardTitle>
             <CardDescription>
-              Interactive UpSet plot showing fuzzer coverage of bugs (
+              Interactive UpSet plot for bugs (
               {currentMetric} metric)
               {processedMap[currentMetric]?.stats && (
                 <span className="block mt-1">
@@ -268,7 +268,11 @@ export function UpSetPlot({ benchmark, tableData }: UpSetPlotProps) {
                   }
 
                   const rectElement = target.closest("rect");
-                  if (rectElement && selection?.type === "intersection") {
+                  if (
+                    rectElement &&
+                    (selection?.type === "intersection" ||
+                      selection?.type === "distinctIntersection")
+                  ) {
                     const elems = processedMap[currentMetric].elems || [];
                     const selectedElems = selection.elems || [];
 
@@ -306,6 +310,10 @@ export function UpSetPlot({ benchmark, tableData }: UpSetPlotProps) {
               >
                 <UpSetComponent
                   {...(processedMap[currentMetric] as any)}
+                  combinations={{
+                    type: "distinctIntersection",
+                    order: ["cardinality:desc", "name:asc"],
+                  }}
                   width={dimensions.width}
                   height={dimensions.height}
                   selection={selection}
