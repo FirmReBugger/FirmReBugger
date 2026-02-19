@@ -21,7 +21,7 @@ def final_model(path="."):
     return max_num
 
 
-def get_time_input(seed_path, fuzzer_stats_path="default/fuzzer_stats"):
+def get_time_input(seed_path, fuzzer_stats_path="outputs/fuzzer_stats"):
     try:
         file_mtime = int(os.path.getmtime(seed_path))
     except Exception as e:
@@ -47,7 +47,7 @@ def get_run_parameters(output_path):
     file_info = ""
     file_return = []
 
-    cmdline_path = os.path.join(output_path, "default", "cmdline")
+    cmdline_path = os.path.join(output_path, "outputs", "cmdline")
     if not os.path.isfile(cmdline_path):
         raise FileNotFoundError(f"The 'cmdline' file does not exist at: {cmdline_path}")
 
@@ -78,13 +78,13 @@ def dice_analyzer(
     os.environ["FIRMREBUGGER_CONFIG"] = descriptor_path
     execution_times = []
     if not Crash:
-        working_folder = os.path.join(output_path, "default", "queue")
+        working_folder = os.path.join(output_path, "outputs", "queue")
         if not os.path.isdir(working_folder):
             raise FileNotFoundError(
                 f"The 'Queue' folder does not exist at: {working_folder}"
             )
     else:
-        working_folder = os.path.join(output_path, "default", "crashes")
+        working_folder = os.path.join(output_path, "outputs", "crashes")
         if not os.path.isdir(working_folder):
             raise FileNotFoundError(
                 f"The 'Crashes' folder does not exist at: {working_folder}"

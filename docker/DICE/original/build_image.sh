@@ -73,5 +73,5 @@ else
 
 fi
 
-docker buildx build --tag "$FUZZER_IMAGE" --load --build-arg USERID="${USERID:-1000}" -f $FIRMREBUGGER_BASE_DIR/docker/DICE/original/Dockerfile . || { echo "Failed to build Docker image '$FUZZER_IMAGE'"; exit 1; }
+docker buildx build --tag "$FUZZER_IMAGE" --load --build-arg USERID="$(id -u)" -f $FIRMREBUGGER_BASE_DIR/docker/DICE/original/Dockerfile . || { echo "Failed to build Docker image '$FUZZER_IMAGE'"; exit 1; }
 echo "[+] Docker image '$FUZZER_IMAGE' built successfully."

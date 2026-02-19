@@ -13,9 +13,9 @@ export FUZZDIR="$trial_name"
 program=$(sed -n 's/^[[:space:]]*program[[:space:]]*=[[:space:]]*//p' config.cfg)
 # echo "$program"
 
-sed -i "s/^\(run[[:space:]]*=[[:space:]]*\).*/\1$trial_name/" config.cfg
+sed -i "s|^\(run[[:space:]]*=[[:space:]]*\).*|\1$trial_name|" config.cfg
 
-timeout --foreground "$time_duration" python3 "$DICE_BASE_DIR/DICE-Evaluation/ARM/Fuzzing/fuzz.py" -c config.cfg
+timeout --foreground "$time_duration" python3 -u "$DICE_BASE_DIR/DICE-Evaluation/ARM/Fuzzing/fuzz.py" -c config.cfg
 pkill -9 -f afl-fuzz
 
 exit_code=$?
