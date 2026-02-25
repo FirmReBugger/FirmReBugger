@@ -24,6 +24,7 @@ FROM fuzzware-base AS fuzzware-modeling
 USER root
 # First copy and install requirements
 RUN git clone -b DMA --recurse-submodules https://github.com/fuzzware-fuzzer/fuzzware.git /tmp/fuzzware
+RUN grep -q '^pycparser==2.21$' /tmp/fuzzware/modeling/requirements.txt || echo 'pycparser==2.21' >> /tmp/fuzzware/modeling/requirements.txt
 # f5979d009f18ce0069c7e57c9f557766b5f977c8 is the commit
 
 RUN cp /tmp/fuzzware/modeling/requirements.txt /requirements-modeling.txt

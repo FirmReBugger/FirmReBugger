@@ -18,6 +18,7 @@ FROM fuzzware-base AS fuzzware-modeling
 USER user
 # Install requirements first (from the repo)
 RUN git clone https://github.com/fuzzware-fuzzer/fuzzware.git /tmp/fuzzware
+RUN grep -q '^pycparser==2.21$' /tmp/fuzzware/modeling/requirements.txt || echo 'pycparser==2.21' >> /tmp/fuzzware/modeling/requirements.txt
 RUN python3 -m virtualenv --python=/usr/bin/python3 $WORKON_HOME/fuzzware-modeling && \
     . $WORKON_HOME/fuzzware-modeling/bin/activate && \
     pip3 install -r /tmp/fuzzware/modeling/requirements.txt
@@ -49,7 +50,7 @@ RUN ./get_afl.sh && \
 # Build harness
 RUN make -C $FUZZER/repo/emulator/harness/fuzzware_harness/native clean all
 
-# Install the emulator and pipeline 
+# Install the emulator and pipeline
 USER root
 RUN pip3 install -e $FUZZER/repo/emulator/harness && \
     pip3 install -e $FUZZER/repo/pipeline
