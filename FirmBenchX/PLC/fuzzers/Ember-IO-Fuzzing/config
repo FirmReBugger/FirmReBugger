@@ -1,4 +1,4 @@
-../PLCX.elf
+./PLCX.elf
 -sram_size
 256k
 -flash_size

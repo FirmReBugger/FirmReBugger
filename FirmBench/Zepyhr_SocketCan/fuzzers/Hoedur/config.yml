@@ -34,4 +34,4 @@ memory_maps:
     type: rom
 
 symbols:
-  - uuEmu.zephyrsocketcan.elf
+  - uEmu.zephyrsocketcan.elf

@@ -1,4 +1,4 @@
-../ConsoleX.elf
+./ConsoleX.elf
 -machine
 embedded_fuzz
 -sram_size
@@ -6,7 +6,7 @@ embedded_fuzz
 -flash_base
 0
 -flash_size
-32k
+64k
 -sram_base
 0x1fff0000
 -fuzz_input

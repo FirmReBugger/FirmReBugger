@@ -1,5 +1,5 @@
 board:
-  init_nsvtor: 0x800c000
+  init_nsvtor: 0x800c080
 
 interrupt:
   mode: round-robin
@@ -8,22 +8,35 @@ interrupt:
     interval: 1000
 
 memory_maps:
-  - name: dynamically_added_crash_region_00000054
-    address: 0x0
-    size: 0xa000
-    type: ram
   - name: mmio
     address: 0x40000000
     size: 0x20000000
     type: mmio
+  - name: ITM_DWT_BPU
+    address: 0xe0000000
+    size: 0x3000
+    type: mmio
+  - name: CTI
+    address: 0xe0042000
+    size: 0x1000
+    type: mmio
+  - name: zero
+    address: 0x0
+    size: 0x1000
+    type: ram
   - name: ram
     address: 0x20000000
-    size: 0x100000
+    size: 0x40000
+    type: ram
+  - name: rom
+    address: 0x8000000
+    size: 0xc000
     type: ram
   - name: text
     address: 0x800c000
-    size: 0x19400
+    size: 0xa400
     file:
+      offset: 0x80
       path: uEmu.uTaskerV1.4_USB_STM32429ZI.bin
     type: rom
 

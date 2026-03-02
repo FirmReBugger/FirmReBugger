@@ -1,4 +1,4 @@
-../CNCX.elf
+./CNCX.elf
 -sram_size
 192k
 -flash_size

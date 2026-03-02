@@ -110,12 +110,22 @@ class Task:
 
             self.subprocess.wait()
 
+            if self.status != "stopped" and self.subprocess.returncode not in (0, None):
+                warn_msg = f"Fuzzer process exited with non-zero status {self.subprocess.returncode}"
+                print(f"[Task {self.task_id}] WARNING: {warn_msg}")
+                log.write(f"\n\nWARNING: {warn_msg}\n")
+                log.flush()
+
         fuzz_end_time = time.time()
         actual_duration = fuzz_end_time - fuzz_start_time
-        expected_duration = self.duration - 60 
+        expected_duration = max(0, self.duration - 5)
         
         if self.status != "stopped" and actual_duration < expected_duration:
-            error_msg = f"Task ended prematurely after {actual_duration:.1f}s (expected at least {expected_duration}s)"
+            return_code = self.subprocess.returncode if self.subprocess is not None else "unknown"
+            error_msg = (
+                f"Task ended prematurely after {actual_duration:.1f}s "
+                f"(expected at least {expected_duration}s; return code: {return_code})"
+            )
             print(f"[Task {self.task_id}] ERROR: {error_msg}")
             self.status = "error"
             with open(log_file, "a") as log:
@@ -215,6 +225,13 @@ class Task:
                 log.flush()  
 
             self.subprocess.wait()
+
+            if self.status != "stopped" and self.subprocess.returncode not in (0, None):
+                error_msg = f"Triaging process exited with non-zero status {self.subprocess.returncode}"
+                print(f"[Task {self.task_id}] ERROR: {error_msg}")
+                self.status = "error"
+                log.write(f"\n\nERROR: {error_msg}\n")
+                log.flush()
 
 
 

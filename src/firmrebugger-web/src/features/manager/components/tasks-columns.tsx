@@ -1,5 +1,5 @@
 import { type ColumnDef } from '@tanstack/react-table'
-import { Trash2, CircleStop, ArrowUp, Search, MoreHorizontal, CheckCircle2, FileCheck } from 'lucide-react'
+import { Trash2, CircleStop, Search, MoreHorizontal, CheckCircle2, FileCheck, CircleAlert, LoaderCircle } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
@@ -21,9 +21,21 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 
+function formatDateTime(value: Date | string | undefined): string {
+  if (!value) return '-'
+  const date = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(date.getTime())) return '-'
+  return date.toLocaleString([], {
+    month: 'short',
+    day: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
 let deleteTaskCallback: ((id: string) => void) | null = null
 let stopTaskCallback: ((id: string) => void) | null = null
-let moveUpCallback: ((id: string) => void) | null = null
 let queueTriagingCallback: ((id: string) => void) | null = null
 let toggleAutoTriagingCallback: ((id: string, value: boolean) => void) | null = null
 let allTasks: Task[] = []
@@ -31,14 +43,12 @@ let allTasks: Task[] = []
 export function setTaskCallbacks(
   deleteFn: (id: string) => void,
   stopFn: (id: string) => void,
-  moveUpFn: (id: string) => void,
   queueTriagingFn: (id: string) => void,
   toggleAutoTriagingFn: (id: string, value: boolean) => void,
   tasks: Task[]
 ) {
   deleteTaskCallback = deleteFn
   stopTaskCallback = stopFn
-  moveUpCallback = moveUpFn
   queueTriagingCallback = queueTriagingFn
   toggleAutoTriagingCallback = toggleAutoTriagingFn
   allTasks = tasks
@@ -53,9 +63,10 @@ export const tasksColumns: ColumnDef<Task>[] = [
       const statusOrder = {
         running: 0,
         queued: 1,
-        completed: 2,
-        stopped: 3,
-        errored: 4,
+        stopping: 2,
+        errored: 3,
+        stopped: 4,
+        completed: 5,
       }
       const statusA = rowA.original.status
       const statusB = rowB.original.status
@@ -92,6 +103,18 @@ export const tasksColumns: ColumnDef<Task>[] = [
         </div>
       )
     },
+  },
+  {
+    accessorKey: 'benchmark',
+    header: () => <div className='pl-4'>Benchmark</div>,
+    enableSorting: false,
+    filterFn: (row, id, value) => {
+      if (!Array.isArray(value) || value.length === 0) return true
+      return value.includes(row.getValue(id))
+    },
+    cell: ({ row }) => (
+      <div className='w-[120px] pl-4'>{String(row.getValue('benchmark'))}</div>
+    ),
   },
   {
     accessorKey: 'mode',
@@ -158,6 +181,28 @@ export const tasksColumns: ColumnDef<Task>[] = [
     cell: ({ row }) => <div className='w-[100px] font-mono pl-4'>{row.getValue('runs')}</div>,
   },
   {
+    accessorKey: 'startTime',
+    header: () => <div className='pl-4'>Started</div>,
+    sortingFn: (rowA, rowB) => {
+      const getSortTime = (task: Task) => {
+        const source = task.startTime ?? task.createdAt
+        const date = source instanceof Date ? source : new Date(source)
+        return Number.isNaN(date.getTime()) ? 0 : date.getTime()
+      }
+
+      return getSortTime(rowA.original) - getSortTime(rowB.original)
+    },
+    cell: ({ row }) => {
+      const startTime = row.original.startTime
+
+      return (
+        <div className='w-[170px] pl-4 pr-3'>
+          <div className='text-sm whitespace-nowrap'>{formatDateTime(startTime)}</div>
+        </div>
+      )
+    },
+  },
+  {
     accessorKey: 'completedAt',
     id: 'time',
     header: ({ column }) => (
@@ -184,6 +229,7 @@ export const tasksColumns: ColumnDef<Task>[] = [
       const status = row.original.status
       const mode = row.original.mode
       const elapsedTime = row.original.elapsedTime ?? 0
+      const isRunningTriaging = status === 'running' && mode === 'Triaging'
       
       let timeRemaining = Math.max(0, totalTime - elapsedTime)
       if (progress >= 100) {
@@ -197,16 +243,20 @@ export const tasksColumns: ColumnDef<Task>[] = [
         'bg-primary'
       
       return (
-        <div className='flex flex-col items-center gap-2 w-full min-w-[250px]'>
+        <div className='flex flex-col items-center gap-2 w-full min-w-[250px] pl-3'>
           <div className='w-full h-2 bg-muted rounded-full overflow-hidden'>
-            <div
-              className={`h-full transition-all duration-300 ${barColorClass}`}
-              style={{ width: `${progress}%` }}
-            />
+            {isRunningTriaging ? (
+              <div className='h-full w-1/3 bg-primary/80 animate-pulse' />
+            ) : (
+              <div
+                className={`h-full transition-all duration-300 ${barColorClass}`}
+                style={{ width: `${progress}%` }}
+              />
+            )}
           </div>
           {status === 'running' && mode === 'Triaging' && (
             <span className='text-xs text-muted-foreground font-mono whitespace-nowrap'>
-              {progress.toFixed(1)}% complete
+              in progress
             </span>
           )}
           {status === 'running' && mode !== 'Triaging' && (
@@ -243,13 +293,20 @@ export const tasksColumns: ColumnDef<Task>[] = [
     header: () => <div className='w-[60px]'></div>,
     cell: ({ row }) => {
       const status = row.original.status
-      const isQueued = status === 'queued'
       const isActive = status === 'running' || status === 'queued'
-      const isFinished = status === 'completed' || status === 'stopped'
+      const isFinished = status === 'completed' || status === 'stopped' || status === 'errored'
       const mode = row.original.mode
       const isTriagingMode = mode === 'Triaging'
       const autoQueueTriaging = isTriagingMode ? false : (row.original.autoQueueTriaging ?? true)
       const triaged = row.original.triaged ?? false
+      const relatedTriagingJobs = allTasks.filter(task =>
+        task.mode === 'Triaging' &&
+        task.binary === row.original.binary &&
+        task.fuzzer === row.original.fuzzer &&
+        task.output_dir === row.original.output_dir
+      )
+      const hasTriagingError = relatedTriagingJobs.some(task => task.status === 'errored')
+      const hasActiveTriaging = relatedTriagingJobs.some(task => task.status === 'running' || task.status === 'queued')
       
       return (
         <div className='flex items-center justify-center gap-2' onClick={(e) => e.stopPropagation()}>
@@ -277,6 +334,30 @@ export const tasksColumns: ColumnDef<Task>[] = [
               </Tooltip>
             </TooltipProvider>
           )}
+          {isFinished && !triaged && hasTriagingError && !isTriagingMode && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <CircleAlert className='h-4 w-4 text-red-500' />
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Triaging failed</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+          {isFinished && !triaged && !hasTriagingError && hasActiveTriaging && !isTriagingMode && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <LoaderCircle className='h-4 w-4 text-amber-500 animate-spin' />
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Triaging in progress</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
           <DropdownMenu modal={false}>
             <DropdownMenuTrigger asChild>
               <Button
@@ -295,17 +376,6 @@ export const tasksColumns: ColumnDef<Task>[] = [
               {isActive && (
                 <>
                   <DropdownMenuLabel>Actions</DropdownMenuLabel>
-                  {isQueued && (
-                    <DropdownMenuItem
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        moveUpCallback?.(row.original.id)
-                      }}
-                    >
-                      <ArrowUp className='mr-2 h-4 w-4' />
-                      Move Up
-                    </DropdownMenuItem>
-                  )}
                   <DropdownMenuItem
                     onClick={(e) => {
                       e.stopPropagation()
@@ -421,6 +491,7 @@ function getColumnTitle(accessorKey: string): string {
     fuzzer: 'Fuzzer',
     binary: 'Binary',
     runs: 'Runs',
+    startTime: 'Started',
     completedAt: 'Time',
   }
   return titles[accessorKey] || accessorKey.charAt(0).toUpperCase() + accessorKey.slice(1)

@@ -25,6 +25,12 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 type TableMutateDrawerProps = {
   open: boolean;
@@ -57,6 +63,9 @@ export function TableMutateDrawer({
   const [loadingFuzzers, setLoadingFuzzers] = useState(false);
   const [validFuzzers, setValidFuzzers] = useState<string[]>([]);
   const [reportPaths, setReportPaths] = useState<string[]>([]);
+  const [reportDurations, setReportDurations] = useState<Record<string, number | null>>({});
+  const [availableBinaries, setAvailableBinaries] = useState<string[]>([]);
+  const [unavailableReasons, setUnavailableReasons] = useState<Record<string, string>>({});
   const [loadingReports, setLoadingReports] = useState(false);
   const [binarySearch, setBinarySearch] = useState("");
   const [expandedBinaries, setExpandedBinaries] = useState<Set<string>>(
@@ -66,7 +75,7 @@ export function TableMutateDrawer({
 
   const reportsByBinaryAndFuzzer: Record<string, Record<string, string[]>> = {};
 
-  reportPaths.forEach((reportPath) => {
+  const extractBinaryAndFuzzer = (reportPath: string) => {
     const parts = reportPath.split("/");
     const benchmarkIndex = parts.indexOf(benchmark);
     const fuzzersIndex = parts.indexOf("fuzzers");
@@ -77,8 +86,18 @@ export function TableMutateDrawer({
       benchmarkIndex + 1 < parts.length &&
       fuzzersIndex + 1 < parts.length
     ) {
-      const binaryName = parts[benchmarkIndex + 1];
-      const fuzzerName = parts[fuzzersIndex + 1];
+      return {
+        binaryName: parts[benchmarkIndex + 1],
+        fuzzerName: parts[fuzzersIndex + 1],
+      };
+    }
+    return null;
+  };
+
+  reportPaths.forEach((reportPath) => {
+    const extracted = extractBinaryAndFuzzer(reportPath);
+    if (extracted) {
+      const { binaryName, fuzzerName } = extracted;
 
       if (!reportsByBinaryAndFuzzer[binaryName]) {
         reportsByBinaryAndFuzzer[binaryName] = {};
@@ -90,7 +109,7 @@ export function TableMutateDrawer({
     }
   });
 
-  const binaries = Object.keys(reportsByBinaryAndFuzzer);
+  const reportCompleteBinaries = Object.keys(reportsByBinaryAndFuzzer);
 
   useEffect(() => {
     const fetchFuzzers = async () => {
@@ -266,25 +285,108 @@ export function TableMutateDrawer({
   const fetchReportsFor = async (selectedFuzzers: string[]) => {
     if (!selectedFuzzers || selectedFuzzers.length === 0) {
       setReportPaths([]);
+      setReportDurations({});
+      setAvailableBinaries([]);
+      setUnavailableReasons({});
       return;
     }
 
     setLoadingReports(true);
     try {
-      const response = await fetch(`${API_URL}/api/get_reports`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          benchmark: benchmark,
-          fuzzers: selectedFuzzers,
+      const [reportsResponse, binariesResponse] = await Promise.all([
+        fetch(`${API_URL}/api/get_reports`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            benchmark: benchmark,
+            fuzzers: selectedFuzzers,
+          }),
         }),
-      });
-      const data = await response.json();
-      const validReports = data.valid_reports || [];
+        fetch(`${API_URL}/api/check_binaries`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            benchmark: benchmark,
+            fuzzers: selectedFuzzers,
+          }),
+        }),
+      ]);
+
+      const reportsData = await reportsResponse.json();
+      const binariesData = await binariesResponse.json();
+
+      const validReports = reportsData.valid_reports || [];
+      const durations = reportsData.report_durations || {};
+      const validBinaries = binariesData.valid_binaries || [];
+
       setReportPaths(validReports);
+      setReportDurations(durations);
+      setAvailableBinaries(validBinaries);
+
+      const binariesWithCompleteReports = new Set<string>();
+      validReports.forEach((reportPath: string) => {
+        const extracted = extractBinaryAndFuzzer(reportPath);
+        if (extracted) {
+          binariesWithCompleteReports.add(extracted.binaryName);
+        }
+      });
+
+      const unavailableBinaries = validBinaries.filter(
+        (binary: string) => !binariesWithCompleteReports.has(binary),
+      );
+
+      if (unavailableBinaries.length > 0) {
+        const perFuzzerReports = await Promise.all(
+          selectedFuzzers.map(async (fuzzer) => {
+            try {
+              const response = await fetch(`${API_URL}/api/get_reports`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  benchmark,
+                  fuzzers: [fuzzer],
+                }),
+              });
+              const data = await response.json();
+              return { fuzzer, reports: data.valid_reports || [] };
+            } catch {
+              return { fuzzer, reports: [] };
+            }
+          }),
+        );
+
+        const fuzzerBinarySets: Record<string, Set<string>> = {};
+        perFuzzerReports.forEach(({ fuzzer, reports }) => {
+          const binariesForFuzzer = new Set<string>();
+          reports.forEach((reportPath: string) => {
+            const extracted = extractBinaryAndFuzzer(reportPath);
+            if (extracted) {
+              binariesForFuzzer.add(extracted.binaryName);
+            }
+          });
+          fuzzerBinarySets[fuzzer] = binariesForFuzzer;
+        });
+
+        const reasons: Record<string, string> = {};
+        unavailableBinaries.forEach((binary: string) => {
+          const missingFuzzers = selectedFuzzers.filter(
+            (fuzzer) => !fuzzerBinarySets[fuzzer]?.has(binary),
+          );
+          reasons[binary] =
+            missingFuzzers.length > 0
+              ? `No result for ${binary} and ${missingFuzzers.join(", ")}`
+              : `No result for ${binary} and selected fuzzers`;
+        });
+        setUnavailableReasons(reasons);
+      } else {
+        setUnavailableReasons({});
+      }
     } catch (error) {
       console.error("Failed to fetch reports:", error);
       setReportPaths([]);
+      setReportDurations({});
+      setAvailableBinaries([]);
+      setUnavailableReasons({});
     } finally {
       setLoadingReports(false);
     }
@@ -345,11 +447,32 @@ export function TableMutateDrawer({
 
   const getReportLabel = (reportPath: string) => {
     const parts = reportPath.split("/");
+    let outputName = reportPath;
     const fuzzingOutIndex = parts.findIndex((p) => p === "fuzzing_out");
     if (fuzzingOutIndex !== -1 && fuzzingOutIndex + 1 < parts.length) {
-      return parts[fuzzingOutIndex + 1];
+      outputName = parts[fuzzingOutIndex + 1];
     }
-    return reportPath;
+
+    const durationSeconds = reportDurations[reportPath];
+    if (durationSeconds === null || durationSeconds === undefined || Number.isNaN(Number(durationSeconds))) {
+      return outputName;
+    }
+
+    const totalSeconds = Math.max(0, Number(durationSeconds));
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = Math.floor(totalSeconds % 60);
+
+    let durationLabel = '';
+    if (hours > 0) {
+      durationLabel = `${hours}h ${minutes}m`;
+    } else if (minutes > 0) {
+      durationLabel = `${minutes}m`;
+    } else {
+      durationLabel = `${seconds}s`;
+    }
+
+    return `${outputName} (${durationLabel})`;
   };
 
   const getReportTimestamp = (reportPath: string): number => {
@@ -498,9 +621,15 @@ export function TableMutateDrawer({
               control={form.control}
               name="selectedReports"
               render={({ field }) => {
-                const filteredBinaries = binaries.filter((binary) =>
+                const filteredBinaries = reportCompleteBinaries.filter((binary) =>
                   binary.toLowerCase().includes(binarySearch.toLowerCase()),
                 );
+                const unavailableBinaries = availableBinaries
+                  .filter((binary) => !reportCompleteBinaries.includes(binary))
+                  .filter((binary) =>
+                    binary.toLowerCase().includes(binarySearch.toLowerCase()),
+                  )
+                  .sort((a, b) => a.localeCompare(b));
 
                 return (
                   <FormItem>
@@ -526,7 +655,8 @@ export function TableMutateDrawer({
                       Click a binary to expand. Select one report per fuzzer for
                       each binary.
                     </FormDescription>
-                    {binaries.length > 0 && (
+                    {(reportCompleteBinaries.length > 0 ||
+                      availableBinaries.length > 0) && (
                       <Input
                         type="text"
                         placeholder="Search binaries..."
@@ -540,7 +670,8 @@ export function TableMutateDrawer({
                         <p className="text-sm text-muted-foreground">
                           Loading reports...
                         </p>
-                      ) : filteredBinaries.length > 0 ? (
+                      ) : filteredBinaries.length > 0 ||
+                        unavailableBinaries.length > 0 ? (
                         <div className="space-y-1">
                           {filteredBinaries.map((binary) => {
                             const isExpanded = expandedBinaries.has(binary);
@@ -714,8 +845,39 @@ export function TableMutateDrawer({
                               </div>
                             );
                           })}
+
+                          {unavailableBinaries.length > 0 && (
+                            <div className="pt-2 mt-2 border-t space-y-1">
+                              {unavailableBinaries.map((binary) => (
+                                <TooltipProvider key={binary}>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <div className="flex items-center space-x-2 p-2 rounded-md border border-dashed opacity-50 cursor-not-allowed">
+                                        <span className="flex-1 text-sm font-medium">
+                                          {binary}
+                                        </span>
+                                        <Badge
+                                          variant="outline"
+                                          className="text-xs"
+                                        >
+                                          Unavailable
+                                        </Badge>
+                                      </div>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      <p>
+                                        {unavailableReasons[binary] ||
+                                          `No result for ${binary} and selected fuzzers`}
+                                      </p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+                              ))}
+                            </div>
+                          )}
                         </div>
-                      ) : binaries.length > 0 &&
+                      ) : (reportCompleteBinaries.length > 0 ||
+                          availableBinaries.length > 0) &&
                         filteredBinaries.length === 0 ? (
                         <p className="text-sm text-muted-foreground">
                           No binaries match your search

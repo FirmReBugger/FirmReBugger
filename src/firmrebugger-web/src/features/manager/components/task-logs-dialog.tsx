@@ -16,6 +16,9 @@ interface TaskLogsDialogProps {
   onOpenChange: (open: boolean) => void
   taskId: string | null
   runNumber: number | null
+  title?: string | null
+  downloadFilename?: string | null
+  logUrl?: string | null
 }
 
 export function TaskLogsDialog({
@@ -23,6 +26,9 @@ export function TaskLogsDialog({
   onOpenChange,
   taskId,
   runNumber,
+  title,
+  downloadFilename,
+  logUrl,
 }: TaskLogsDialogProps) {
   const [logs, setLogs] = useState<string>('')
   const [loading, setLoading] = useState(false)
@@ -32,14 +38,14 @@ export function TaskLogsDialog({
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
 
   const fetchLogs = async () => {
-    if (!taskId) return
+    if (!taskId && !logUrl) return
 
     setLoading(true)
     setError(null)
 
     try {
       const response = await fetch(
-        `${API_URL}/api/tasks/logs?task_id=${taskId}`
+        logUrl || `${API_URL}/api/tasks/logs?task_id=${taskId}`
       )
       const data = await response.json()
 
@@ -59,10 +65,10 @@ export function TaskLogsDialog({
   }
 
   useEffect(() => {
-    if (open && taskId) {
+    if (open && (taskId || logUrl)) {
       fetchLogs()
     }
-  }, [open, taskId])
+  }, [open, taskId, logUrl])
 
   useEffect(() => {
     if (logs && scrollAreaRef.current) {
@@ -83,7 +89,7 @@ export function TaskLogsDialog({
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `log-${runNumber}.log`
+    a.download = downloadFilename || (runNumber !== null ? `log-${runNumber}.log` : 'log.txt')
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -96,7 +102,7 @@ export function TaskLogsDialog({
       <DialogContent className='!w-[95vw] !max-w-[1400px] h-[85vh] flex flex-col'>
         <DialogHeader>
           <DialogTitle className='flex items-center gap-2'>
-            Task Logs - Run #{runNumber}
+            {title || (runNumber !== null ? `Task Logs - Run #${runNumber}` : 'Task Logs')}
           </DialogTitle>
           <DialogDescription className='font-mono text-xs'>
             {logPath}

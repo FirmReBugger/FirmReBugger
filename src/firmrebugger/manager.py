@@ -16,9 +16,9 @@ class Job:
     def __init__(self, job_id, fuzzer, duration, binary, runs, mode, benchmark, progress, output_dir):
         self.job_id = job_id
         self.fuzzer = fuzzer
-        self.duration = duration
+        self.duration = int(duration)
         self.binary = binary
-        self.runs = runs
+        self.runs = int(runs)
         self.mode = mode
         self.benchmark = benchmark
         self.tasks = [] 
@@ -73,13 +73,21 @@ class Job:
         """Derive job status from tasks."""
         if not self.tasks:
             return "queued"
+
+        has_running = any(t.status == "running" for t in self.tasks)
+        has_queued = any(t.status == "queued" for t in self.tasks)
+        has_error = any(t.status == "error" for t in self.tasks)
+        has_stopped = any(t.status == "stopped" for t in self.tasks)
+
         if all(t.status == "completed" for t in self.tasks):
             return "completed"
-        elif any(t.status == "running" for t in self.tasks):
+        elif has_running:
             return "running"
         elif all(t.status == "queued" for t in self.tasks):
             return "queued"
-        elif any(t.status == "stopped" for t in self.tasks):
+        elif has_error and not has_running and not has_queued:
+            return "error"
+        elif has_stopped and not has_running and not has_queued:
             return "stopped"
         else:
             return "partial"
@@ -177,6 +185,31 @@ class JobScheduler:
             self.job_queue.put(task)
         
         print(f"[Scheduler] Moved Job {job_id} up one position in the queue.")
+
+    def reorder_job_to_top(self, job_id):
+        """Move a job's queued tasks to the top of the queue."""
+        if job_id not in self.jobs:
+            print(f"[Scheduler] Job {job_id} not found.")
+            return
+
+        tasks_list = []
+        while not self.job_queue.empty():
+            tasks_list.append(self.job_queue.get())
+
+        job_tasks = [t for t in tasks_list if t.job_id == job_id and t.status == "queued"]
+
+        if not job_tasks:
+            for task in tasks_list:
+                self.job_queue.put(task)
+            print(f"[Scheduler] Job {job_id} has no queued tasks.")
+            return
+
+        other_tasks = [t for t in tasks_list if t.job_id != job_id or t.status != "queued"]
+
+        for task in job_tasks + other_tasks:
+            self.job_queue.put(task)
+
+        print(f"[Scheduler] Moved Job {job_id} to the top of the queue.")
     
     def delete_job(self, job_id):
         """Delete a job and its tasks from the scheduler."""
@@ -295,36 +328,71 @@ class JobScheduler:
                     tasks_list.append(self.job_queue.get())
                 
                 if tasks_list:
-                    first_job_id = tasks_list[0].job_id
-                    job_tasks = [t for t in tasks_list if t.job_id == first_job_id and t.status == "queued"]
-                    
-                    if first_job_id in self.jobs:
-                        job = self.jobs[first_job_id]
-                        if job.mode == "Triaging":
-                            cores_needed = job.runs
+                    queued_job_ids = []
+                    seen_job_ids = set()
+                    for task in tasks_list:
+                        if task.status == "queued" and task.job_id not in seen_job_ids:
+                            queued_job_ids.append(task.job_id)
+                            seen_job_ids.add(task.job_id)
+
+                    selected_job = None
+                    selected_job_tasks = []
+                    selected_cores_needed = 0
+
+                    fuzzing_job_ids = []
+                    triaging_job_ids = []
+                    for candidate_job_id in queued_job_ids:
+                        candidate_job = self.jobs.get(candidate_job_id)
+                        if candidate_job is not None and candidate_job.mode == "Triaging":
+                            triaging_job_ids.append(candidate_job_id)
                         else:
-                            cores_needed = len(job_tasks)
-                    else:
-                        cores_needed = len(job_tasks)
-                    
-                    if len(job_tasks) <= available_slots and cores_needed <= available_cores:
-                        job_to_start = first_job_id
-                        
-                        if first_job_id in self.jobs:
-                            job = self.jobs[first_job_id]
-                            if not hasattr(job, 'started_at') or job.started_at is None:
-                                job.started_at = time.time()
-                        
-                        if job.mode == "Fuzzing":
-                            prep_target_folder(job)
-                        
-                        for i, job_task in enumerate(job_tasks):
-                            combined_tasks = self.running_tasks + job_tasks[:i]
-                            
-                            if job.mode == "Triaging":
-                                num_cores_needed = job.runs
+                            fuzzing_job_ids.append(candidate_job_id)
+
+                    prioritized_job_ids = fuzzing_job_ids + triaging_job_ids
+
+                    for candidate_job_id in prioritized_job_ids:
+                        candidate_job_tasks = [
+                            t for t in tasks_list if t.job_id == candidate_job_id and t.status == "queued"
+                        ]
+
+                        if not candidate_job_tasks:
+                            continue
+
+                        if candidate_job_id in self.jobs:
+                            candidate_job = self.jobs[candidate_job_id]
+                            if candidate_job.mode == "Triaging":
+                                candidate_cores_needed = candidate_job.runs
+                            else:
+                                candidate_cores_needed = len(candidate_job_tasks)
+                        else:
+                            candidate_job = None
+                            candidate_cores_needed = len(candidate_job_tasks)
+
+                        if (
+                            len(candidate_job_tasks) <= available_slots
+                            and candidate_cores_needed <= available_cores
+                        ):
+                            selected_job = candidate_job
+                            selected_job_tasks = candidate_job_tasks
+                            selected_cores_needed = candidate_cores_needed
+                            break
+
+                    if selected_job is not None and selected_job_tasks:
+                        job_to_start = selected_job.job_id
+
+                        if not hasattr(selected_job, 'started_at') or selected_job.started_at is None:
+                            selected_job.started_at = time.time()
+
+                        if selected_job.mode == "Fuzzing":
+                            prep_target_folder(selected_job)
+
+                        for i, job_task in enumerate(selected_job_tasks):
+                            combined_tasks = self.running_tasks + selected_job_tasks[:i]
+
+                            if selected_job.mode == "Triaging":
+                                num_cores_needed = selected_job.runs
                                 core_indices = find_available_idx(
-                                    multiprocessing.cpu_count() - self.reserved_cores, 
+                                    multiprocessing.cpu_count() - self.reserved_cores,
                                     combined_tasks,
                                     num_cores=num_cores_needed
                                 )
@@ -336,14 +404,14 @@ class JobScheduler:
                                 print(f"[Scheduler] Assigned {num_cores_needed} cores {core_indices} to triaging task {job_task.task_id}")
                             else:
                                 core_idx = find_available_idx(
-                                    multiprocessing.cpu_count() - self.reserved_cores, 
+                                    multiprocessing.cpu_count() - self.reserved_cores,
                                     combined_tasks,
                                     num_cores=1
                                 )
                                 job_task.core_idx = core_idx
                                 job_task.container_name = f"{job_task.job_id}_run{job_task.run_number}_core{core_idx}"
                                 print(f"[Scheduler] Assigned core {core_idx} to task {job_task.task_id}")
-                            
+
                             print(f"[Scheduler] Starting Task {job_task.task_id}... ({current_running + 1}/{self.max_concurrent_tasks} slots used)")
 
                             job_task.start()
@@ -351,8 +419,11 @@ class JobScheduler:
                             current_running += 1
                             available_slots -= 1
                             tasks_list.remove(job_task)
-                        
-                        print(f"[Scheduler] Started all {len(job_tasks)} tasks for Job {job_to_start}")
+
+                        print(
+                            f"[Scheduler] Started all {len(selected_job_tasks)} tasks for Job {job_to_start} "
+                            f"(needed {selected_cores_needed} cores)"
+                        )
                 
                 for task in tasks_list:
                     self.job_queue.put(task)
@@ -417,8 +488,30 @@ class JobScheduler:
                     print(f"[Scheduler] Marking triaged job {job_id} for removal (stopped)")
             
             elif job.status == "stopped" and job.started_at is None:
-                jobs_to_remove.append(job_id)
-                print(f"[Scheduler] Marking triaged job {job_id} for removal (stopped)")
+                if job.mode == "Triaging":
+                    jobs_to_remove.append(job_id)
+                    print(f"[Scheduler] Marking triaged job {job_id} for removal (stopped)")
+
+            elif job.status == "error":
+                if prev_status != "error" and job.started_at is not None:
+                    finalize_job(job, stopped=True, force_status="error")
+
+                if job.started_at is not None:
+                    finished_times = [t.completed_at for t in job.tasks if t.completed_at is not None]
+                    if finished_times:
+                        elapsed_time = round(max(finished_times) - job.started_at, 0)
+                    else:
+                        elapsed_time = round(time.time() - job.started_at, 0)
+                else:
+                    elapsed_time = 0
+
+                if job.duration and job.duration > 0:
+                    job.progress = min(100, round((elapsed_time / job.duration) * 100, 2))
+                else:
+                    job.progress = 0
+
+                if job.mode == "Triaging":
+                    print(f"[Scheduler] Keeping triaging job {job_id} with error status for visibility")
 
             elif job.status == "running" and job.started_at is not None and job.mode == "Triaging":
                 elapsed_time = round(time.time() - job.started_at, 0)
@@ -465,7 +558,7 @@ def start_manager(scheduler):
     scheduler.run_scheduler()
 
 
-def finalize_job(job: Job, stopped=False):
+def finalize_job(job: Job, stopped=False, force_status=None):
     """Create/update the frb_info.json file with complete job and task information when job completes."""
     import json
     
@@ -504,7 +597,7 @@ def finalize_job(job: Job, stopped=False):
         }
 
         data["output_dir"] = job.output_dir
-        data["status"] = job.status
+        data["status"] = force_status if force_status is not None else job.status
         data["created_at"] = job.created_at
         data["started_at"] = job.started_at
         data["ended_at"] = end_time

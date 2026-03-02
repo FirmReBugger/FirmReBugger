@@ -7,6 +7,44 @@ import { TasksTable } from './components/tasks-table'
 import { CpuMonitor } from './components/cpu-monitor'
 import { type Task } from './data/schema'
 import { toast } from 'sonner'
+import { FileCheck, CircleAlert, LoaderCircle } from 'lucide-react'
+
+function toDateOrUndefined(value: unknown): Date | undefined {
+  if (value === undefined || value === null || value === '') {
+    return undefined
+  }
+
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? undefined : value
+  }
+
+  if (typeof value === 'number') {
+    const numericValue = Number.isFinite(value) ? value : NaN
+    if (Number.isNaN(numericValue)) return undefined
+    const milliseconds = Math.abs(numericValue) < 1e11 ? numericValue * 1000 : numericValue
+    const date = new Date(milliseconds)
+    return Number.isNaN(date.getTime()) ? undefined : date
+  }
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (!trimmed) return undefined
+
+    const asNumber = Number(trimmed)
+    if (!Number.isNaN(asNumber)) {
+      const milliseconds = Math.abs(asNumber) < 1e11 ? asNumber * 1000 : asNumber
+      const dateFromNumber = new Date(milliseconds)
+      if (!Number.isNaN(dateFromNumber.getTime())) {
+        return dateFromNumber
+      }
+    }
+
+    const dateFromString = new Date(trimmed)
+    return Number.isNaN(dateFromString.getTime()) ? undefined : dateFromString
+  }
+
+  return undefined
+}
 
 export function Manager() {
   const [tasks, setTasks] = useState<Task[]>([])
@@ -22,6 +60,7 @@ export function Manager() {
         setTasks(prevTasks => {
           const formattedTasks: Task[] = data.jobs.map((job: any, index: number) => {
             const existingTask = prevTasks.find(t => t.id === job.id)
+            const normalizedStatus = job.status === 'error' ? 'errored' : job.status
             
             return {
               id: job.id,
@@ -32,12 +71,12 @@ export function Manager() {
               runs: job.runs,
               time: job.time,
               output_dir: job.output_dir || '',
-              status: job.status || 'queued',
+              status: normalizedStatus || 'queued',
               progress: job.progress || 0,
               elapsedTime: job.elapsedTime || 0,
-              createdAt: job.createdAt ? new Date(job.createdAt) : new Date(),
-              startTime: job.startedAt ? new Date(job.startedAt) : undefined,
-              completedAt: job.completedAt ? new Date(job.completedAt) : undefined,
+              createdAt: toDateOrUndefined(job.createdAt) ?? new Date(),
+              startTime: toDateOrUndefined(job.startedAt),
+              completedAt: toDateOrUndefined(job.completedAt),
               queuePosition: index,
               autoQueueTriaging: existingTask?.autoQueueTriaging ?? job.autoQueueTriaging ?? true,
               triaged: job.triaged ?? false,
@@ -62,59 +101,77 @@ export function Manager() {
   }, [])
 
   useEffect(() => {
-    const autoQueueTriaging = async () => {
-      for (const task of tasks) {
-        const previousTask = previousTasksRef.current.find(t => t.id === task.id)
-        
-        const justCompleted = 
-          previousTask?.status === 'running' &&
-          task.status === 'completed'
-        
-        if (
-          justCompleted &&
-          task.mode === 'Fuzzing' &&
-          task.autoQueueTriaging === true
-        ) {
-          const hasTriagingJob = tasks.some(t => 
-            t.binary === task.binary &&
-            t.fuzzer === task.fuzzer &&
-            t.mode === 'Triaging' &&
-            (t.status === 'running' || t.status === 'queued')
-          )
+    const previousTasksSnapshot = previousTasksRef.current
+    const tasksToAutoQueue = tasks.filter((task) => {
+      const previousTask = previousTasksSnapshot.find((t) => t.id === task.id)
 
-          if (!hasTriagingJob) {
-            try {
-              const timestamp = Date.now()
-              const newJobId = `JOB-${timestamp}-AUTO-TRIAGE`
-              
-              const triagingJobData = {
-                job_id: newJobId,
-                fuzzer: task.fuzzer,
-                benchmark: task.benchmark,
-                duration: task.time,
-                binary: task.binary,
-                runs: task.runs,
-                mode: 'Triaging',
-                output_dir: task.output_dir,
-              }
-              
-              const response = await fetch(`${API_URL}/api/jobs/add`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                  jobs: [triagingJobData]
-                }),
-              })
-              
-              if (response.ok) {
-                toast.success(`Auto-queued triaging for ${task.binary}`)
-              }
-            } catch (error) {
-              console.error('Error auto-queueing triaging:', error)
-            }
+      const justCompleted =
+        !!previousTask &&
+        previousTask.status !== 'completed' &&
+        task.status === 'completed'
+
+      if (
+        !justCompleted ||
+        task.mode !== 'Fuzzing' ||
+        task.autoQueueTriaging !== true ||
+        task.triaged === true
+      ) {
+        return false
+      }
+
+      const hasTriagingJob = tasks.some((t) =>
+        t.benchmark === task.benchmark &&
+        t.binary === task.binary &&
+        t.fuzzer === task.fuzzer &&
+        t.output_dir === task.output_dir &&
+        t.mode === 'Triaging' &&
+        (t.status === 'running' || t.status === 'queued')
+      )
+
+      return !hasTriagingJob
+    })
+
+    const autoQueueTriaging = async () => {
+      for (const task of tasksToAutoQueue) {
+        try {
+          const timestamp = Date.now()
+          const newJobId = `JOB-${timestamp}-${task.id}-AUTO-TRIAGE`
+
+          const triagingJobData = {
+            job_id: newJobId,
+            fuzzer: task.fuzzer,
+            benchmark: task.benchmark,
+            duration: task.time,
+            binary: task.binary,
+            runs: task.runs,
+            mode: 'Triaging',
+            output_dir: task.output_dir,
           }
+
+          const response = await fetch(`${API_URL}/api/jobs/add`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              jobs: [triagingJobData]
+            }),
+          })
+
+          if (response.ok) {
+            toast.success(`Auto-queued triaging for ${task.binary}`)
+          } else {
+            const responseData = await response.json().catch(() => ({}))
+            console.error('Auto-queue triaging failed:', {
+              jobId: task.id,
+              binary: task.binary,
+              fuzzer: task.fuzzer,
+              outputDir: task.output_dir,
+              error: responseData?.error,
+            })
+          }
+        } catch (error) {
+          console.error('Error auto-queueing triaging:', error)
         }
       }
     }
@@ -128,7 +185,8 @@ export function Manager() {
     task.status === 'running' || task.status === 'queued'
   )
   const finishedTasks = tasks.filter(task => 
-    task.status === 'completed' || task.status === 'stopped'
+    task.mode !== 'Triaging' &&
+    (task.status === 'completed' || task.status === 'stopped' || task.status === 'errored')
   )
 
   return (
@@ -149,14 +207,30 @@ export function Manager() {
         
         <div className='flex flex-col gap-6'>
           <div>
-            <h3 className='text-xl font-semibold mb-3'>Active Jobs</h3>
+            <div className='mb-3 flex flex-wrap items-center justify-between gap-2'>
+              <h3 className='text-xl font-semibold'>Active Jobs</h3>
+              <div className='flex flex-wrap items-center gap-3 text-xs text-muted-foreground'>
+                <div className='flex items-center gap-1.5'>
+                  <FileCheck className='h-3.5 w-3.5 text-blue-500' />
+                  <span>Triaged</span>
+                </div>
+                <div className='flex items-center gap-1.5'>
+                  <CircleAlert className='h-3.5 w-3.5 text-red-500' />
+                  <span>Triaging failed</span>
+                </div>
+                <div className='flex items-center gap-1.5'>
+                  <LoaderCircle className='h-3.5 w-3.5 text-amber-500' />
+                  <span>Triaging in progress</span>
+                </div>
+              </div>
+            </div>
             <TasksTable data={activeTasks} allTasks={tasks} />
           </div>
           
           {finishedTasks.length > 0 && (
             <div>
               <h3 className='text-xl font-semibold mb-3'>Finished Jobs</h3>
-              <TasksTable data={finishedTasks} showCreateButton={false} enableColumnSorting={true} allTasks={tasks} />
+              <TasksTable data={finishedTasks} showCreateButton={false} enableColumnSorting={true} allTasks={tasks} isFinishedJobs={true} />
             </div>
           )}
         </div>

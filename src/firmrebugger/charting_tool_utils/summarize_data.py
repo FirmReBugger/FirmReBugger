@@ -25,7 +25,8 @@ def summarize_data(json_file):
     total_ungrouped_crashes = []
     MAX_TRIAL_TIME = json_data.get("Trial-Time")
 
-    trigger_count = {}
+    trigger_runs = {}
+    detected_runs = {}
 
     if "Campaign" not in json_data:
         raise KeyError("'Campaign' key not found in the JSON data.")
@@ -46,9 +47,9 @@ def summarize_data(json_file):
             if trial.get("triggered") is not None:
                 triggered_event_observed = 1
                 triggered_duration = trial["triggered"]
-                trigger_count[bug_id] = (
-                    trigger_count.get(bug_id, 0) + 1
-                )
+                if bug_id not in trigger_runs:
+                    trigger_runs[bug_id] = set()
+                trigger_runs[bug_id].add(run)
             else:
                 triggered_event_observed = 0 
                 triggered_duration = MAX_TRIAL_TIME 
@@ -56,6 +57,9 @@ def summarize_data(json_file):
             if trial.get("reached") is not None:
                 reached_duration = trial["reached"]
                 reached_event_observed = 1 
+                if bug_id not in detected_runs:
+                    detected_runs[bug_id] = set()
+                detected_runs[bug_id].add(run)
             else:
                 reached_duration = MAX_TRIAL_TIME
                 reached_event_observed = 0
@@ -73,6 +77,20 @@ def summarize_data(json_file):
             )
 
     df = pd.DataFrame(data)
+
+    if df.empty:
+        return pd.DataFrame(
+            columns=[
+                "Binary",
+                "Fuzzer",
+                "BugID",
+                "MedianDetectedTime",
+                "DetectedCount",
+                "MedianReachedTime",
+                "MedianTriggeredTime",
+                "TriggeredCount",
+            ]
+        )
 
     triggered_medians = df.groupby(["Binary", "Fuzzer", "BugID"]).apply(
         lambda x, **kwargs: compute_median_survival(
@@ -94,15 +112,21 @@ def summarize_data(json_file):
             "Fuzzer": triggered_medians.index.get_level_values("Fuzzer"),
             "BugID": triggered_medians.index.get_level_values("BugID"),
             "MedianReachedTime": reached_medians.values,
+            "MedianDetectedTime": reached_medians.values,
             "MedianTriggeredTime": triggered_medians.values,
             "TriggeredCount": [
-                trigger_count.get(bug_id, 0)
+                len(trigger_runs.get(bug_id, set()))
                 for bug_id in triggered_medians.index.get_level_values("BugID")
+            ],
+            "DetectedCount": [
+                len(detected_runs.get(bug_id, set()))
+                for bug_id in reached_medians.index.get_level_values("BugID")
             ],
         }
     )
 
     medians_df["MedianReachedTime"] = np.ceil(medians_df["MedianReachedTime"] / 60)
+    medians_df["MedianDetectedTime"] = np.ceil(medians_df["MedianDetectedTime"] / 60)
     medians_df["MedianTriggeredTime"] = np.ceil(medians_df["MedianTriggeredTime"] / 60)
 
     binary = medians_df["Binary"].unique()

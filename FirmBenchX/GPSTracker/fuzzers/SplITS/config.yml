@@ -29,7 +29,7 @@ memory_map:
     size: 0x100000
   text:
     base_addr: 0x80000
-    file: ../GPSTrackerX.bin
+    file: GPSTrackerX.bin
     ivt_offset: 0x0
     permissions: r-x
     size: 0x1bc88

@@ -1,5 +1,25 @@
 import { z } from 'zod'
 
+const dateLikeSchema = z.union([z.string(), z.date(), z.number()])
+
+const parseDateLike = (value: string | number | Date): Date => {
+  if (value instanceof Date) return value
+
+  if (typeof value === 'number') {
+    const milliseconds = Math.abs(value) < 1e11 ? value * 1000 : value
+    return new Date(milliseconds)
+  }
+
+  const trimmed = value.trim()
+  const asNumber = Number(trimmed)
+  if (!Number.isNaN(asNumber)) {
+    const milliseconds = Math.abs(asNumber) < 1e11 ? asNumber * 1000 : asNumber
+    return new Date(milliseconds)
+  }
+
+  return new Date(trimmed)
+}
+
 export const taskStatusSchema = z.enum(['queued', 'running', 'stopping', 'completed', 'stopped', 'errored'])
 export type TaskStatus = z.infer<typeof taskStatusSchema>
 
@@ -18,15 +38,9 @@ export const taskSchema = z.object({
   queuePosition: z.number().optional(),
   autoQueueTriaging: z.boolean().optional().default(true), 
   triaged: z.boolean().optional().default(false), 
-  createdAt: z.string().or(z.date()).transform((val) => 
-    typeof val === 'string' ? new Date(val) : val
-  ),
-  startTime: z.string().or(z.date()).transform((val) => 
-    typeof val === 'string' ? new Date(val) : val
-  ),
-  completedAt: z.string().or(z.date()).transform((val) => 
-    typeof val === 'string' ? new Date(val) : val
-  ).optional(),
+  createdAt: dateLikeSchema.transform((val) => parseDateLike(val)),
+  startTime: dateLikeSchema.transform((val) => parseDateLike(val)),
+  completedAt: dateLikeSchema.transform((val) => parseDateLike(val)).optional(),
 })
 
 export type Task = z.infer<typeof taskSchema>

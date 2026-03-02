@@ -145,11 +145,20 @@ def add_job():
             job_id = job_data['job_id']
             fuzzer = job_data['fuzzer']
             benchmark = job_data['benchmark']
-            duration = job_data['duration']
+            duration = int(job_data['duration'])
             binary = job_data['binary']
-            runs = job_data['runs']
+            runs = int(job_data['runs'])
             mode = job_data['mode']
             output_dir = job_data.get('output_dir', '')
+
+            if runs < 1:
+                return jsonify({
+                    'error': f'Invalid runs value for job {job_id}: must be >= 1'
+                }), 400
+            if duration < 0:
+                return jsonify({
+                    'error': f'Invalid duration value for job {job_id}: must be >= 0'
+                }), 400
 
             try:
                 job = Job(
@@ -227,7 +236,8 @@ def get_jobs():
                 'createdAt': job.created_at,
                 'startedAt': job.started_at,
                 'elapsedTime': job.elapsed_time,
-                'output_dir': full_output_dir,
+                'output_dir': job.output_dir,
+                'output_path': full_output_dir,
                 'triaged': has_been_triaged,
             }
             jobs_data.append(job_dict)
@@ -313,6 +323,43 @@ def reorder_jobs():
 
     except Exception as e:
         print(f"ERROR in reorder_jobs: {e}")
+        return jsonify({
+            'error': str(e),
+            'success': False
+        }), 500
+
+
+@app.route('/api/jobs/reorder-top', methods=['POST'])
+def reorder_jobs_to_top():
+    """Move a queued job to the top of the queue"""
+    try:
+        global job_scheduler
+
+        if not job_scheduler:
+            return jsonify({
+                'error': 'Job scheduler not initialized',
+                'success': False
+            }), 500
+
+        data = request.json
+        job_id = data.get('job_id', None)
+
+        if not job_id:
+            return jsonify({
+                'error': 'job_id is required',
+                'success': False
+            }), 400
+
+        job_scheduler.reorder_job_to_top(job_id)
+
+        return jsonify({
+            'success': True,
+            'message': f'Job {job_id} moved to top of queue',
+            'job_id': job_id
+        })
+
+    except Exception as e:
+        print(f"ERROR in reorder_jobs_to_top: {e}")
         return jsonify({
             'error': str(e),
             'success': False
@@ -439,6 +486,14 @@ def get_task_logs():
         else:
             log_filename = f"log-{task_found.run_number}.log"
 
+        normalized_output_dir = task_found.output_dir or ''
+        if os.path.isabs(normalized_output_dir):
+            marker = f"{os.sep}fuzzing_out{os.sep}"
+            if marker in normalized_output_dir:
+                normalized_output_dir = normalized_output_dir.split(marker, 1)[1].strip(os.sep)
+            else:
+                normalized_output_dir = os.path.basename(normalized_output_dir.rstrip(os.sep))
+
         log_path = os.path.join(
             FIRMREBUGGER_BASE_DIR,
             task_found.benchmark,
@@ -446,7 +501,7 @@ def get_task_logs():
             "fuzzers",
             task_found.fuzzer,
             "fuzzing_out",
-            task_found.output_dir,
+            normalized_output_dir,
             "fuzzing_logs",
             log_filename
         )
@@ -479,6 +534,69 @@ def get_task_logs():
 
     except Exception as e:
         print(f"ERROR in get_task_logs: {e}")
+        return jsonify({
+            'error': str(e),
+            'content': ''
+        }), 500
+
+
+@app.route('/api/jobs/triage-log', methods=['GET'])
+def get_triage_log_by_job():
+    """Get triage.log by job coordinates even if triaging task is no longer active."""
+    try:
+        benchmark = request.args.get('benchmark', None)
+        binary = request.args.get('binary', None)
+        fuzzer = request.args.get('fuzzer', None)
+        output_dir = request.args.get('output_dir', None)
+
+        if not benchmark or not binary or not fuzzer or not output_dir:
+            return jsonify({
+                'error': 'benchmark, binary, fuzzer, and output_dir are required',
+                'content': ''
+            }), 400
+
+        normalized_output_dir = output_dir
+        if os.path.isabs(normalized_output_dir):
+            marker = f"{os.sep}fuzzing_out{os.sep}"
+            if marker in normalized_output_dir:
+                normalized_output_dir = normalized_output_dir.split(marker, 1)[1].strip(os.sep)
+            else:
+                normalized_output_dir = os.path.basename(normalized_output_dir.rstrip(os.sep))
+
+        log_path = os.path.join(
+            FIRMREBUGGER_BASE_DIR,
+            benchmark,
+            binary,
+            'fuzzers',
+            fuzzer,
+            'fuzzing_out',
+            normalized_output_dir,
+            'fuzzing_logs',
+            'triage.log'
+        )
+
+        if not os.path.exists(log_path):
+            return jsonify({
+                'error': f'Triage log file not found: {log_path}',
+                'content': '',
+                'exists': False
+            }), 404
+
+        with open(log_path, 'r') as f:
+            log_content = f.read()
+
+        return jsonify({
+            'content': log_content,
+            'path': log_path,
+            'exists': True,
+            'benchmark': benchmark,
+            'binary': binary,
+            'fuzzer': fuzzer,
+            'output_dir': normalized_output_dir,
+        })
+
+    except Exception as e:
+        print(f"ERROR in get_triage_log_by_job: {e}")
         return jsonify({
             'error': str(e),
             'content': ''
@@ -536,9 +654,19 @@ def get_reports_endpoint():
         fuzzers = data.get('fuzzers', [])
 
         valid_reports = get_reports(benchmark, fuzzers)
+        report_durations = {}
+
+        for report_path in valid_reports:
+            try:
+                with open(report_path, 'r') as f:
+                    report_json = json.load(f)
+                report_durations[report_path] = report_json.get('Trial-Time', None)
+            except Exception:
+                report_durations[report_path] = None
 
         return jsonify({
             'valid_reports': valid_reports,
+            'report_durations': report_durations,
             'benchmark': benchmark,
             'fuzzers': fuzzers
         })

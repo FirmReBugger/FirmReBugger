@@ -57,14 +57,25 @@ type DataTableProps = {
   showCreateButton?: boolean
   enableColumnSorting?: boolean
   allTasks?: Task[]
+  isFinishedJobs?: boolean
+  toolbarExtras?: React.ReactNode
 }
 
-export function TasksTable({ data, showCreateButton = true, enableColumnSorting = false, allTasks }: DataTableProps) {
+export function TasksTable({
+  data,
+  showCreateButton = true,
+  enableColumnSorting = false,
+  allTasks,
+  isFinishedJobs = false,
+  toolbarExtras,
+}: DataTableProps) {
   // Local UI-only states
-  const [sorting, setSorting] = useState<SortingState>([
-    { id: 'status', desc: false }
-  ])
-  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({})
+  const [sorting, setSorting] = useState<SortingState>(
+    isFinishedJobs
+      ? [{ id: 'status', desc: false }, { id: 'time', desc: true }]
+      : [{ id: 'status', desc: false }]
+  )
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({ benchmark: false })
   const [expanded, setExpanded] = useState<ExpandedState>({})
   const [now, setNow] = useState(Date.now())
   const { setTasks, setOpen } = useTasks()
@@ -72,17 +83,61 @@ export function TasksTable({ data, showCreateButton = true, enableColumnSorting 
   const [logsDialogOpen, setLogsDialogOpen] = useState(false)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const [selectedRunNumber, setSelectedRunNumber] = useState<number | null>(null)
+  const [selectedLogTitle, setSelectedLogTitle] = useState<string | null>(null)
+  const [selectedDownloadFilename, setSelectedDownloadFilename] = useState<string | null>(null)
+  const [selectedLogUrl, setSelectedLogUrl] = useState<string | null>(null)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [jobToDelete, setJobToDelete] = useState<string | null>(null)
   const [triagingDialogOpen, setTriagingDialogOpen] = useState(false)
   const [jobToTriage, setJobToTriage] = useState<Task | null>(null)
+  const [loadingTriagingLogForJobId, setLoadingTriagingLogForJobId] = useState<string | null>(null)
+  const [draggedQueuedJobId, setDraggedQueuedJobId] = useState<string | null>(null)
+  const [queueDropTargetJobId, setQueueDropTargetJobId] = useState<string | null>(null)
   const [cpuCount, setCpuCount] = useState<number | ''>('')
   const [maxCores, setMaxCores] = useState<number>(32)
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
 
+  const handleShowTriagingLog = useCallback(async (job: Task) => {
+    setLoadingTriagingLogForJobId(job.id)
+
+    try {
+      const query = new URLSearchParams({
+        benchmark: job.benchmark,
+        binary: job.binary,
+        fuzzer: job.fuzzer,
+        output_dir: job.output_dir,
+      })
+
+      const logUrl = `${API_URL}/api/jobs/triage-log?${query.toString()}`
+      const response = await fetch(logUrl)
+      const responseData = await response.json()
+
+      if (!response.ok) {
+        toast.error(responseData.error || 'No triage log found for this job')
+        return
+      }
+
+      setSelectedTaskId(null)
+      setSelectedRunNumber(null)
+      setSelectedLogTitle('Triaging Log')
+      setSelectedDownloadFilename('triage.log')
+      setSelectedLogUrl(logUrl)
+      setLogsDialogOpen(true)
+    } catch (error) {
+      console.error('Error opening triaging log:', error)
+      toast.error('Failed to open triaging log')
+    } finally {
+      setLoadingTriagingLogForJobId(null)
+    }
+  }, [API_URL])
+
   useEffect(() => {
-    setSorting([{ id: 'status', desc: false }])
-  }, [data])
+    setSorting(
+      isFinishedJobs
+        ? [{ id: 'status', desc: false }, { id: 'time', desc: true }]
+        : [{ id: 'status', desc: false }]
+    )
+  }, [data, isFinishedJobs])
 
   useEffect(() => {
     const fetchCoreCount = async () => {
@@ -98,6 +153,31 @@ export function TasksTable({ data, showCreateButton = true, enableColumnSorting 
     }
     fetchCoreCount()
   }, [])
+
+  const moveJobToTop = useCallback(async (id: string, showToast = true) => {
+    try {
+      const response = await fetch(`${API_URL}/api/jobs/reorder-top`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ job_id: id }),
+      })
+
+      const responseData = await response.json()
+
+      if (response.ok) {
+        if (showToast) {
+          toast.success('Job moved to top of queue')
+        }
+      } else {
+        toast.error(responseData.error || 'Failed to reorder job')
+      }
+    } catch (error) {
+      console.error('Error moving job to top:', error)
+      toast.error('Failed to reorder job')
+    }
+  }, [API_URL])
 
   const confirmDelete = async () => {
     if (!jobToDelete) return
@@ -151,7 +231,7 @@ export function TasksTable({ data, showCreateButton = true, enableColumnSorting 
         benchmark: jobToTriage.benchmark,
         duration: jobToTriage.time,
         binary: jobToTriage.binary,
-        runs: cpuCount, 
+        runs: Number(cpuCount), 
         mode: 'Triaging',
         output_dir: jobToTriage.output_dir,
       }
@@ -212,29 +292,6 @@ export function TasksTable({ data, showCreateButton = true, enableColumnSorting 
       }
     }
 
-    const handleMoveUp = async (id: string) => {
-      try {
-        const response = await fetch(`${API_URL}/api/jobs/reorder`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ job_id: id }),
-        })
-        
-        const data = await response.json()
-        
-        if (response.ok) {
-          toast.success(`Job moved up one position`)
-        } else {
-          toast.error(data.error || 'Failed to move job')
-        }
-      } catch (error) {
-        console.error('Error moving job:', error)
-        toast.error('Failed to move job')
-      }
-    }
-
     const handleQueueTriaging = async (id: string) => {
       try {
         const job = data.find(task => task.id === id)
@@ -263,7 +320,7 @@ export function TasksTable({ data, showCreateButton = true, enableColumnSorting 
       }
     }
 
-    setTaskCallbacks(handleDelete, handleStop, handleMoveUp, handleQueueTriaging, handleToggleAutoTriaging, allTasks || data)
+    setTaskCallbacks(handleDelete, handleStop, handleQueueTriaging, handleToggleAutoTriaging, allTasks || data)
   }, [setTasks, data, allTasks])
 
   useEffect(() => {
@@ -339,6 +396,12 @@ export function TasksTable({ data, showCreateButton = true, enableColumnSorting 
   })
 
   const tableColumns = enableColumnSorting ? getSortableColumns() : columns
+  const benchmarkOptions = Array.from(new Set(data.map((task) => task.benchmark)))
+    .sort()
+    .map((benchmark) => ({
+      label: benchmark,
+      value: benchmark,
+    }))
 
   const table = useReactTable({
     data,
@@ -391,16 +454,32 @@ export function TasksTable({ data, showCreateButton = true, enableColumnSorting 
       <DataTableToolbar
         table={table}
         searchPlaceholder='Filter'
+        filters={
+          benchmarkOptions.length > 0
+            ? [
+                {
+                  columnId: 'benchmark',
+                  title: 'Benchmark',
+                  options: benchmarkOptions,
+                },
+              ]
+            : []
+        }
         createButton={
-          showCreateButton ? (
-            <Button
-              size='sm'
-              className='ms-auto hidden h-8 lg:flex'
-              onClick={() => setOpen('create')}
-            >
-              <Plus className='size-4' />
-              Add
-            </Button>
+          (showCreateButton || toolbarExtras) ? (
+            <div className='ms-auto hidden items-center gap-2 lg:flex'>
+              {toolbarExtras}
+              {showCreateButton ? (
+                <Button
+                  size='sm'
+                  className='h-8'
+                  onClick={() => setOpen('create')}
+                >
+                  <Plus className='size-4' />
+                  Add
+                </Button>
+              ) : null}
+            </div>
           ) : undefined
         }
       />
@@ -435,11 +514,51 @@ export function TasksTable({ data, showCreateButton = true, enableColumnSorting 
           <TableBody>
             {table.getRowModel().rows?.length ? (
               table.getRowModel().rows.map((row) => {
+                const isQueuedRow = row.original.status === 'queued'
+                const canDragQueued = !isFinishedJobs && isQueuedRow
+                const isQueueDropTarget = queueDropTargetJobId === row.original.id
                 return (
                   <Fragment key={row.id}>
                     <TableRow
                       data-state={row.getIsSelected() && 'selected'}
-                      className='cursor-pointer'
+                      className={cn(
+                        'cursor-pointer',
+                        canDragQueued && 'cursor-grab active:cursor-grabbing',
+                        isQueueDropTarget && 'ring-1 ring-primary/50 bg-primary/5'
+                      )}
+                      draggable={canDragQueued}
+                      onDragStart={(e) => {
+                        if (!canDragQueued) return
+                        setDraggedQueuedJobId(row.original.id)
+                        e.dataTransfer.effectAllowed = 'move'
+                        e.dataTransfer.setData('text/plain', row.original.id)
+                      }}
+                      onDragEnd={() => {
+                        setDraggedQueuedJobId(null)
+                        setQueueDropTargetJobId(null)
+                      }}
+                      onDragOver={(e) => {
+                        if (!canDragQueued || !draggedQueuedJobId) return
+                        e.preventDefault()
+                        e.dataTransfer.dropEffect = 'move'
+                        setQueueDropTargetJobId(row.original.id)
+                      }}
+                      onDragLeave={() => {
+                        if (queueDropTargetJobId === row.original.id) {
+                          setQueueDropTargetJobId(null)
+                        }
+                      }}
+                      onDrop={(e) => {
+                        if (!canDragQueued || !draggedQueuedJobId) return
+                        e.preventDefault()
+                        e.stopPropagation()
+                        const droppedJobId = e.dataTransfer.getData('text/plain') || draggedQueuedJobId
+                        if (droppedJobId && droppedJobId !== row.original.id) {
+                          moveJobToTop(droppedJobId)
+                        }
+                        setDraggedQueuedJobId(null)
+                        setQueueDropTargetJobId(null)
+                      }}
                     >
                       {row.getVisibleCells().map((cell) => (
                         <TableCell
@@ -615,6 +734,9 @@ export function TasksTable({ data, showCreateButton = true, enableColumnSorting 
                                                 e.stopPropagation()
                                                 setSelectedTaskId(task.task_id)
                                                 setSelectedRunNumber(task.run_number)
+                                                setSelectedLogTitle(null)
+                                                setSelectedDownloadFilename(null)
+                                                setSelectedLogUrl(null)
                                                 setLogsDialogOpen(true)
                                               }}
                                             >
@@ -641,6 +763,24 @@ export function TasksTable({ data, showCreateButton = true, enableColumnSorting 
                                   <Hash className='h-8 w-8 mx-auto opacity-50' />
                                   <p className='text-sm'>No tasks found for this job</p>
                                 </div>
+                              </div>
+                            )}
+
+                            {isFinishedJobs && row.original.mode !== 'Triaging' && (row.original.triaged ?? false) && (
+                              <div className='pt-1'>
+                                <Button
+                                  variant='outline'
+                                  size='sm'
+                                  className='h-8 text-xs'
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    handleShowTriagingLog(row.original)
+                                  }}
+                                  disabled={loadingTriagingLogForJobId === row.original.id}
+                                >
+                                  <FolderOutput className='h-3.5 w-3.5 mr-1.5' />
+                                  {loadingTriagingLogForJobId === row.original.id ? 'Loading triage log...' : 'Show traiage log'}
+                                </Button>
                               </div>
                             )}
                           </div>
@@ -671,6 +811,9 @@ export function TasksTable({ data, showCreateButton = true, enableColumnSorting 
         onOpenChange={setLogsDialogOpen}
         taskId={selectedTaskId}
         runNumber={selectedRunNumber}
+        title={selectedLogTitle}
+        downloadFilename={selectedDownloadFilename}
+        logUrl={selectedLogUrl}
       />
 
       {/* Delete Confirmation Dialog */}

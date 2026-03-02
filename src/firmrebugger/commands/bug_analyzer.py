@@ -36,45 +36,6 @@ fuzzer_function_mapping = {
 }
 
 
-def tar_folder(folder_paths):
-    print("Archiving folders to tar.gz files...")
-
-    def process_folder(path):
-        if not os.path.isdir(path):
-            print(f"Error: {path} is not a valid directory.")
-            return None
-
-        archive_name = path.rstrip(os.sep).split(os.sep)[-1] + ".tar.gz"
-        try:
-            with tarfile.open(archive_name, "w:gz") as tar:
-                tar.add(path, arcname=os.path.basename(path))
-            print(f"Archive {archive_name} created successfully. at {path}")
-            return path
-        except Exception as e:
-            print(f"Error while creating tar.gz archive for {path}: {e}")
-            return None
-
-    completed = []
-    try:
-        with ThreadPoolExecutor() as executor:
-            futures = {
-                executor.submit(process_folder, path): path for path in folder_paths
-            }
-            for future in as_completed(futures):
-                result = future.result()
-                if result:
-                    completed.append(result)
-    except KeyboardInterrupt:
-        print("Interrupted! Not deleting any folders.")
-        return
-
-    if len(completed) == len(folder_paths):
-        for path in completed:
-            shutil.rmtree(path)
-    else:
-        print("Not all folders were archived successfully.")
-
-
 def get_run_number(output):
     output = os.path.basename(output)
     match = re.search(r"output-(\d+)", output)
@@ -153,17 +114,9 @@ def generate_frb_report(fuzzing_results_dir, descriptor_path):
         json.dump(data, json_file, indent=4)
 
     print("Summary of the analysis:")
-    print(summarize_data(f"{fuzzing_results_dir}/frb_report.json"))
+    summary_df = summarize_data(f"{fuzzing_results_dir}/frb_report.json")
+    print(summary_df[["BugID", "MedianDetectedTime", "DetectedCount"]])
     print("\n")
-
-    if (
-        "Fuzzware-Icicle" in fuzzer
-        or "SplITS" in fuzzer
-        or "Fuzzware" in fuzzer
-        or "GDMA" in fuzzer
-        or "DICE" in fuzzer
-    ):
-        tar_folder(output_dirs)
 
 
 def run_bug_analyzer(fuzzing_results_dir, descriptor_path):

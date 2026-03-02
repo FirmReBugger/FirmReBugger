@@ -13,7 +13,7 @@ mapfile -t CONFIG_ARGS < "$config_file"
 timeout "$time_duration" "$EMBER_BASE_DIR/AFLplusplus/afl-fuzz" \
   -i ./seeds \
   -o "$trial_name" \
-  -t 150 \
+  -t 200 \
   -Q \
   "${CONFIG_ARGS[@]}"
 
