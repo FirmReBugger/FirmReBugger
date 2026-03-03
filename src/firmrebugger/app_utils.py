@@ -1,5 +1,4 @@
 import os
-import re
 import glob
 import psutil
 import json
@@ -8,6 +7,7 @@ from firmrebugger.common import get_frb_base_dir
 from lifelines.utils import restricted_mean_survival_time as rmst
 from lifelines import KaplanMeierFitter
 import numpy as np
+
 
 def convert_numpy_types(obj):
     if isinstance(obj, np.integer):
@@ -42,6 +42,7 @@ def check_fuzzers(benchmark):
 
     return valid_fuzzers
 
+
 def check_binaries(benchmark, fuzzers_selected):
     base_dir = get_frb_base_dir()
     benchmark_dir = os.path.join(base_dir, benchmark)
@@ -49,7 +50,6 @@ def check_binaries(benchmark, fuzzers_selected):
 
     fuzzer_dirs = glob.glob(f"{benchmark_dir}/*/fuzzers")
     print(f"Fuzzer directories found: {fuzzer_dirs}")
-
 
     for fuzzer_dir in fuzzer_dirs:
         binary_name = os.path.basename(os.path.dirname(fuzzer_dir))
@@ -67,6 +67,35 @@ def check_binaries(benchmark, fuzzers_selected):
     print(f"Valid binaries found: {valid_binaries}")
     return valid_binaries
 
+
+def check_binaries_with_support(benchmark, fuzzers_selected):
+    base_dir = get_frb_base_dir()
+    benchmark_dir = os.path.join(base_dir, benchmark)
+
+    fuzzer_dirs = glob.glob(f"{benchmark_dir}/*/fuzzers")
+    support_details = []
+
+    for fuzzer_dir in fuzzer_dirs:
+        binary_name = os.path.basename(os.path.dirname(fuzzer_dir))
+
+        missing_fuzzers = []
+        for selected_fuzzer in fuzzers_selected:
+            fuzzer_path = os.path.join(fuzzer_dir, selected_fuzzer)
+            if not (os.path.exists(fuzzer_path) and os.path.isdir(fuzzer_path)):
+                missing_fuzzers.append(selected_fuzzer)
+
+        support_details.append(
+            {
+                "binary": binary_name,
+                "is_supported": len(missing_fuzzers) == 0,
+                "missing_fuzzers": missing_fuzzers,
+            }
+        )
+
+    support_details.sort(key=lambda item: (not item["is_supported"], item["binary"]))
+    return support_details
+
+
 def get_reports(benchmark, fuzzers_selected):
     base_dir = get_frb_base_dir()
     benchmark_dir = os.path.join(base_dir, benchmark)
@@ -75,8 +104,6 @@ def get_reports(benchmark, fuzzers_selected):
     fuzzer_dirs = glob.glob(f"{benchmark_dir}/*/fuzzers")
 
     for fuzzer_dir in fuzzer_dirs:
-        binary_name = os.path.basename(os.path.dirname(fuzzer_dir))
-
         all_fuzzers_reports = []
         all_fuzzers_have_reports = True
 
@@ -98,11 +125,14 @@ def get_reports(benchmark, fuzzers_selected):
     print(f"Valid reports found: {valid_reports}")
     return valid_reports
 
+
 def check_output_name(benchmark, binary_name, fuzzers_selected, output_name):
     """Check if the output dir exists"""
     for fuzzer in fuzzers_selected:
         base_dir = get_frb_base_dir()
-        fuzzer_path = os.path.join(base_dir, benchmark, binary_name, "fuzzers", fuzzer, "fuzzing_out")
+        fuzzer_path = os.path.join(
+            base_dir, benchmark, binary_name, "fuzzers", fuzzer, "fuzzing_out"
+        )
         output_path = os.path.join(fuzzer_path, output_name)
         print("Checking path:", output_path)
         if os.path.exists(output_path) and os.path.isdir(output_path):
@@ -120,17 +150,22 @@ def cpu_usage(cpu_num):
                 if 0 <= num < len(cpu_percent):
                     total_usage += cpu_percent[num]
                 else:
-                    print(f"Invalid CPU number: {num}. Valid range: 0-{len(cpu_percent)-1}")
+                    print(
+                        f"Invalid CPU number: {num}. Valid range: 0-{len(cpu_percent) - 1}"
+                    )
             return round(total_usage, 2)
 
         if 0 <= cpu_num < len(cpu_percent):
             return round(cpu_percent[cpu_num], 2)
         else:
-            print(f"Invalid CPU number: {cpu_num}. Valid range: 0-{len(cpu_percent)-1}")
+            print(
+                f"Invalid CPU number: {cpu_num}. Valid range: 0-{len(cpu_percent) - 1}"
+            )
             return 0.0
     except Exception as e:
         print(f"Error getting CPU usage: {e}")
         return 0.0
+
 
 def all_cpu_usage():
     try:
@@ -140,11 +175,14 @@ def all_cpu_usage():
         print(f"Error getting CPU usage: {e}")
         return []
 
+
 def get_all_frb_reports(benchmark):
     """Get all FirmReBugger reports for a given benchmark."""
     base_dir = get_frb_base_dir()
     benchmark_dir = os.path.join(base_dir, benchmark)
-    report_files = glob.glob(f"{benchmark_dir}/*/fuzzers/*/fuzzing_out/*/frb_report.json")
+    report_files = glob.glob(
+        f"{benchmark_dir}/*/fuzzers/*/fuzzing_out/*/frb_report.json"
+    )
 
     valid_reports = []
     for report_file in report_files:
@@ -163,21 +201,23 @@ def prep_upset_data(frb_reports, bug_status):
             "Name": "label",
             "MeanSurvivalTime": "number",
             "MeanCount": "number",
-            "FP/TP": "category"
+            "FP/TP": "category",
         }
     }
 
     fuzzer_set = set()
-    aggregated_data = defaultdict(lambda: {
-        "bug_id": "",
-        "successful_events": [],
-        "event_observed": [],
-        "total_trials": 0,
-        "successful_runs": 0,
-        "bug_type": "",
-        "trial_time": 0,
-        "fuzzers": defaultdict(lambda: {"successful_runs": 0}),
-    })
+    aggregated_data = defaultdict(
+        lambda: {
+            "bug_id": "",
+            "successful_events": [],
+            "event_observed": [],
+            "total_trials": 0,
+            "successful_runs": 0,
+            "bug_type": "",
+            "trial_time": 0,
+            "fuzzers": defaultdict(lambda: {"successful_runs": 0}),
+        }
+    )
 
     for report_path in frb_reports:
         try:
@@ -200,22 +240,36 @@ def prep_upset_data(frb_reports, bug_status):
                     triggered = bug.get("triggered", None)
                     detected = bug.get("detected", None)
 
-                    status_value = {"reached": reached, "triggered": triggered, "detected": detected}[bug_status]
+                    status_value = {
+                        "reached": reached,
+                        "triggered": triggered,
+                        "detected": detected,
+                    }[bug_status]
 
                     success = status_value is not None
 
                     aggregated_data[bug_id]["bug_id"] = bug_id
                     aggregated_data[bug_id]["total_trials"] = num_trials
                     aggregated_data[bug_id]["trial_time"] = trial_time
-                    aggregated_data[bug_id]["bug_type"] = "False Positive" if bug_id.startswith("FP_") else "True Positive"
+                    aggregated_data[bug_id]["bug_type"] = (
+                        "False Positive"
+                        if bug_id.startswith("FP_")
+                        else "True Positive"
+                    )
 
-                    aggregated_data[bug_id]["successful_events"].append(status_value if success else trial_time)
-                    aggregated_data[bug_id]["event_observed"].append(1 if success else 0)
+                    aggregated_data[bug_id]["successful_events"].append(
+                        status_value if success else trial_time
+                    )
+                    aggregated_data[bug_id]["event_observed"].append(
+                        1 if success else 0
+                    )
 
                     if success:
                         aggregated_data[bug_id]["successful_runs"] += 1
 
-                    aggregated_data[bug_id]["fuzzers"][fuzzer_name]["successful_runs"] += 1 if success else 0
+                    aggregated_data[bug_id]["fuzzers"][fuzzer_name][
+                        "successful_runs"
+                    ] += 1 if success else 0
         except Exception as e:
             print(f"Error processing {report_path}: {e}")
             continue
@@ -231,7 +285,9 @@ def prep_upset_data(frb_reports, bug_status):
             survival_mean_time = rmst(kmf, t=data["trial_time"])
 
         total_trials = data["total_trials"]
-        avg_status_count = data["successful_runs"] / total_trials if total_trials > 0 else 0
+        avg_status_count = (
+            data["successful_runs"] / total_trials if total_trials > 0 else 0
+        )
 
         bug_entry = {
             "id": item_id,
@@ -242,7 +298,9 @@ def prep_upset_data(frb_reports, bug_status):
         }
 
         for fuzzer in fuzzer_set:
-            bug_entry[fuzzer] = aggregated_data[bug_id]["fuzzers"][fuzzer]["successful_runs"] > 0
+            bug_entry[fuzzer] = (
+                aggregated_data[bug_id]["fuzzers"][fuzzer]["successful_runs"] > 0
+            )
 
         raw_data.append(bug_entry)
         item_id += 1
@@ -306,7 +364,7 @@ class BugTableEntry:
         uncensored = [v for v in values if v is not None]
         censored_count = sum(1 for v in values if v is None)
 
-        adjusted_values = uncensored + [float('inf')] * censored_count
+        adjusted_values = uncensored + [float("inf")] * censored_count
 
         if len(adjusted_values) == 0:
             return None
@@ -327,9 +385,15 @@ class BugTableEntry:
             "bugs": {
                 bug_id: {
                     "runs": [detail.to_dict() for detail in details],
-                    "meanReached": self._compute_median_with_censoring([d.bug_reached for d in details]),
-                    "meanTriggered": self._compute_median_with_censoring([d.bug_triggered for d in details]),
-                    "meanDetected": self._compute_median_with_censoring([d.bug_detected for d in details]),
+                    "meanReached": self._compute_median_with_censoring(
+                        [d.bug_reached for d in details]
+                    ),
+                    "meanTriggered": self._compute_median_with_censoring(
+                        [d.bug_triggered for d in details]
+                    ),
+                    "meanDetected": self._compute_median_with_censoring(
+                        [d.bug_detected for d in details]
+                    ),
                 }
                 for bug_id, details in self.stats.items()
             },
@@ -345,15 +409,17 @@ class BugDetails:
         self.run = run
 
     def print(self):
-        print(f"Fuzzer: {self.fuzzer}, Run: {self.run}, Reached: {self.bug_reached}, Triggered: {self.bug_triggered}, Detected: {self.bug_detected}")
+        print(
+            f"Fuzzer: {self.fuzzer}, Run: {self.run}, Reached: {self.bug_reached}, Triggered: {self.bug_triggered}, Detected: {self.bug_detected}"
+        )
 
     def to_dict(self):
         return {
-            'fuzzer': self.fuzzer,
-            'run': self.run,
-            'reached': self.bug_reached,
-            'triggered': self.bug_triggered,
-            'detected': self.bug_detected
+            "fuzzer": self.fuzzer,
+            "run": self.run,
+            "reached": self.bug_reached,
+            "triggered": self.bug_triggered,
+            "detected": self.bug_detected,
         }
 
 
@@ -398,21 +464,15 @@ def get_table_json(frb_reports):
                 "meanReached": bug_stats["meanReached"],
                 "meanTriggered": bug_stats["meanTriggered"],
                 "meanDetected": bug_stats["meanDetected"],
-                "runs": bug_stats["runs"]
+                "runs": bug_stats["runs"],
             }
 
     result = []
     for binary, bugs_dict in binary_data.items():
         bugs_list = []
         for bug_id, fuzzer_stats in bugs_dict.items():
-            bugs_list.append({
-                "bugId": bug_id,
-                "fuzzerStats": fuzzer_stats
-            })
+            bugs_list.append({"bugId": bug_id, "fuzzerStats": fuzzer_stats})
 
-        result.append({
-            "binary": binary,
-            "bugs": bugs_list
-        })
+        result.append({"binary": binary, "bugs": bugs_list})
 
     return result

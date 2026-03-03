@@ -1,5 +1,4 @@
 import os
-import sys
 import zstandard
 import tarfile
 import yaml
@@ -17,7 +16,6 @@ import threading
 def get_hoedur_env():
     if "HOEDUR_BASE_DIR" not in os.environ:
         raise EnvironmentError("The environment variable 'HOEDUR_BASE_DIR' is not set.")
-        sys.exit(1)
 
     hoedur_env = os.environ["HOEDUR_BASE_DIR"]
     return hoedur_env
@@ -69,8 +67,7 @@ def get_seeds(zst_path):
             if not member.isfile():
                 continue
             if meta_time is None:
-                print("Meta timestamp not found in the tar file.")
-                sys.exit(1)
+                raise RuntimeError("Meta timestamp not found in the tar file.")
             if member.name.startswith("input/") or member.name.startswith("crash/"):
                 relative_time = member.mtime - meta_time
                 # Ensure the directories exist
@@ -90,15 +87,12 @@ def check_env_setup():
         raise EnvironmentError(
             "The environment variable 'FIRMREBUGGER_CONFIG' is not set."
         )
-        sys.exit(1)
 
     if "LD_LIBRARY_PATH" not in os.environ:
         raise EnvironmentError("The environment variable 'LD_LIBRARY_PATH' is not set.")
-        sys.exit(1)
 
     if "HOEDUR_BASE_DIR" not in os.environ:
         raise EnvironmentError("The environment variable 'HOEDUR_BASE_DIR' is not set.")
-        sys.exit(1)
 
 
 def hoedur_analyzer(
@@ -141,7 +135,7 @@ def hoedur_analyzer(
     # Begin bug analysis on seeds
     with ThreadPoolExecutor(max_workers=num_workers) as executor:
         futures = []
-        hoedur_base_dir = get_hoedur_env()
+        get_hoedur_env()
         for seed, time_val in sorted(working_folder):
             seed_path = os.path.abspath(seed)
             if "README" in seed_path:

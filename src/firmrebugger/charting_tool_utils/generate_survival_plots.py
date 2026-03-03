@@ -182,7 +182,9 @@ def plot_grid_survival(fuzzers_data, max_time, output_dir, binary):
         output_dir = "survival_plots"
     output_dir_binary = os.path.join(output_dir, binary)
     os.makedirs(output_dir_binary, exist_ok=True)
-    plt.savefig(f"{output_dir_binary}/survival_plots.pdf",backend='pgf', bbox_inches="tight")
+    plt.savefig(
+        f"{output_dir_binary}/survival_plots.pdf", backend="pgf", bbox_inches="tight"
+    )
     print(
         f"Survival plots generated successfully at {output_dir_binary}/survival_plots.pdf"
     )

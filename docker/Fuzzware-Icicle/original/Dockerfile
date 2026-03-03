@@ -56,7 +56,8 @@ WORKDIR $FUZZER/repo/emulator
 RUN make -C $FUZZER/repo/emulator/harness/fuzzware_harness/native clean all
 USER root
 RUN pip3 install -e $FUZZER/repo/emulator/harness && \
-    pip3 install -e $FUZZER/repo/pipeline
+    pip3 install -e $FUZZER/repo/pipeline && \
+    pip3 install watchdog
 
 RUN git clone https://github.com/icicle-emu/ghidra.git $FUZZER/ghidra
 # Finally copy the modeling venv

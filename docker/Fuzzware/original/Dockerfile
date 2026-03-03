@@ -37,6 +37,7 @@ RUN git submodule update --init --recursive
 USER root
 # Install requirements from the repo
 RUN pip3 install -r $FUZZER/repo/pipeline/requirements.txt -r $FUZZER/repo/emulator/requirements.txt
+RUN pip3 install watchdog
 
 # Build and install emulator dependencies: afl, unicorn
 USER user

@@ -25,9 +25,37 @@ export function CpuMonitor() {
 
     fetchCpuUsage()
 
-    const interval = setInterval(fetchCpuUsage, 2000)
+    let fallbackInterval: ReturnType<typeof setInterval> | null = null
+    const eventSource = new EventSource(`${API_URL}/api/system/cpu/stream`)
 
-    return () => clearInterval(interval)
+    const ensureFallbackPolling = () => {
+      if (fallbackInterval) return
+      fallbackInterval = setInterval(fetchCpuUsage, 5000)
+    }
+
+    eventSource.addEventListener('cpu', (event) => {
+      try {
+        const payload = JSON.parse((event as MessageEvent).data)
+        if (payload.cpu_usage) {
+          setCpuUsage(payload.cpu_usage)
+          setCoreCount(payload.core_count || payload.cpu_usage.length)
+        }
+      } catch (error) {
+        console.error('Failed to parse CPU stream payload:', error)
+      }
+    })
+
+    eventSource.onerror = (error) => {
+      console.error('CPU stream disconnected, enabling fallback polling:', error)
+      ensureFallbackPolling()
+    }
+
+    return () => {
+      eventSource.close()
+      if (fallbackInterval) {
+        clearInterval(fallbackInterval)
+      }
+    }
   }, [])
 
   const getUsageColor = (usage: number) => {

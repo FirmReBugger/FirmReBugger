@@ -2,12 +2,141 @@ import os
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
+import shutil
 from firmrebugger.bug_analyzer_utils.common import (
     update_bug_data,
     run_command,
     periodic_printer,
 )
 import re
+
+
+def _extract_elf_name_from_cmdline(output_path):
+    cmdline_path = os.path.join(output_path, "outputs", "cmdline")
+    if not os.path.isfile(cmdline_path):
+        return None
+
+    try:
+        with open(cmdline_path, "r") as file:
+            for line in file:
+                token = line.strip()
+                if token.endswith(".elf"):
+                    return os.path.basename(token)
+    except Exception:
+        return None
+
+    return None
+
+
+def _extract_elf_name_from_cfg(output_path):
+    cfg_path = os.path.join(output_path, "mi-f429.cfg")
+    if not os.path.isfile(cfg_path):
+        return None
+
+    try:
+        with open(cfg_path, "r") as file:
+            for line in file:
+                stripped = line.strip()
+                if stripped.startswith("img") and "=" in stripped:
+                    value = stripped.split("=", 1)[1].strip()
+                    if value.endswith(".elf"):
+                        return os.path.basename(value)
+    except Exception:
+        return None
+
+    return None
+
+
+def _extract_elf_name_from_run_script(output_path):
+    run_script = os.path.join(output_path, "run_fw.py")
+    if not os.path.isfile(run_script):
+        return None
+
+    try:
+        with open(run_script, "r") as file:
+            content = file.read()
+        match = re.search(r"/home/user/target/([^'\"\s]+\.elf)", content)
+        if match:
+            return os.path.basename(match.group(1))
+    except Exception:
+        return None
+
+    return None
+
+
+def _prepare_dice_compat_paths(output_path):
+    expected_root = "/home/user/target"
+    output_name = os.path.basename(output_path)
+    expected_output_path = os.path.join(expected_root, output_name)
+
+    try:
+        os.makedirs(expected_root, exist_ok=True)
+    except Exception as e:
+        print(f"Warning: Could not create {expected_root}: {e}")
+        return
+
+    try:
+        if os.path.lexists(expected_output_path):
+            if os.path.islink(expected_output_path):
+                current_target = os.readlink(expected_output_path)
+                if os.path.abspath(current_target) != os.path.abspath(output_path):
+                    os.remove(expected_output_path)
+                    os.symlink(output_path, expected_output_path)
+            elif os.path.abspath(expected_output_path) != os.path.abspath(output_path):
+                print(
+                    f"Warning: {expected_output_path} exists and is not a symlink; using existing path"
+                )
+        else:
+            os.symlink(output_path, expected_output_path)
+    except Exception as e:
+        print(f"Warning: Could not prepare output symlink {expected_output_path}: {e}")
+
+    elf_name = _extract_elf_name_from_cmdline(output_path)
+    if not elf_name:
+        elf_name = _extract_elf_name_from_cfg(output_path)
+    if not elf_name:
+        elf_name = _extract_elf_name_from_run_script(output_path)
+    if not elf_name:
+        parent_dir = os.path.dirname(output_path)
+        try:
+            elf_files = [f for f in os.listdir(parent_dir) if f.endswith(".elf")]
+            if len(elf_files) == 1:
+                elf_name = elf_files[0]
+        except Exception:
+            pass
+    if not elf_name:
+        print("Warning: Could not determine DICE ELF name; run_fw.py may fail")
+        return
+
+    expected_elf_path = os.path.join(expected_root, elf_name)
+    if os.path.exists(expected_elf_path):
+        return
+
+    elf_candidates = [
+        os.path.join(output_path, elf_name),
+        os.path.join(os.path.dirname(output_path), elf_name),
+        os.path.join(os.path.dirname(os.path.dirname(output_path)), elf_name),
+    ]
+
+    source_elf = None
+    for candidate in elf_candidates:
+        if os.path.isfile(candidate):
+            source_elf = candidate
+            break
+
+    if source_elf is None:
+        print(
+            f"Warning: Could not find ELF '{elf_name}' near output path; run_fw.py may fail"
+        )
+        return
+
+    try:
+        os.symlink(source_elf, expected_elf_path)
+    except Exception:
+        try:
+            shutil.copy2(source_elf, expected_elf_path)
+        except Exception as e:
+            print(f"Warning: Could not place ELF at {expected_elf_path}: {e}")
 
 
 def final_model(path="."):
@@ -113,6 +242,8 @@ def dice_analyzer(
     )
     printer_thread.start()
     original_dir = os.getcwd()
+
+    _prepare_dice_compat_paths(output_path)
 
     with ThreadPoolExecutor(max_workers=num_workers) as executor:
         futures = []

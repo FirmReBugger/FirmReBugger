@@ -8,6 +8,13 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 interface UpSetPlotProps {
   benchmark: string;
@@ -38,6 +45,11 @@ export function UpSetPlot({ benchmark, tableData }: UpSetPlotProps) {
     y: number;
   } | null>(null);
   const [dimensions, setDimensions] = useState({ width: 1200, height: 600 });
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [selectedIntersectionBugs, setSelectedIntersectionBugs] = useState<{
+    tp: string[];
+    fp: string[];
+  }>({ tp: [], fp: [] });
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   const UpSetComponent: any = UpSetJS;
@@ -89,6 +101,11 @@ export function UpSetPlot({ benchmark, tableData }: UpSetPlotProps) {
     tableData.forEach((binaryEntry: any) => {
       const binary = binaryEntry.binary;
       (binaryEntry.bugs || []).forEach((bug: any) => {
+        const bugId = String(bug?.bugId || "");
+        if (bugId.toUpperCase().startsWith("ERROR")) {
+          return;
+        }
+
         totalBugs++;
         const fuzzerStats = bug.fuzzerStats || {};
         const memberSets: string[] = [];
@@ -108,18 +125,19 @@ export function UpSetPlot({ benchmark, tableData }: UpSetPlotProps) {
           },
         );
 
-        const bugName = `${binary}:${bug.bugId}`;
-        const isFP = bug.bugId.startsWith("FP_");
+        const bugName = `${binary}:${bugId}`;
+        const isFP = bugId.startsWith("FP_");
+
+        if (memberSets.length === 0) {
+          missedBugs++;
+          return;
+        }
 
         items.push({
           name: bugName,
           sets: memberSets,
           isFP,
         });
-
-        if (memberSets.length === 0) {
-          missedBugs++;
-        }
 
         memberSets.forEach((fuzzer) => {
           setsMap.get(fuzzer)?.add(bugName);
@@ -177,6 +195,39 @@ export function UpSetPlot({ benchmark, tableData }: UpSetPlotProps) {
     }
   }, [tableData]);
 
+  const openSelectionDetails = () => {
+    if (!selection) return;
+    if (
+      selection?.type !== "intersection" &&
+      selection?.type !== "distinctIntersection"
+    ) {
+      return;
+    }
+
+    const elems = processedMap[currentMetric]?.elems || [];
+    const selectedElems: string[] = selection?.elems || [];
+
+    const tp: string[] = [];
+    const fp: string[] = [];
+
+    selectedElems.forEach((elemName) => {
+      const elem = elems.find((e: any) => e.name === elemName);
+      if (!elem) return;
+      const bugName = String(elem.name || "").split(":").slice(1).join(":") || String(elem.name || "");
+      if (elem.isFP) {
+        fp.push(bugName);
+      } else {
+        tp.push(bugName);
+      }
+    });
+
+    setSelectedIntersectionBugs({
+      tp: tp.sort((a, b) => a.localeCompare(b)),
+      fp: fp.sort((a, b) => a.localeCompare(b)),
+    });
+    setDetailsOpen(true);
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -185,22 +236,12 @@ export function UpSetPlot({ benchmark, tableData }: UpSetPlotProps) {
             <CardTitle>Bug UpSet Plot - {benchmark}</CardTitle>
             <CardDescription>
               Interactive UpSet plot for bugs (
-              {currentMetric} metric)
+              {currentMetric} metric). You can click on the plot to view details about the bugs in the selected intersection.
               {processedMap[currentMetric]?.stats && (
                 <span className="block mt-1">
                   {processedMap[currentMetric].stats.hitBugs} of{" "}
                   {processedMap[currentMetric].stats.totalBugs} bugs{" "}
                   {currentMetric}
-                  {processedMap[currentMetric].stats.missedBugs > 0 && (
-                    <span className="text-orange-600 dark:text-orange-400 font-medium">
-                      {" "}
-                      · {processedMap[currentMetric].stats.missedBugs} bug
-                      {processedMap[currentMetric].stats.missedBugs !== 1
-                        ? "s"
-                        : ""}{" "}
-                      not {currentMetric} by any fuzzer
-                    </span>
-                  )}
                 </span>
               )}
             </CardDescription>
@@ -245,6 +286,12 @@ export function UpSetPlot({ benchmark, tableData }: UpSetPlotProps) {
               style={{ height: `${dimensions.height}px` }}
             >
               <div
+                onClickCapture={(e) => {
+                  const target = e.target as HTMLElement;
+                  if (target.closest("rect")) {
+                    openSelectionDetails();
+                  }
+                }}
                 onMouseMove={(e) => {
                   const target = e.target as HTMLElement;
 
@@ -367,6 +414,55 @@ export function UpSetPlot({ benchmark, tableData }: UpSetPlotProps) {
           )}
         </div>
       </CardContent>
+
+      <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {currentMetric.charAt(0).toUpperCase() + currentMetric.slice(1)} bugs in selection
+            </DialogTitle>
+            <DialogDescription>
+              {selectedIntersectionBugs.tp.length + selectedIntersectionBugs.fp.length} total · {selectedIntersectionBugs.tp.length} true positive · {selectedIntersectionBugs.fp.length} false positive
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div>
+              <div className="text-sm font-semibold text-green-600 dark:text-green-400 mb-1">
+                True Positive Bugs
+              </div>
+              {selectedIntersectionBugs.tp.length > 0 ? (
+                <div className="text-sm space-y-1">
+                  {selectedIntersectionBugs.tp.map((bugId) => (
+                    <div key={`tp-${bugId}`} className="font-mono">
+                      {bugId}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-sm text-muted-foreground">None</div>
+              )}
+            </div>
+
+            <div>
+              <div className="text-sm font-semibold text-red-600 dark:text-red-400 mb-1">
+                False Positive Bugs
+              </div>
+              {selectedIntersectionBugs.fp.length > 0 ? (
+                <div className="text-sm space-y-1">
+                  {selectedIntersectionBugs.fp.map((bugId) => (
+                    <div key={`fp-${bugId}`} className="font-mono">
+                      {bugId}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-sm text-muted-foreground">None</div>
+              )}
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

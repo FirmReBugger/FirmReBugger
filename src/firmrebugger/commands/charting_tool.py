@@ -60,10 +60,10 @@ def init_working_dirs(benchmark):
                 if report_path is not None:
                     report_paths.append(report_path)
         if report_paths:
-            binary_collection[binary] = sorted(report_paths)   
+            binary_collection[binary] = sorted(report_paths)
     if binary_collection:
         frb_reports[benchmark] = binary_collection
-        return frb_reports 
+        return frb_reports
 
 
 def run_charting_tool():
@@ -88,4 +88,4 @@ def run_charting_tool():
 
 
 if __name__ == "__main__":
-    main()
+    run_charting_tool()

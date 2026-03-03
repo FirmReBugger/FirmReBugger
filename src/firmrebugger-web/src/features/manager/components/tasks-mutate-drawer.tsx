@@ -19,6 +19,12 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip'
+import {
   Sheet,
   SheetClose,
   SheetContent,
@@ -87,6 +93,12 @@ const formSchema = z.object({
 })
 type TaskForm = z.infer<typeof formSchema>
 
+type BinarySupport = {
+  binary: string
+  is_supported: boolean
+  missing_fuzzers: string[]
+}
+
 export function TasksMutateDrawer({
   open,
   onOpenChange,
@@ -100,6 +112,7 @@ export function TasksMutateDrawer({
   const [selectedBenchmark, setSelectedBenchmark] = useState<string>('FirmBench')
   const [validFuzzers, setValidFuzzers] = useState<string[]>([])
   const [binaries, setBinaries] = useState<string[]>([])
+  const [binarySupport, setBinarySupport] = useState<BinarySupport[]>([])
   const [loadingBinaries, setLoadingBinaries] = useState(false)
   const [binarySearch, setBinarySearch] = useState('')
   const [maxCores, setMaxCores] = useState<number>(32)
@@ -336,6 +349,7 @@ export function TasksMutateDrawer({
           
           if (selectedFuzzers.length === 0) {
             setBinaries([])
+            setBinarySupport([])
             return
           }
 
@@ -352,12 +366,32 @@ export function TasksMutateDrawer({
             })
             const data = await response.json()
             console.log('Received binaries:', data)
-            if (data.valid_binaries) {
+            const supportData: BinarySupport[] = Array.isArray(data.binary_support)
+              ? data.binary_support
+              : []
+
+            if (supportData.length > 0) {
+              setBinarySupport(supportData)
+              setBinaries(supportData.filter((b) => b.is_supported).map((b) => b.binary))
+
+              const supportedSet = new Set(supportData.filter((b) => b.is_supported).map((b) => b.binary))
+              const currentlySelected = form.getValues('binary') || []
+              const stillValid = currentlySelected.filter((binary) => supportedSet.has(binary))
+              if (stillValid.length !== currentlySelected.length) {
+                form.setValue('binary', stillValid)
+              }
+            } else if (data.valid_binaries) {
               setBinaries(data.valid_binaries)
+              setBinarySupport((data.valid_binaries as string[]).map((binary) => ({
+                binary,
+                is_supported: true,
+                missing_fuzzers: [],
+              })))
             }
           } catch (error) {
             console.error('Failed to fetch binaries:', error)
             setBinaries([])
+            setBinarySupport([])
           } finally {
             setLoadingBinaries(false)
           }
@@ -403,6 +437,7 @@ export function TasksMutateDrawer({
               form.setValue('fuzzer', [])
               form.setValue('binary', [])
               setBinaries([])
+              setBinarySupport([])
             }} 
             className='w-full px-4'
           >
@@ -491,9 +526,17 @@ export function TasksMutateDrawer({
               control={form.control}
               name='binary'
               render={({ field }) => {
-                const filteredBinaries = binaries.filter(binary =>
-                  binary.toLowerCase().includes(binarySearch.toLowerCase())
+                const binaryOptions = binarySupport.length > 0
+                  ? binarySupport
+                  : binaries.map((binary) => ({ binary, is_supported: true, missing_fuzzers: [] as string[] }))
+
+                const filteredSupported = binaryOptions.filter((item) =>
+                  item.is_supported && item.binary.toLowerCase().includes(binarySearch.toLowerCase())
                 )
+                const filteredUnsupported = binaryOptions.filter((item) =>
+                  !item.is_supported && item.binary.toLowerCase().includes(binarySearch.toLowerCase())
+                )
+                const filteredBinaries = [...filteredSupported, ...filteredUnsupported]
                 
                 return (
                   <FormItem>
@@ -506,7 +549,7 @@ export function TasksMutateDrawer({
                     <FormDescription className='text-xs'>
                       Select one or more binaries (filtered by benchmark and fuzzers)
                     </FormDescription>
-                    {binaries.length > 0 && (
+                    {binaryOptions.length > 0 && (
                       <Input
                         type='text'
                         placeholder='Search binaries...'
@@ -520,14 +563,24 @@ export function TasksMutateDrawer({
                         <p className='text-sm text-muted-foreground'>Loading binaries...</p>
                       ) : filteredBinaries.length > 0 ? (
                         <div className='space-y-2'>
-                          {filteredBinaries.map((binary) => {
+                          {filteredBinaries.map((binaryItem) => {
+                            const binary = binaryItem.binary
                             const isSelected = field.value?.includes(binary)
+                            const isSupported = binaryItem.is_supported
+                            const tooltipText = binaryItem.missing_fuzzers.length > 0
+                              ? `Not supported by: ${binaryItem.missing_fuzzers.join(', ')}`
+                              : 'Not supported by selected fuzzers'
                             return (
-                              <div key={binary} className='flex items-center space-x-2'>
+                              <div
+                                key={binary}
+                                className={`flex items-center space-x-2 p-1.5 rounded ${isSupported ? '' : 'opacity-50'}`}
+                              >
                                 <Checkbox
                                   id={`binary-${binary}`}
                                   checked={isSelected}
+                                  disabled={!isSupported}
                                   onCheckedChange={(checked) => {
+                                    if (!isSupported) return
                                     const currentValue = field.value || []
                                     if (checked) {
                                       field.onChange([...currentValue, binary])
@@ -536,18 +589,36 @@ export function TasksMutateDrawer({
                                     }
                                   }}
                                 />
-                                <label
-                                  htmlFor={`binary-${binary}`}
-                                  className='text-sm font-normal leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1'
-                                >
-                                  {binary}
-                                </label>
+                                {isSupported ? (
+                                  <label
+                                    htmlFor={`binary-${binary}`}
+                                    className='text-sm font-normal leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer flex-1'
+                                  >
+                                    {binary}
+                                  </label>
+                                ) : (
+                                  <TooltipProvider>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <label
+                                          htmlFor={`binary-${binary}`}
+                                          className='text-sm font-normal leading-none cursor-not-allowed flex-1'
+                                        >
+                                          {binary}
+                                        </label>
+                                      </TooltipTrigger>
+                                      <TooltipContent>
+                                        <p>{tooltipText}</p>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TooltipProvider>
+                                )}
                                 {isSelected && <Check className='h-4 w-4 text-primary' />}
                               </div>
                             )
                           })}
                         </div>
-                      ) : binaries.length > 0 && filteredBinaries.length === 0 ? (
+                      ) : binaryOptions.length > 0 && filteredBinaries.length === 0 ? (
                         <p className='text-sm text-muted-foreground'>No binaries match your search</p>
                       ) : (
                         <p className='text-sm text-muted-foreground'>

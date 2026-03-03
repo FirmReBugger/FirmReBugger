@@ -1,5 +1,23 @@
 #!/bin/bash
 
+patch_dice_qemu_downloads() {
+  local qemu_root="$1"
+  local mirror_url="https://zlib.net/fossils/zlib-1.2.8.tar.gz"
+  local scripts=(
+    "$qemu_root/build_scripts/build-qemu.sh"
+    "$qemu_root/src/scripts/build-qemu.sh"
+  )
+
+  for script_path in "${scripts[@]}"; do
+    if [ -f "$script_path" ]; then
+      sed -i \
+        "s|^LIBZ_URL=.*$|LIBZ_URL=\"${mirror_url}\"|" \
+        "$script_path"
+      echo "[+] Patched LIBZ_URL in $script_path"
+    fi
+  done
+}
+
 # Function to check if a package is installed
 check_pkg_installed() {
   if dpkg -s "$1" >/dev/null 2>&1; then
@@ -69,9 +87,13 @@ else
     git clone https://github.com/xgandiaga/DRIVERS.git
     mv DRIVERS/* ./build_scripts/ && rm -rf DRIVERS
 
+    patch_dice_qemu_downloads "$(pwd)"
+
     WORK_FOLDER_PATH=`pwd`/src ./build_scripts/build-qemu.sh --deb64 --no-strip
 
 fi
+
+cd "$FIRMREBUGGER_BASE_DIR" || { echo "Failed to change directory to '$FIRMREBUGGER_BASE_DIR'"; exit 1; }
 
 docker buildx build --tag "$FUZZER_IMAGE" --load --build-arg USERID="$(id -u)" -f $FIRMREBUGGER_BASE_DIR/docker/DICE/original/Dockerfile . || { echo "Failed to build Docker image '$FUZZER_IMAGE'"; exit 1; }
 echo "[+] Docker image '$FUZZER_IMAGE' built successfully."

@@ -14,3 +14,6 @@ DICE-DMA-Emulation
 # Benchmark results
 **/fuzzing_out/*
 !**/fuzzing_out/.gitkeep
+
+# ghrc_push.sh
+ghrc_push.sh

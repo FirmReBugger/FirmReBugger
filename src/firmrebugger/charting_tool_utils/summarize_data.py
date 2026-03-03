@@ -51,18 +51,20 @@ def summarize_data(json_file):
                     trigger_runs[bug_id] = set()
                 trigger_runs[bug_id].add(run)
             else:
-                triggered_event_observed = 0 
-                triggered_duration = MAX_TRIAL_TIME 
+                triggered_event_observed = 0
+                triggered_duration = MAX_TRIAL_TIME
 
             if trial.get("reached") is not None:
                 reached_duration = trial["reached"]
-                reached_event_observed = 1 
-                if bug_id not in detected_runs:
-                    detected_runs[bug_id] = set()
-                detected_runs[bug_id].add(run)
+                reached_event_observed = 1
             else:
                 reached_duration = MAX_TRIAL_TIME
                 reached_event_observed = 0
+
+            if trial.get("detected") is not None:
+                if bug_id not in detected_runs:
+                    detected_runs[bug_id] = set()
+                detected_runs[bug_id].add(run)
 
             data.append(
                 {

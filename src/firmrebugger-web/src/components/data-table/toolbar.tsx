@@ -33,25 +33,42 @@ export function DataTableToolbar<TData>({
   return (
     <div className='flex items-center justify-between'>
       <div className='flex flex-1 flex-col-reverse items-start gap-y-2 sm:flex-row sm:items-center sm:space-x-2'>
-        {searchKey ? (
-          <Input
-            placeholder={searchPlaceholder}
-            value={
-              (table.getColumn(searchKey)?.getFilterValue() as string) ?? ''
-            }
-            onChange={(event) =>
-              table.getColumn(searchKey)?.setFilterValue(event.target.value)
-            }
-            className='h-8 w-[150px] lg:w-[250px]'
-          />
-        ) : (
-          <Input
-            placeholder={searchPlaceholder}
-            value={table.getState().globalFilter ?? ''}
-            onChange={(event) => table.setGlobalFilter(event.target.value)}
-            className='h-8 w-[150px] lg:w-[250px]'
-          />
-        )}
+        <div className='relative'>
+          {searchKey ? (
+            <Input
+              placeholder={searchPlaceholder}
+              value={
+                (table.getColumn(searchKey)?.getFilterValue() as string) ?? ''
+              }
+              onChange={(event) =>
+                table.getColumn(searchKey)?.setFilterValue(event.target.value)
+              }
+              className='h-8 w-[150px] pr-8 lg:w-[250px]'
+            />
+          ) : (
+            <Input
+              placeholder={searchPlaceholder}
+              value={table.getState().globalFilter ?? ''}
+              onChange={(event) => table.setGlobalFilter(event.target.value)}
+              className='h-8 w-[150px] pr-8 lg:w-[250px]'
+            />
+          )}
+          {isFiltered && (
+            <Button
+              type='button'
+              variant='ghost'
+              size='icon'
+              onClick={() => {
+                table.resetColumnFilters()
+                table.setGlobalFilter('')
+              }}
+              className='absolute right-1 top-1/2 h-6 w-6 -translate-y-1/2'
+            >
+              <Cross2Icon className='h-3.5 w-3.5' />
+              <span className='sr-only'>Reset filters</span>
+            </Button>
+          )}
+        </div>
         <div className='flex gap-x-2'>
           {filters.map((filter) => {
             const column = table.getColumn(filter.columnId)
@@ -66,19 +83,6 @@ export function DataTableToolbar<TData>({
             )
           })}
         </div>
-        {isFiltered && (
-          <Button
-            variant='ghost'
-            onClick={() => {
-              table.resetColumnFilters()
-              table.setGlobalFilter('')
-            }}
-            className='h-8 px-2 lg:px-3'
-          >
-            Reset
-            <Cross2Icon className='ms-2 h-4 w-4' />
-          </Button>
-        )}
       </div>
       {createButton}
     </div>

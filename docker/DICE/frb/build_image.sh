@@ -2,6 +2,24 @@
 
 set -euo pipefail
 
+patch_dice_qemu_downloads() {
+  local qemu_root="$1"
+  local mirror_url="https://zlib.net/fossils/zlib-1.2.8.tar.gz"
+  local scripts=(
+    "$qemu_root/build_scripts/build-qemu.sh"
+    "$qemu_root/src/scripts/build-qemu.sh"
+  )
+
+  for script_path in "${scripts[@]}"; do
+    if [ -f "$script_path" ]; then
+      sed -i \
+        "s|^LIBZ_URL=.*$|LIBZ_URL=\"${mirror_url}\"|" \
+        "$script_path"
+      echo "[+] Patched LIBZ_URL in $script_path"
+    fi
+  done
+}
+
 # Function to check if a package is installed
 check_pkg_installed() {
   if dpkg -s "$1" >/dev/null 2>&1; then
@@ -73,6 +91,9 @@ else
 
   #print current dir
   echo "Current directory: $(pwd)"
+
+  patch_dice_qemu_downloads "$(pwd)"
+
   # Build QEMU
   WORK_FOLDER_PATH="$(pwd)/src" ./build_scripts/build-qemu.sh --deb64 --no-strip
 

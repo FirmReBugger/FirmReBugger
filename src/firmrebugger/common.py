@@ -74,7 +74,7 @@ def menu(title, options):
                         )
                     else:
                         stdscr.addstr(idx + 3, 0, f"  {selected_marker} {option}")
-            except curses.error as e:
+            except curses.error:
                 height, width = stdscr.getmaxyx()
                 raise RuntimeError(
                     f"Terminal too small or rendering error. Need at least {required_height} rows and 80 columns (current: {height}x{width})"

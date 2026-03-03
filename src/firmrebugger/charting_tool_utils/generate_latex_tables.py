@@ -197,7 +197,7 @@ def reshape_and_convert_to_latex(
     latex_table += "\n & & " + sub_headers + r" \\ \hline"
 
     grouped_data = combined_df.groupby("Binary")
-    grouped_data_list = list(grouped_data) 
+    grouped_data_list = list(grouped_data)
 
     first_row = True
 
@@ -261,9 +261,7 @@ def reshape_and_convert_to_latex(
 
                 else:
                     reached_hm, triggered_hm = r"\missing", r"\missing"
-                    count = (
-                        r"\cellcolor[HTML]{F5F5F5}N/A"
-                    )
+                    count = r"\cellcolor[HTML]{F5F5F5}N/A"
 
                 row_data.extend([str(reached_hm), str(triggered_hm), str(count)])
 
@@ -326,13 +324,13 @@ def generate_table(frb_reports, output_report, max_rows_per_table=40):
         for binary, group in combined_df.groupby("Binary"):
             fuzzer_groups = group.groupby("Fuzzer")["MedianTriggeredTime"].apply(list)
             fuzzer_groups = fuzzer_groups[
-                fuzzer_groups.apply(lambda l: any(t < timeout for t in l))
+                fuzzer_groups.apply(lambda times: any(t < timeout for t in times))
             ]
             if len(fuzzer_groups) < 2:
                 continue
 
             medians = fuzzer_groups.apply(
-                lambda l: np.median([t for t in l if t < timeout])
+                lambda times: np.median([t for t in times if t < timeout])
             )
             winner = medians.idxmin()
             winner_times = np.array([t for t in fuzzer_groups[winner] if t < timeout])

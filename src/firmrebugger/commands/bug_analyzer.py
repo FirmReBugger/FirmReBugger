@@ -19,9 +19,6 @@ import os
 import sys
 import re
 import json
-import shutil
-import tarfile
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 fuzzer_function_mapping = {
     "Ember-IO-Fuzzing": ember_analyzer,
@@ -115,7 +112,8 @@ def generate_frb_report(fuzzing_results_dir, descriptor_path):
 
     print("Summary of the analysis:")
     summary_df = summarize_data(f"{fuzzing_results_dir}/frb_report.json")
-    print(summary_df[["BugID", "MedianDetectedTime", "DetectedCount"]])
+    summary_view = summary_df[["BugID", "MedianDetectedTime", "DetectedCount"]]
+    print(summary_view.to_string(index=False))
     print("\n")
 
 

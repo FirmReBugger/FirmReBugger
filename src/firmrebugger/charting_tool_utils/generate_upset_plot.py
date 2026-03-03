@@ -9,8 +9,8 @@ from upsetplot import UpSet
 
 
 def prep_data_for_upset_plot(all_bugs_triggered, bugs_triggered):
-    fuzzer_rename_map = {f: newf for f, newf in fuzzer_rename.items()}
-    fuzzer_list = list(fuzzer_rename.values())
+    fuzzer_rename_map = {fuzzer: fuzzer for fuzzer in bugs_triggered.keys()}
+    fuzzer_list = sorted(fuzzer_rename_map.values())
 
     bugs_triggered_new = {}
     for fuzzer, bug_list in bugs_triggered.items():

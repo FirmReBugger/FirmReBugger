@@ -42,6 +42,7 @@ RUN make -C $FUZZER/repo/emulator/harness/fuzzware_harness/native clean all
 USER root
 RUN pip3 install -e $FUZZER/repo/emulator/harness && \
     pip3 install -e $FUZZER/repo/pipeline
+RUN pip3 install watchdog
 
 # ---- Install FirmReBugger ----
 USER user

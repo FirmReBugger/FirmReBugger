@@ -493,7 +493,16 @@ export function TableMutateDrawer({
     return 0;
   };
 
-  const selectLatestReports = (binary: string) => {
+  const getOutputFolderName = (reportPath: string): string => {
+    const parts = reportPath.split("/");
+    const fuzzingOutIndex = parts.findIndex((p) => p === "fuzzing_out");
+    if (fuzzingOutIndex !== -1 && fuzzingOutIndex + 1 < parts.length) {
+      return parts[fuzzingOutIndex + 1];
+    }
+    return reportPath;
+  };
+
+  const selectMatchingFolderReports = (binary: string) => {
     const currentValue = form.getValues("selectedReports") || {};
     const newValue = { ...currentValue };
 
@@ -501,18 +510,60 @@ export function TableMutateDrawer({
       newValue[binary] = {};
     }
 
-    selectedFuzzers?.forEach((fuzzer) => {
+    const selectedFuzzerList = selectedFuzzers || [];
+    if (selectedFuzzerList.length === 0) {
+      return;
+    }
+
+    const outputNameSetsByFuzzer: Record<string, Set<string>> = {};
+    selectedFuzzerList.forEach((fuzzer) => {
+      const reportsForFuzzer = reportsByBinaryAndFuzzer[binary]?.[fuzzer] || [];
+      outputNameSetsByFuzzer[fuzzer] = new Set(
+        reportsForFuzzer.map((path) => getOutputFolderName(path)),
+      );
+    });
+
+    const [firstFuzzer, ...otherFuzzers] = selectedFuzzerList;
+    const firstSet = outputNameSetsByFuzzer[firstFuzzer] || new Set<string>();
+    const commonOutputNames = Array.from(firstSet).filter((outputName) =>
+      otherFuzzers.every((fuzzer) =>
+        outputNameSetsByFuzzer[fuzzer]?.has(outputName),
+      ),
+    );
+
+    if (commonOutputNames.length === 0) {
+      form.setError("selectedReports", {
+        type: "manual",
+        message: `No common output folder name found for ${binary} across selected fuzzers. Select reports manually in details.`,
+      });
+      return;
+    }
+
+    const chosenOutputName = commonOutputNames.reduce((latest, current) => {
+      const latestTime = getReportTimestamp(latest);
+      const currentTime = getReportTimestamp(current);
+      return currentTime > latestTime ? current : latest;
+    });
+
+    selectedFuzzerList.forEach((fuzzer) => {
       const reportsForFuzzer = reportsByBinaryAndFuzzer[binary]?.[fuzzer] || [];
       if (reportsForFuzzer.length > 0) {
-        const latestReport = reportsForFuzzer.reduce((latest, current) => {
-          const latestTime = getReportTimestamp(latest);
-          const currentTime = getReportTimestamp(current);
-          return currentTime > latestTime ? current : latest;
-        });
-        newValue[binary][fuzzer] = latestReport;
+        const matchingReports = reportsForFuzzer.filter(
+          (path) => getOutputFolderName(path) === chosenOutputName,
+        );
+
+        if (matchingReports.length > 0) {
+          const selectedReportPath = matchingReports.reduce((latest, current) => {
+            const latestTime = getReportTimestamp(latest);
+            const currentTime = getReportTimestamp(current);
+            return currentTime > latestTime ? current : latest;
+          });
+          newValue[binary][fuzzer] = selectedReportPath;
+        }
       }
     });
 
+    form.clearErrors("selectedReports");
     form.setValue("selectedReports", newValue);
   };
 
@@ -653,7 +704,8 @@ export function TableMutateDrawer({
                     </div>
                     <FormDescription className="text-xs">
                       Click a binary to expand. Select one report per fuzzer for
-                      each binary.
+                      each binary. Use "Match" to auto-pick the
+                      same output folder name across selected fuzzers.
                     </FormDescription>
                     {(reportCompleteBinaries.length > 0 ||
                       availableBinaries.length > 0) && (
@@ -694,7 +746,7 @@ export function TableMutateDrawer({
                                   }`}
                                 >
                                   <div
-                                    className="flex items-center space-x-2 flex-1 cursor-pointer"
+                                    className="flex items-center space-x-2 flex-1 min-w-0 cursor-pointer"
                                     onClick={() =>
                                       toggleBinaryExpansion(binary)
                                     }
@@ -707,29 +759,41 @@ export function TableMutateDrawer({
                                     <span className="flex-1 text-sm font-medium">
                                       {binary}
                                     </span>
+                                    <span className="text-xs text-muted-foreground shrink-0">
+                                      Details
+                                    </span>
                                     <Badge
                                       variant="outline"
-                                      className="text-xs"
+                                      className="text-xs shrink-0"
                                     >
                                       {selectedCount}/
                                       {selectedFuzzers?.length || 0}
                                     </Badge>
                                     {isComplete && (
-                                      <Check className="h-4 w-4 text-primary" />
+                                      <Check className="h-4 w-4 text-primary shrink-0" />
                                     )}
                                   </div>
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="ghost"
-                                    className="text-xs h-7 px-2"
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      selectLatestReports(binary);
-                                    }}
-                                  >
-                                    Select Latest
-                                  </Button>
+                                  <TooltipProvider>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="ghost"
+                                          className="text-xs h-7 px-2 shrink-0 whitespace-nowrap"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            selectMatchingFolderReports(binary);
+                                          }}
+                                        >
+                                          Match
+                                        </Button>
+                                      </TooltipTrigger>
+                                      <TooltipContent>
+                                        <p>Select Matching Output Directory</p>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TooltipProvider>
                                 </div>
 
                                 {isExpanded &&

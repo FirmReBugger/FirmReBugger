@@ -1,5 +1,6 @@
 # FirmReBugger
 A benchmark framework for monolithic firmware fuzzers.
+![alt text](front_page.png)
 
 ## Raven Creation
 
@@ -31,7 +32,6 @@ sudo apt-get install automake texinfo unzip
 sudo apt install gcc-arm-none-eabi
 sudo apt install texlive-latex-base
 sudo apt install texlive-xetex texlive-fonts-recommended texlive-latex-extra
-sudo apt install binutils-arm-none-eabi gcc-arm-none-eabi
 install npm (npm >= 22.0.0)
 ```
 
@@ -46,6 +46,25 @@ uv run frb build
 # If a fuzzer fails to build, retry building it individually.
 uv run frb build
 ```
+
+### Use prebuilt Docker images (recommended)
+
+If you're having trouble building the fuzzers locally or do not need to, you can pull our prebuilt images from GHCR:
+
+```bash
+uv run frb build --use-prebuilt
+```
+
+This pulls registry images and tags them locally as `frb:<fuzzer>` and `frb_original:<fuzzer>`, which are the names used by fuzzing/triage runtime.
+
+Runtime containers now default to your host user (`uid:gid`) to avoid permission issues when prebuilt images were created with a different UID.
+If needed, you can override this explicitly:
+
+```bash
+export FRB_DOCKER_USER="$(id -u):$(id -g)"
+```
+
+If the prebuilt images fail to run on your system, fall back to the non-prebuilt images with: `uv run frb build`
 
 ### Fuzzing
 
@@ -73,20 +92,26 @@ It is recommneded to run FirmReBugger through the webapp
 ```bash
 # If you want to rebuild the front end 
 cd src/firmrebugger-web
+npm install
 npm run build 
 
 # Otherwise just run the webapp
 uv run frb app --help
 uv run frb app -p <port>
+
+# Optional explicit runtime user override (if needed in shared environments)
+export FRB_DOCKER_USER="$(id -u):$(id -g)"
 ```
 
 - **Report** shows you a summary of your fuzzing campaigns with FirmReBugger.
 
 - **Job manager** lets you schedule jobs (Triaging or Fuzzing) all automatically.
 
+![alt text](job_scheduler.png)
+
 #### Recommended workflow:
 1. Go to the Job Manager tab to schedule fuzzing jobs.
-2. If auto triaging is enabled, after fuzzing completes FirmReBugger will automatically queue triaging jobs, otherwise you can queue it manually through the "Finished Jobs" section.
+2. If auto triaging is enabled, the backend scheduler automatically queues triaging jobs after fuzzing completes. Otherwise you can queue it manually through the "Finished Jobs" section.
 3. Switch to the Report tab to analyze and visualize outcomes.
 
 ### Workflow CLI

@@ -72,10 +72,10 @@ export function TasksTable({
   // Local UI-only states
   const [sorting, setSorting] = useState<SortingState>(
     isFinishedJobs
-      ? [{ id: 'status', desc: false }, { id: 'time', desc: true }]
+      ? [{ id: 'status', desc: false }, { id: 'startTime', desc: true }]
       : [{ id: 'status', desc: false }]
   )
-  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({ benchmark: false })
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({ benchmark: false, output_dir: false })
   const [expanded, setExpanded] = useState<ExpandedState>({})
   const [now, setNow] = useState(Date.now())
   const { setTasks, setOpen } = useTasks()
@@ -134,10 +134,10 @@ export function TasksTable({
   useEffect(() => {
     setSorting(
       isFinishedJobs
-        ? [{ id: 'status', desc: false }, { id: 'time', desc: true }]
+        ? [{ id: 'status', desc: false }, { id: 'startTime', desc: true }]
         : [{ id: 'status', desc: false }]
     )
-  }, [data, isFinishedJobs])
+  }, [isFinishedJobs])
 
   useEffect(() => {
     const fetchCoreCount = async () => {
@@ -308,8 +308,23 @@ export function TasksTable({
 
     const handleToggleAutoTriaging = async (id: string, value: boolean) => {
       try {
-        setTasks((prevTasks) => 
-          prevTasks.map(task => 
+        const response = await fetch(`${API_URL}/api/jobs/auto-triage`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ job_id: id, enabled: value }),
+        })
+
+        const data = await response.json()
+
+        if (!response.ok) {
+          toast.error(data.error || 'Failed to update auto-triaging setting')
+          return
+        }
+
+        setTasks((prevTasks) =>
+          prevTasks.map(task =>
             task.id === id ? { ...task, autoQueueTriaging: value } : task
           )
         )
@@ -402,6 +417,24 @@ export function TasksTable({
       label: benchmark,
       value: benchmark,
     }))
+  const fuzzerOptions = Array.from(new Set(data.map((task) => task.fuzzer)))
+    .sort()
+    .map((fuzzer) => ({
+      label: fuzzer,
+      value: fuzzer,
+    }))
+  const binaryOptions = Array.from(new Set(data.map((task) => task.binary)))
+    .sort()
+    .map((binary) => ({
+      label: binary,
+      value: binary,
+    }))
+  const outputDirOptions = Array.from(new Set(data.map((task) => task.output_dir).filter(Boolean)))
+    .sort()
+    .map((outputDir) => ({
+      label: outputDir,
+      value: outputDir,
+    }))
 
   const table = useReactTable({
     data,
@@ -455,15 +488,40 @@ export function TasksTable({
         table={table}
         searchPlaceholder='Filter'
         filters={
-          benchmarkOptions.length > 0
-            ? [
-                {
+          [
+            benchmarkOptions.length > 0
+              ? {
                   columnId: 'benchmark',
                   title: 'Benchmark',
                   options: benchmarkOptions,
-                },
-              ]
-            : []
+                }
+              : null,
+            fuzzerOptions.length > 0
+              ? {
+                  columnId: 'fuzzer',
+                  title: 'Fuzzer',
+                  options: fuzzerOptions,
+                }
+              : null,
+            binaryOptions.length > 0
+              ? {
+                  columnId: 'binary',
+                  title: 'Binary',
+                  options: binaryOptions,
+                }
+              : null,
+            outputDirOptions.length > 0
+              ? {
+                  columnId: 'output_dir',
+                  title: 'Output Dir',
+                  options: outputDirOptions,
+                }
+              : null,
+          ].filter(Boolean) as {
+            columnId: string
+            title: string
+            options: { label: string; value: string }[]
+          }[]
         }
         createButton={
           (showCreateButton || toolbarExtras) ? (
@@ -517,6 +575,13 @@ export function TasksTable({
                 const isQueuedRow = row.original.status === 'queued'
                 const canDragQueued = !isFinishedJobs && isQueuedRow
                 const isQueueDropTarget = queueDropTargetJobId === row.original.id
+                const relatedTriagingJobs = (allTasks || data).filter(task =>
+                  task.mode === 'Triaging' &&
+                  task.binary === row.original.binary &&
+                  task.fuzzer === row.original.fuzzer &&
+                  task.output_dir === row.original.output_dir
+                )
+                const hasTriagingError = relatedTriagingJobs.some(task => task.status === 'errored')
                 return (
                   <Fragment key={row.id}>
                     <TableRow
@@ -766,7 +831,7 @@ export function TasksTable({
                               </div>
                             )}
 
-                            {isFinishedJobs && row.original.mode !== 'Triaging' && (row.original.triaged ?? false) && (
+                            {isFinishedJobs && row.original.mode !== 'Triaging' && ((row.original.triaged ?? false) || hasTriagingError) && (
                               <div className='pt-1'>
                                 <Button
                                   variant='outline'
@@ -779,7 +844,7 @@ export function TasksTable({
                                   disabled={loadingTriagingLogForJobId === row.original.id}
                                 >
                                   <FolderOutput className='h-3.5 w-3.5 mr-1.5' />
-                                  {loadingTriagingLogForJobId === row.original.id ? 'Loading triage log...' : 'Show traiage log'}
+                                  {loadingTriagingLogForJobId === row.original.id ? 'Loading triage log...' : 'Show triage log'}
                                 </Button>
                               </div>
                             )}

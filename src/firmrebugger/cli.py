@@ -12,6 +12,7 @@ from firmrebugger.commands.fuzz import fuzz
 from firmrebugger.commands.web_app import run_app
 from firmrebugger.common import get_frb_base_dir, menu, parse_fuzzing_time
 
+
 def check_docker_nosudo():
     """Check if Docker can be run without sudo."""
     try:
@@ -27,7 +28,7 @@ def check_docker_nosudo():
         else:
             click.echo("[!] Docker cannot be run without sudo.", err=True)
             click.echo(
-                f"    To fix this, run: sudo usermod -aG docker $USER and restart your session.",
+                "    To fix this, run: sudo usermod -aG docker $USER and restart your session.",
                 err=True,
             )
             return False
@@ -120,7 +121,19 @@ def fuzz_cmd(time, num_trials, output_name):
 
 
 @main.command()
-def build():
+@click.option(
+    "--use-prebuilt",
+    is_flag=True,
+    default=False,
+    help="Pull prebuilt images from a registry instead of building locally.",
+)
+@click.option(
+    "--registry-prefix",
+    default="ghcr.io/firmrebugger",
+    show_default=True,
+    help="Registry prefix used with --use-prebuilt (expects /frb:<fuzzer> and /frb_original:<fuzzer>).",
+)
+def build(use_prebuilt, registry_prefix):
     """Build fuzzers with Docker."""
     if not check_docker_nosudo():
         sys.exit(1)
@@ -142,9 +155,12 @@ def build():
             user_id = 1000
 
     os.environ["USERID"] = str(user_id)
-    click.echo(f"[+] Building Docker images with USERID={user_id}")
+    if use_prebuilt:
+        click.echo(f"[+] Pulling prebuilt Docker images from {registry_prefix}")
+    else:
+        click.echo(f"[+] Building Docker images with USERID={user_id}")
 
-    build_fuzzers()
+    build_fuzzers(use_prebuilt=use_prebuilt, registry_prefix=registry_prefix)
 
 
 @main.command("bug-analyzer")
@@ -192,7 +208,7 @@ def app(port):
 
     env_vars["VITE_API_URL"] = f"http://localhost:{port}"
 
-    with open(env_path, 'w') as f:
+    with open(env_path, "w") as f:
         for key, value in env_vars.items():
             f.write(f"{key}={value}\n")
 

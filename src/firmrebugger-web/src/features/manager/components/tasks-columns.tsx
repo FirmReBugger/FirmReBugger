@@ -76,7 +76,12 @@ export const tasksColumns: ColumnDef<Task>[] = [
       if (orderA !== orderB) {
         return orderA - orderB
       }
-      
+
+      const activeStatuses = new Set(['running', 'queued', 'stopping'])
+      if (!activeStatuses.has(statusA) || !activeStatuses.has(statusB)) {
+        return 0
+      }
+
       const posA = rowA.original.queuePosition ?? 999999
       const posB = rowB.original.queuePosition ?? 999999
       return posA - posB
@@ -175,6 +180,20 @@ export const tasksColumns: ColumnDef<Task>[] = [
     },
   },
   {
+    accessorKey: 'output_dir',
+    header: () => <div className='pl-4'>Output Dir</div>,
+    enableSorting: false,
+    filterFn: (row, id, value) => {
+      if (!Array.isArray(value) || value.length === 0) return true
+      return value.includes(row.getValue(id))
+    },
+    cell: ({ row }) => (
+      <div className='w-[160px] pl-4 truncate' title={String(row.getValue('output_dir') || '')}>
+        {String(row.getValue('output_dir') || '-')}
+      </div>
+    ),
+  },
+  {
     accessorKey: 'runs',
     header: () => <div className='pl-4'>Runs</div>,
     enableSorting: false,
@@ -230,6 +249,7 @@ export const tasksColumns: ColumnDef<Task>[] = [
       const mode = row.original.mode
       const elapsedTime = row.original.elapsedTime ?? 0
       const isRunningTriaging = status === 'running' && mode === 'Triaging'
+      const isRunningFuzzing = status === 'running' && mode !== 'Triaging'
       
       let timeRemaining = Math.max(0, totalTime - elapsedTime)
       if (progress >= 100) {
@@ -238,6 +258,7 @@ export const tasksColumns: ColumnDef<Task>[] = [
       
       const barColorClass = 
         status === 'completed' ? 'bg-green-500' :
+        status === 'errored' ? 'bg-red-500' :
         status === 'stopped' ? 'bg-yellow-500' :
         status === 'stopping' ? 'bg-yellow-400' :
         'bg-primary'
@@ -245,14 +266,10 @@ export const tasksColumns: ColumnDef<Task>[] = [
       return (
         <div className='flex flex-col items-center gap-2 w-full min-w-[250px] pl-3'>
           <div className='w-full h-2 bg-muted rounded-full overflow-hidden'>
-            {isRunningTriaging ? (
-              <div className='h-full w-1/3 bg-primary/80 animate-pulse' />
-            ) : (
-              <div
-                className={`h-full transition-all duration-300 ${barColorClass}`}
-                style={{ width: `${progress}%` }}
-              />
-            )}
+            <div
+              className={`h-full transition-all duration-300 ${barColorClass} ${isRunningFuzzing || isRunningTriaging ? 'animate-pulse' : ''}`}
+              style={{ width: `${isRunningTriaging ? 100 : progress}%` }}
+            />
           </div>
           {status === 'running' && mode === 'Triaging' && (
             <span className='text-xs text-muted-foreground font-mono whitespace-nowrap'>
@@ -282,6 +299,11 @@ export const tasksColumns: ColumnDef<Task>[] = [
           {(status === 'completed' || status === 'stopped') && (
             <span className='text-xs text-muted-foreground font-mono whitespace-nowrap'>
               {formatTime(totalTime)} {status}
+            </span>
+          )}
+          {status === 'errored' && (
+            <span className='text-xs text-muted-foreground font-mono whitespace-nowrap'>
+              {formatTime(elapsedTime)} errored
             </span>
           )}
         </div>

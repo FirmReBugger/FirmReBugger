@@ -44,6 +44,17 @@ interface TooltipState {
   metric: string;
 }
 
+const isErrorBugId = (bugId: string | undefined | null) =>
+  typeof bugId === 'string' && bugId.toUpperCase().startsWith('ERROR');
+
+const filterErrorBugs = (tableData: BinaryGroup[]): BinaryGroup[] =>
+  tableData
+    .map((binaryGroup) => ({
+      ...binaryGroup,
+      bugs: (binaryGroup.bugs || []).filter((bug) => !isErrorBugId(bug?.bugId)),
+    }))
+    .filter((binaryGroup) => binaryGroup.bugs.length > 0);
+
 export function BugTable({ benchmark, openDrawer, onOpenChange, onDataUpdate }: BugTableProps) {
 
   const [expandedBinaries, setExpandedBinaries] = useState<Set<string>>(new Set());
@@ -85,15 +96,17 @@ export function BugTable({ benchmark, openDrawer, onOpenChange, onDataUpdate }: 
       setError(`Invalid data format: expected array, got ${typeof tableData}`);
       return;
     }
+
+    const filteredTableData = filterErrorBugs(tableData as BinaryGroup[]);
     
-    setData(tableData);
+    setData(filteredTableData);
     
     if (onDataUpdate) {
-      onDataUpdate(tableData);
+      onDataUpdate(filteredTableData);
     }
     
     const fuzzerSet = new Set<string>();
-    tableData.forEach((binaryGroup: BinaryGroup) => {
+    filteredTableData.forEach((binaryGroup: BinaryGroup) => {
       if (binaryGroup.bugs && Array.isArray(binaryGroup.bugs)) {
         binaryGroup.bugs.forEach((bug: BugRow) => {
           if (bug.fuzzerStats && typeof bug.fuzzerStats === 'object') {
@@ -283,7 +296,7 @@ export function BugTable({ benchmark, openDrawer, onOpenChange, onDataUpdate }: 
             <div>
               <CardTitle>Bug Table</CardTitle>
               <CardDescription>
-                Showing {totalBugs} unique bug{totalBugs !== 1 ? 's' : ''} across {data.length} binar{data.length !== 1 ? 'ies' : 'y'} and {fuzzers.length} fuzzer{fuzzers.length !== 1 ? 's' : ''} for {benchmark}. 
+                Showing {totalBugs} unique bug{totalBugs !== 1 ? 's' : ''} across {data.length} binar{data.length !== 1 ? 'ies' : 'y'} and {fuzzers.length} fuzzer{fuzzers.length !== 1 ? 's' : ''} for {benchmark}. You can click on a bug ID to see bug survival curves, or hover over the times to see details for each run. 
               </CardDescription>
             </div>
           </div>

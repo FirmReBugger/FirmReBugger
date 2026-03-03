@@ -11,6 +11,110 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Copy, Download, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 
+type AnsiState = {
+  bold: boolean
+  colorClass: string
+}
+
+type AnsiSegment = {
+  text: string
+  className: string
+}
+
+const DEFAULT_ANSI_STATE: AnsiState = {
+  bold: false,
+  colorClass: '',
+}
+
+const ANSI_COLOR_CLASS: Record<number, string> = {
+  30: 'text-zinc-800 dark:text-zinc-200',
+  31: 'text-red-500',
+  32: 'text-green-500',
+  33: 'text-yellow-500',
+  34: 'text-blue-500',
+  35: 'text-fuchsia-500',
+  36: 'text-cyan-500',
+  37: 'text-zinc-100',
+  90: 'text-zinc-500',
+  91: 'text-red-400',
+  92: 'text-green-400',
+  93: 'text-yellow-400',
+  94: 'text-blue-400',
+  95: 'text-fuchsia-400',
+  96: 'text-cyan-400',
+  97: 'text-zinc-50',
+}
+
+function buildAnsiClassName(state: AnsiState) {
+  return [state.bold ? 'font-semibold' : '', state.colorClass].filter(Boolean).join(' ')
+}
+
+function applyAnsiCodes(state: AnsiState, codes: number[]): AnsiState {
+  let nextState = { ...state }
+  const normalizedCodes = codes.length > 0 ? codes : [0]
+
+  for (const code of normalizedCodes) {
+    if (code === 0) {
+      nextState = { ...DEFAULT_ANSI_STATE }
+    } else if (code === 1) {
+      nextState.bold = true
+    } else if (code === 22) {
+      nextState.bold = false
+    } else if (code === 39) {
+      nextState.colorClass = ''
+    } else if (code in ANSI_COLOR_CLASS) {
+      nextState.colorClass = ANSI_COLOR_CLASS[code]
+    }
+  }
+
+  return nextState
+}
+
+function parseAnsiToSegments(input: string): AnsiSegment[] {
+  if (!input) return []
+
+  const tokenRegex = /(\x1b\[[0-9;]*m|\x1b\[[0-?]*[ -/]*[@-~])/g
+  const segments: AnsiSegment[] = []
+
+  let ansiState: AnsiState = { ...DEFAULT_ANSI_STATE }
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  const pushSegment = (text: string) => {
+    if (!text) return
+    const className = buildAnsiClassName(ansiState)
+    const prev = segments[segments.length - 1]
+    if (prev && prev.className === className) {
+      prev.text += text
+    } else {
+      segments.push({ text, className })
+    }
+  }
+
+  while ((match = tokenRegex.exec(input)) !== null) {
+    const token = match[0]
+    const tokenIndex = match.index
+
+    pushSegment(input.slice(lastIndex, tokenIndex))
+
+    if (token.endsWith('m')) {
+      const body = token.slice(2, -1)
+      const codes = body
+        .split(';')
+        .filter(Boolean)
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value))
+
+      ansiState = applyAnsiCodes(ansiState, codes)
+    }
+
+    lastIndex = tokenRegex.lastIndex
+  }
+
+  pushSegment(input.slice(lastIndex))
+  return segments
+}
+
 interface TaskLogsDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -36,6 +140,7 @@ export function TaskLogsDialog({
   const [logPath, setLogPath] = useState<string>('')
   const scrollAreaRef = useRef<HTMLDivElement>(null)
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+  const ansiSegments = parseAnsiToSegments(logs)
 
   const fetchLogs = async () => {
     if (!taskId && !logUrl) return
@@ -157,7 +262,11 @@ export function TaskLogsDialog({
           ) : logs ? (
             <ScrollArea ref={scrollAreaRef} className='h-full rounded-md border bg-muted/30'>
               <pre className='p-4 text-xs font-mono whitespace-pre-wrap break-words'>
-                {logs}
+                {ansiSegments.map((segment, index) => (
+                  <span key={index} className={segment.className || undefined}>
+                    {segment.text}
+                  </span>
+                ))}
               </pre>
             </ScrollArea>
           ) : (
