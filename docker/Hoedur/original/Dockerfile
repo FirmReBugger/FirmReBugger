@@ -1,4 +1,5 @@
 FROM frb_original:Fuzzware
+ENV PIP_NO_CACHE_DIR=1
 
 USER root
 RUN apt update -q

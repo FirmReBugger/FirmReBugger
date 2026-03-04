@@ -2,6 +2,7 @@ FROM frb_original:SplITS AS fuzzer-base
 
 ENV FUZZER=/home/user/splits
 ENV WORKON_HOME=/home/user/.virtualenvs
+ENV PIP_NO_CACHE_DIR=1
 
 # ---- Stage 1: Building TinyCC ----
 FROM fuzzer-base AS tcc-build
@@ -43,17 +44,13 @@ RUN pip3 install -e $FUZZER/repo/fuzzware/emulator/harness && \
 
 # Install FirmReBugger
 USER user
-RUN pip3 install --user uv
+RUN pip3 install --user uv && \
+    git clone --depth 1 https://github.com/FirmReBugger/FirmReBugger.git /home/user/firmrebugger
 ENV PATH=$PATH:/home/user/.local/bin
-COPY --chown=user ./src /firmrebugger/
-COPY --chown=user ./pyproject.toml /firmrebugger/
-COPY --chown=user ./uv.lock /firmrebugger/
-COPY --chown=user ./README.md /firmrebugger/
-COPY --chown=user ./.python-version /firmrebugger/
-WORKDIR /firmrebugger/target
+WORKDIR /home/user/firmrebugger/target
 RUN uv run frb -h
 
 # ---- Final Setup ----
 USER root
-ENV FIRMREBUGGER_BASE_DIR=/firmrebugger
+ENV FIRMREBUGGER_BASE_DIR=/home/user/firmrebugger
 ENTRYPOINT ["uv", "run", "frb", "bug-analyzer", "."]

@@ -62,9 +62,14 @@ def summarize_data(json_file):
                 reached_event_observed = 0
 
             if trial.get("detected") is not None:
+                detected_duration = trial["detected"]
+                detected_event_observed = 1
                 if bug_id not in detected_runs:
                     detected_runs[bug_id] = set()
                 detected_runs[bug_id].add(run)
+            else:
+                detected_duration = MAX_TRIAL_TIME
+                detected_event_observed = 0
 
             data.append(
                 {
@@ -75,6 +80,8 @@ def summarize_data(json_file):
                     "triggered_event_observed": triggered_event_observed,
                     "reached_duration": reached_duration,
                     "reached_event_observed": reached_event_observed,
+                    "detected_duration": detected_duration,
+                    "detected_event_observed": detected_event_observed,
                 }
             )
 
@@ -108,13 +115,20 @@ def summarize_data(json_file):
         include_groups=False,
     )
 
+    detected_medians = df.groupby(["Binary", "Fuzzer", "BugID"]).apply(
+        lambda x, **kwargs: compute_median_survival(
+            x, "detected_duration", "detected_event_observed"
+        ),
+        include_groups=False,
+    )
+
     medians_df = pd.DataFrame(
         {
             "Binary": triggered_medians.index.get_level_values("Binary"),
             "Fuzzer": triggered_medians.index.get_level_values("Fuzzer"),
             "BugID": triggered_medians.index.get_level_values("BugID"),
             "MedianReachedTime": reached_medians.values,
-            "MedianDetectedTime": reached_medians.values,
+            "MedianDetectedTime": detected_medians.values,
             "MedianTriggeredTime": triggered_medians.values,
             "TriggeredCount": [
                 len(trigger_runs.get(bug_id, set()))
@@ -122,7 +136,7 @@ def summarize_data(json_file):
             ],
             "DetectedCount": [
                 len(detected_runs.get(bug_id, set()))
-                for bug_id in reached_medians.index.get_level_values("BugID")
+                for bug_id in detected_medians.index.get_level_values("BugID")
             ],
         }
     )
@@ -150,4 +164,5 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    print(summarize_data(args.json_file))
+    summarized_df = summarize_data(args.json_file)
+    print(summarized_df[["BugID", "MedianDetectedTime", "DetectedCount"]])

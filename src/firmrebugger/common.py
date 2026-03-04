@@ -59,10 +59,8 @@ def menu(title, options):
                 stdscr.addstr(
                     1,
                     0,
-                    "Use ↑ and ↓ to navigate. Space to toggle. Enter to finish. 'a' to (de)select all.",
-                    curses.A_BOLD,
+                    "Use ↑ and ↓ to navigate. Space to toggle. Enter to finish. 'a' to (de)select all. Press 'q' to quit.",
                 )
-                stdscr.addstr(2, 0, "Press 'q' to quit.")
                 for idx, option in enumerate(options):
                     selected_marker = "[X]" if option in selected else "[ ]"
                     if idx == current_selection:

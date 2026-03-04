@@ -1,5 +1,6 @@
 FROM ubuntu:22.04
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
+ENV PIP_NO_CACHE_DIR=1
 
 RUN apt-get update
 RUN apt-get install -y python3-pip automake sudo git vim clang cmake llvm wget unzip build-essential

@@ -1,6 +1,6 @@
 # FirmReBugger
 A benchmark framework for monolithic firmware fuzzers.
-![alt text](front_page.png)
+![alt text](report.png)
 
 ## Raven Creation
 
@@ -13,6 +13,7 @@ We have made the process of incorporating a bug with a Raven, simple—we demons
 ## Full Paper Results
 The full table of our experiemnts are detailed in `paper_results`
 - [FirmBench](paper_results/FirmBench.pdf)
+- [FirmBenchDMA](paper_results/FirmBenchDMA.pdf)
 - [FirmBenchX](paper_results/FirmBenchX.pdf)
 
 ## Quick Start 
@@ -44,7 +45,6 @@ export FIRMREBUGGER_BASE_DIR=$(pwd)
 # Follow the steps and build all fuzzers
 uv run frb build
 # If a fuzzer fails to build, retry building it individually.
-uv run frb build
 ```
 
 ### Use prebuilt Docker images (recommended)
@@ -57,14 +57,11 @@ uv run frb build --use-prebuilt
 
 This pulls registry images and tags them locally as `frb:<fuzzer>` and `frb_original:<fuzzer>`, which are the names used by fuzzing/triage runtime.
 
-Runtime containers now default to your host user (`uid:gid`) to avoid permission issues when prebuilt images were created with a different UID.
-If needed, you can override this explicitly:
+If the prebuilt images fail to run on your system, fall back to the non-prebuilt images with:
 
 ```bash
-export FRB_DOCKER_USER="$(id -u):$(id -g)"
+uv run frb build
 ```
-
-If the prebuilt images fail to run on your system, fall back to the non-prebuilt images with: `uv run frb build`
 
 ### Fuzzing
 
@@ -90,29 +87,31 @@ uv run frb charting-tool --help
 ### Workflow webapp 
 It is recommneded to run FirmReBugger through the webapp
 ```bash
+# Run the webapp
+uv run frb app --help
+uv run frb app -p <port>
+
 # If you want to rebuild the front end 
 cd src/firmrebugger-web
 npm install
 npm run build 
-
-# Otherwise just run the webapp
-uv run frb app --help
-uv run frb app -p <port>
-
-# Optional explicit runtime user override (if needed in shared environments)
-export FRB_DOCKER_USER="$(id -u):$(id -g)"
 ```
 
-- **Report** shows you a summary of your fuzzing campaigns with FirmReBugger.
+**Report** shows you a summary of your fuzzing campaigns with FirmReBugger.
 
-- **Job manager** lets you schedule jobs (Triaging or Fuzzing) all automatically.
+**Job manager** lets you schedule jobs (Triaging or Fuzzing) all automatically.
 
-![alt text](job_scheduler.png)
+![alt text](job_manager.png)
 
-#### Recommended workflow:
-1. Go to the Job Manager tab to schedule fuzzing jobs.
-2. If auto triaging is enabled, the backend scheduler automatically queues triaging jobs after fuzzing completes. Otherwise you can queue it manually through the "Finished Jobs" section.
-3. Switch to the Report tab to analyze and visualize outcomes.
+### Recommended Workflow
+
+1. Launch the web application by following the instructions provided above.
+
+2. Navigate to the **Job Manager** tab to configure and schedule fuzzing jobs.
+
+3. If auto-triaging is enabled, the backend scheduler will automatically queue triaging jobs once fuzzing completes. Otherwise, you can manually start triaging from the **Finished Jobs** section.
+
+4. Open the **Report** tab to analyze results and visualize the outcomes.
 
 ### Workflow CLI
 
@@ -120,57 +119,123 @@ export FRB_DOCKER_USER="$(id -u):$(id -g)"
 cd FirmReBugger
 export FIRMREBUGGER_BASE_DIR=$(pwd)
 # Fuzz your choice of binaries with 
-uv run frb fuzz
+uv run frb fuzz -h
 # Recommened to connect to the frb docker and manually run the bug analyzer as it can take a while eg. 
 docker run -it --mount type=bind,source=./,target=/benchmark frb:<fuzzer> /bin/bash
+# Run the bug-analyzer
 cd <to_results_folder>
-uv run frb bug-analyzer .
+uv run frb bug-analyzer <fuzzing_results_dir> <descriptor_path>
 
 # Visualize the data
 uv run frb charting-tool
 ```
 ### Trouble shooting
-- If fuzzing sessions die prematurely, check the logs at `/home/user/FirmReBugger/<benchmark>/fuzzers/<fuzzer>/fuzzing_out/<output_name>/fuzzing_out`.
+- If fuzzing sessions die prematurely, check the logs at:
 
-### Adding a new fuzzer
-- Add your fuzzer to the docker folder. With both original for fuzzing and frb version for triaging (with the FirmReBugger patches).
-- Add a runner in `src/firmrebugger/fuzzer_runners`
-- In `src/<Benchmark>/<Binary>/fuzzers`, add your fuzzer folder and configs etc.
+```
+/home/user/FirmReBugger/<benchmark>/fuzzers/<fuzzer>/fuzzing_out/<output_name>/fuzzing_out.
+```
 
-### Adding a new binary with ravens
-- In a selected benchmark (FirmBench/ FirmBenchDMA/ FirmBenchX) add a folder of the binary name. 
-- Ravens are stored in `bug_descriptor.c`
-- Following the existing folder structure with `<Benchmark>/<Binary>/fuzzers/<fuzzer>/fuzzing_out/<output_dir>`
+## Contributing to FirmReBugger
+
+### Adding a New Fuzzer
+
+To integrate a new fuzzer into FirmReBugger:
+
+1. Docker Integration
+
+    Add your fuzzer under the docker/ directory:
+
+    - An original image for fuzzing.
+
+    - A **FRB-patched** version for triaging (i.e., including the FirmReBugger modifications). Follow the structure and integration pattern used by the existing fuzzers as a reference.
+
+2. Runner Implementation
+
+    Implement a corresponding runner in:
+    ```
+    src/firmrebugger/fuzer_runners/
+    ```
+    This runner defines how FirmReBugger invokes your fuzzer inside Docker.
+
+3. Benchmark Configuration
+
+    For each binary you want to support, add your fuzzer configuration under:
+
+    ```
+    src/<Benchmark>/<Binary>/fuzzers/<your_fuzzer>/
+    ```
+
+    Include all required configuration files, scripts, and auxiliary resources.
+
+During execution, FirmReBugger automatically:
+
+- Creates the fuzzing output directory.
+
+- Copies the required configuration files.
+
+- Copies the appropriate fuzzer runner.
+
+- Launches the fuzzer inside the corresponding Docker container.
+
+### Extending existing Ravens
+If you discover a new bug and want to extend an existing Raven:
+
+- Modify the corresponding `bug_descriptor.c` file located in the relevant binary’s directory.
+
+- Follow the structure and conventions used in existing descriptors.
+
+
+### Adding a New Binary and Its Corresponding Raven
+
+1. Choose a benchmark suite (e.g., FirmBench, FirmBenchDMA, or FirmBenchX) and create a new folder named after your binary:
+
+```
+src/<Benchmark>/<Binary>/
+```
+
+2. Add the Raven implementation in:
+
+```
+bug_descriptor.c
+```
+
+3. Follow the existing directory structure for fuzzers:
+
+```
+<Benchmark>/<Binary>/fuzzers/<fuzzer>/fuzzing_out/<output_dir>/
+```
+
+Maintaining consistency with the existing structure ensures compatibility with the scheduling, fuzzing, and triaging pipelines.
+
 
 ## Folder Structure
 
-```bash
+```
 FirmReBugger/
 ├── docker/
 ├── FirmBench/
-│   │   └── <Binary>/
-│   │       └── fuzzers/
-│   │           └── <Fuzzer>/
-│   │               └── fuzzing_out/
-│   │                   └── <output_name>/
 │   └── <Binary>/
-│       └── ...
+│       └── fuzzers/
+│           └── <Fuzzer>/
+│               └── fuzzing_out/
+│                   └── <output_name>/
 ├── FirmBenchDMA/
 ├── FirmBenchX/
 ├── pyproject.toml
 ├── README.md
 ├── requirements.txt
 ├── src/
-│   └── firmrebugger/
-│       ├── analysis_bench/
-│       ├── bug_analyzer/
-│       ├── build_fuzzers/
-│       ├── charting_tools/
-│       ├── fuzz/
-│       ├── utils/
-│       ├── __init__.py
-│       └── main.py
-│   └── firmrebugger-web
+│   ├── firmrebugger/
+│   │   ├── analysis_bench/
+│   │   ├── bug_analyzer/
+│   │   ├── build_fuzzers/
+│   │   ├── charting_tools/
+│   │   ├── fuzz/
+│   │   ├── utils/
+│   │   ├── __init__.py
+│   │   └── main.py
+│   └── firmrebugger-web/
 ├── uv.lock
 ```
 
@@ -268,9 +333,6 @@ Dangling pointers are particularly hard to detect because a stale pointer might 
 To capture this bug in a Raven, observe that once `HAL_I2C_Mem_Read` returns (at `0x0800c9b0`), the pointer stored in `pBuffPtr` becomes invalid. With `frb_mem_write`, we overwrite this pointer with a sentinel value (`0xDEADBEEF`). Each time the pointer is subsequently accessed (e.g., at `0x0800bd02`), the Raven checks whether its value equals `0xDEADBEEF`. If so, this indicates that the pointer has been incorrectly used, precisely capturing the condition that triggers the bug.
 
 
-## Experiment Results
-
-Median bug survival times—both **R**eached and **T**riggered—measured over a 24-hour period across 10 trials for the FirmBench and FirmBenchX set, reported in HH:MM. “Hit” denotes the percentage of trials in which the bug was successfully triggered. Bug IDs highlighted in grey indicate false positives, while the best-performing times are shown in bold. “N/A” denotes evaluations that are not applicable to the target. Table and statistics were generated using the Analysis Bench.
 
 
 ## Modification table
@@ -310,3 +372,16 @@ Median bug survival times—both **R**eached and **T**riggered—measured over a
 | FirmReBugger | Hoverboard        | Dma patched in DMA1_Channel1_IRQHandler<br>Patched softwareserialRXInterrupt<br>Early return to HAL_Delay<br>Early return to Flash_WaitLastOperation<br>Early return to consoleLog                                                                                                                                                                                                                                                                                                                                             |
 | FirmReBugger | Oresat-Control    | Timer patch to chVTDoTickI<br>Patched DMA in ax5043SPIExchange<br>Patched DMA in ax5043GetStatus<br>Early return to Delay                                                                                                                                                                                                                                                                                                                                                                                                      |
 | FirmReBugger | BetaFlight        | Early return to FLASH_WaitForLastOperation<br>Early return to OverclockRebootIfNecessar<br>Early return to OTG_FS_IRQHandle<br>Early return to Delay                                                                                                                                                                                                                                                                                                                                                                           |
+
+
+# Cite as:
+
+```
+@inproceedings{2026firmrebugger,
+  title={FirmReBugger: A Benchmark Framework for Monolithic Firmware Fuzzers},
+  author={Duong, Mathew and Chesser, Michael and Farrelly, Guy and Nepal, Surya and Ranasinghe, Damith C},
+  booktitle = {{USENIX} Security Symposium},
+  series    = {USENIX Security},
+  year      = {2026}
+}
+```

@@ -139,16 +139,10 @@ def split_dataframe_by_binaries(combined_df, max_rows_per_table=25):
 def reshape_and_convert_to_latex(
     combined_df, expected_fuzzers=None, table_number=1, total_tables=1
 ):
-    desired_order = [
-        "Ember-IO-Fuzzing",
-        "Fuzzware",
-        "Fuzzware-Icicle",
-        "SEmu-Fuzz",
-        "SplITS",
-        "Hoedur",
-        "MultiFuzz",
-        "GDMA",
-    ]
+    if expected_fuzzers is not None:
+        fuzzers = list(expected_fuzzers)
+    else:
+        fuzzers = list(combined_df["Fuzzer"].unique())
 
     if expected_fuzzers is None:
         present_fuzzers = combined_df["Fuzzer"].unique()

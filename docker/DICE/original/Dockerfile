@@ -1,5 +1,6 @@
 FROM ubuntu:22.04 AS fuzzer-base
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
+ENV PIP_NO_CACHE_DIR=1
 
 RUN apt-get update
 RUN apt-get install -y make wget xz-utils unzip git cmake python3 python3-pip curl automake texinfo coreutils gcc-arm-none-eabi nano patchelf
@@ -22,4 +23,4 @@ RUN patchelf --replace-needed librt.so.1 /lib/x86_64-linux-gnu/librt.so.1 qemu-s
 
 USER user:user
 ENV DICE_BASE_DIR=$FUZZER/build/DICE-DMA-Emulation
-WORKDIR /benchmark
+WORKDIR /home/user/benchmark

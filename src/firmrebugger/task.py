@@ -473,7 +473,7 @@ class Task:
                 "--name",
                 container_name,
                 "--mount",
-                f"type=bind,source={output_dir},target=/firmrebugger/target",
+                f"type=bind,source={output_dir},target=/home/user/firmrebugger/target",
                 "--cpuset-cpus",
                 core_str,
             ]

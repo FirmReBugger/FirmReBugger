@@ -1,6 +1,7 @@
 FROM frb_original:SEmu-Fuzz AS fuzzer-base
 
 ENV FUZZER=/home/user/SEmu-Fuzz
+ENV PIP_NO_CACHE_DIR=1
 
 FROM frb_original:SEmu-Fuzz AS semu-firmrebugger
 USER root
@@ -46,20 +47,16 @@ RUN echo "[+] Success to build AFL!"
 RUN chown -R user:user /home/user
 # Install FirmReBugger
 USER user
-RUN pip3 install --user uv
+RUN pip3 install --user uv && \
+    git clone --depth 1 https://github.com/FirmReBugger/FirmReBugger.git /home/user/firmrebugger
 ENV PATH=$PATH:/home/user/.local/bin
-COPY --chown=user ./src /firmrebugger/
-COPY --chown=user ./pyproject.toml /firmrebugger/
-COPY --chown=user ./uv.lock /firmrebugger/
-COPY --chown=user ./README.md /firmrebugger/
-COPY --chown=user ./.python-version /firmrebugger/
-WORKDIR /firmrebugger/target
+WORKDIR /home/user/firmrebugger/target
 RUN uv run frb -h
 
 ENV PATH="$PATH:/home/user/.local/bin"
 RUN pip3 install --user intelhex
 RUN pip3 install --user $FUZZER/build/SEmu-Fuzz/
-ENV FIRMREBUGGER_BASE_DIR=/firmrebugger
+ENV FIRMREBUGGER_BASE_DIR=/home/user/firmrebugger
 
 ENTRYPOINT ["uv", "run", "frb", "bug-analyzer", "."]
 

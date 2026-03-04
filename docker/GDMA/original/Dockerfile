@@ -1,8 +1,9 @@
 FROM ubuntu:22.04 AS fuzzware-base
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
+ENV PIP_NO_CACHE_DIR=1
 RUN apt-get update && \
     apt-get upgrade -y && \
-    apt-get install -y python3 python3-pip automake tmux redis wget autoconf sudo htop cmake clang vim unzip git binutils-arm-none-eabi curl && \
+    apt-get install -y python3 python3-pip automake tmux redis wget autoconf sudo htop cmake clang vim unzip git binutils-arm-none-eabi curl patch make && \
     pip3 install virtualenv virtualenvwrapper cython setuptools
 
 ENV FUZZER=/home/user/GDMA
