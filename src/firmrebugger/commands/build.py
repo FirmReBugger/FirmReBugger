@@ -1,7 +1,6 @@
 from firmrebugger.common import get_frb_base_dir, menu
 import sys
 import os
-import concurrent.futures
 import subprocess
 import json
 
@@ -238,18 +237,13 @@ def build_fuzzers(use_prebuilt=False, registry_prefix=None):
 
     if use_prebuilt:
         total = len(selected_fuzzers)
-        workers = total
-        print(f"Using parallel prebuilt pulls with {workers} workers")
-        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
-            futures = [
-                executor.submit(safe_build, fuzzer) for fuzzer in selected_fuzzers
-            ]
-            completed = 0
-            for future in concurrent.futures.as_completed(futures):
-                fuzzer, success, error = future.result()
-                completed += 1
-                print(f"[{completed}/{total}] Prepared prebuilt images for {fuzzer}")
-                results[fuzzer] = {"success": success, "error": error}
+        print(f"Processing prebuilt images for ({total} fuzzers)")
+        completed = 0
+        for fuzzer in selected_fuzzers:
+            fuzzer, success, error = safe_build(fuzzer)
+            completed += 1
+            print(f"[{completed}/{total}] Prepared prebuilt images for {fuzzer}")
+            results[fuzzer] = {"success": success, "error": error}
     else:
         with concurrent.futures.ThreadPoolExecutor() as executor:
             futures = [
@@ -258,6 +252,7 @@ def build_fuzzers(use_prebuilt=False, registry_prefix=None):
             for future in concurrent.futures.as_completed(futures):
                 fuzzer, success, error = future.result()
                 results[fuzzer] = {"success": success, "error": error}
+
 
     # Print summary
     print("\n" + "=" * 60)
