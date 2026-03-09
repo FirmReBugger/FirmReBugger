@@ -270,6 +270,17 @@ export function TasksTable({
     }
 
     const handleStop = async (id: string) => {
+      const currentTask = (allTasks || data).find((task) => task.id === id)
+      const previousStatus = currentTask?.status
+
+      setTasks((prevTasks) =>
+        prevTasks.map((task) =>
+          task.id === id && (task.status === 'running' || task.status === 'queued')
+            ? { ...task, status: 'stopping' }
+            : task
+        )
+      )
+
       try {
         const response = await fetch(`${API_URL}/api/jobs/stop`, {
           method: 'POST',
@@ -282,11 +293,25 @@ export function TasksTable({
         const data = await response.json()
         
         if (response.ok) {
-          toast.success(`Job ${id} stopped`)
+          toast.success(`Job ${id} is stopping`)
         } else {
+          if (previousStatus) {
+            setTasks((prevTasks) =>
+              prevTasks.map((task) =>
+                task.id === id ? { ...task, status: previousStatus } : task
+              )
+            )
+          }
           toast.error(data.error || 'Failed to stop job')
         }
       } catch (error) {
+        if (previousStatus) {
+          setTasks((prevTasks) =>
+            prevTasks.map((task) =>
+              task.id === id ? { ...task, status: previousStatus } : task
+            )
+          )
+        }
         console.error('Error stopping job:', error)
         toast.error('Failed to stop job')
       }
@@ -542,7 +567,7 @@ export function TasksTable({
         }
       />
       <div className='relative'>
-        <div className='overflow-auto rounded-md border max-h-[calc(100vh-300px)] scroll-smooth'>
+        <div className='overflow-x-auto overflow-y-visible rounded-md border scroll-smooth'>
           <Table className='min-w-xl'>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
@@ -689,7 +714,7 @@ export function TasksTable({
                             {/* Individual Task Details Table */}
                             {taskDetails[row.original.id] && taskDetails[row.original.id].length > 0 ? (
                               <div className='rounded-md border'>
-                                <div className='max-h-[500px] overflow-auto'>
+                                <div className='overflow-x-auto'>
                                   <Table>
                                     <TableHeader className='sticky top-0 bg-background z-10'>
                                       <TableRow>

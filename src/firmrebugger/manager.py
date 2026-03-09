@@ -90,12 +90,15 @@ class Job:
             return "queued"
 
         has_running = any(t.status == "running" for t in self.tasks)
+        has_stopping = any(t.status == "stopping" for t in self.tasks)
         has_queued = any(t.status == "queued" for t in self.tasks)
         has_error = any(t.status == "error" for t in self.tasks)
         has_stopped = any(t.status == "stopped" for t in self.tasks)
 
         if all(t.status == "completed" for t in self.tasks):
             return "completed"
+        elif has_stopping:
+            return "stopping"
         elif has_running:
             return "running"
         elif all(t.status == "queued" for t in self.tasks):
@@ -114,9 +117,18 @@ class Job:
     def stop_all_tasks(self):
         """Stop all running tasks in this job."""
         for task in self.tasks:
-            if task.is_running():
-                task.kill_task()
-            if task.status == "queued":
+            if task.status == "running":
+                task.status = "stopping"
+
+        for task in self.tasks:
+            if task.status == "stopping":
+                if task.is_running() or (
+                    task.subprocess is not None and task.subprocess.poll() is None
+                ):
+                    task.kill_task()
+                else:
+                    task.stop()
+            elif task.status == "queued":
                 task.status = "stopped"
         print(f"[Job {self.job_id}] All tasks stopped.")
 

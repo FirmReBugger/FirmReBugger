@@ -21,7 +21,7 @@ The full table of our experiemnts are detailed in `paper_results`
 ### Set up
 ```bash
 echo core | sudo tee /proc/sys/kernel/core_pattern
-sudo sh -c 'echo 524288 > /proc/sys/fs/inotify/max_user_watches && echo 512 > /proc/sys/fs/inotify/max_user_instances'
+sudo sh -c 'echo 524288 > /proc/sys/fs/inotify/max_user_watches && echo 8192 > /proc/sys/fs/inotify/max_user_instances'
 ```
 
 ### Requirements
@@ -36,7 +36,19 @@ sudo apt install texlive-xetex texlive-fonts-recommended texlive-latex-extra
 install npm (npm >= 22.0.0)
 ```
 
-### Build all Fuzzers 
+### Use prebuilt Docker images (Recommended)
+
+If you're having trouble building the fuzzers locally or do not need to, you can pull our prebuilt images from GHCR:
+
+```bash
+uv run frb build --use-prebuilt
+```
+
+This pulls registry images and tags them locally as `frb:<fuzzer>` and `frb_original:<fuzzer>`, which are the names used by fuzzing/triage runtime.
+
+### Building Fuzzer Dockers locally (Optional)
+
+If the prebuilt images fail to run on your system, fall back to the non-prebuilt images with:
 
 ```bash
 git clone https://github.com/FirmReBugger/FirmReBugger
@@ -47,51 +59,14 @@ uv run frb build
 # If a fuzzer fails to build, retry building it individually.
 ```
 
-### Use prebuilt Docker images (recommended)
-
-If you're having trouble building the fuzzers locally or do not need to, you can pull our prebuilt images from GHCR:
-
-```bash
-uv run frb build --use-prebuilt
-```
-
-This pulls registry images and tags them locally as `frb:<fuzzer>` and `frb_original:<fuzzer>`, which are the names used by fuzzing/triage runtime.
-
-If the prebuilt images fail to run on your system, fall back to the non-prebuilt images with:
-
-```bash
-uv run frb build
-```
-
-### Fuzzing
-
-```bash
-cd FirmReBugger
-export FIRMREBUGGER_BASE_DIR=$(pwd)
-uv run frb fuzz --help
-uv run frb fuzz -t 24h -n 10 -o <output_dir>
-```
-
-### Commands
-
-```bash
-cd FirmReBugger
-export FIRMREBUGGER_BASE_DIR=$(pwd)
-uv run frb --help
-uv run frb fuzz --help
-uv run frb build --help
-uv run frb bug-analyzer --help
-uv run frb charting-tool --help
-```
-
-### Workflow webapp 
+### Workflow Web Application (Recommended)
 It is recommneded to run FirmReBugger through the webapp
 ```bash
 # Run the webapp
 uv run frb app --help
 uv run frb app -p <port>
 
-# If you want to rebuild the front end 
+# If you want/need to rebuild the front end 
 cd src/firmrebugger-web
 npm install
 npm run build 
@@ -103,7 +78,7 @@ npm run build
 
 ![alt text](job_manager.png)
 
-### Recommended Workflow
+#### Recommended Workflow
 
 1. Launch the web application by following the instructions provided above.
 
@@ -134,6 +109,19 @@ uv run frb charting-tool
 
 ```
 /home/user/FirmReBugger/<benchmark>/fuzzers/<fuzzer>/fuzzing_out/<output_name>/fuzzing_out.
+```
+
+#### Commands
+
+```bash
+cd FirmReBugger
+export FIRMREBUGGER_BASE_DIR=$(pwd)
+uv run frb --help
+uv run frb fuzz --help
+uv run frb build --help
+uv run frb bug-analyzer --help
+uv run frb charting-tool --help
+uv run frb app --help
 ```
 
 ## Contributing to FirmReBugger

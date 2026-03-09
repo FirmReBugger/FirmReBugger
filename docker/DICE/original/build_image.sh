@@ -13,7 +13,9 @@ patch_dice_qemu_downloads() {
       sed -i \
         "s|^LIBZ_URL=.*$|LIBZ_URL=\"${mirror_url}\"|" \
         "$script_path"
-      echo "[+] Patched LIBZ_URL in $script_path"
+      # Replace flaky ftp.gnu.org with the recommended ftpmirror.gnu.org
+      sed -i "s|ftp.gnu.org/pub/gnu|ftpmirror.gnu.org|g" "$script_path"
+      echo "[+] Patched LIBZ_URL and GNU mirror in $script_path"
     fi
   done
 }

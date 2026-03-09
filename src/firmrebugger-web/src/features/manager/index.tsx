@@ -132,7 +132,7 @@ export function Manager() {
   }, [])
 
   const activeTasks = tasks.filter(task => 
-    task.status === 'running' || task.status === 'queued'
+    task.status === 'running' || task.status === 'queued' || task.status === 'stopping'
   )
   const finishedTasks = tasks.filter(task => 
     task.mode !== 'Triaging' &&

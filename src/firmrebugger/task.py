@@ -20,6 +20,14 @@ def get_runtime_docker_env():
     }
 
 
+def get_runtime_docker_ulimits():
+    nofile_soft = os.getenv("FRB_ULIMIT_NOFILE_SOFT", "524288")
+    nofile_hard = os.getenv("FRB_ULIMIT_NOFILE_HARD", nofile_soft)
+    return {
+        "nofile": f"{nofile_soft}:{nofile_hard}",
+    }
+
+
 def _ensure_writable_directory(
     path, repair_image=None, verify_with_image=None, verify_user=None
 ):
@@ -222,6 +230,7 @@ class Task:
             return
 
         runtime_env = get_runtime_docker_env()
+        runtime_ulimits = get_runtime_docker_ulimits()
 
         run_cmd = [
             "docker",
@@ -233,6 +242,8 @@ class Task:
             "--name",
             self.container_name,
         ]
+        for ulimit_name, ulimit_value in runtime_ulimits.items():
+            run_cmd.extend(["--ulimit", f"{ulimit_name}={ulimit_value}"])
         for env_name, env_value in runtime_env.items():
             run_cmd.extend(["-e", f"{env_name}={env_value}"])
         run_cmd.extend([f"frb_original:{self.fuzzer}"])
@@ -477,6 +488,8 @@ class Task:
                 "--cpuset-cpus",
                 core_str,
             ]
+            for ulimit_name, ulimit_value in runtime_ulimits.items():
+                docker_exec_cmd.extend(["--ulimit", f"{ulimit_name}={ulimit_value}"])
             for env_name, env_value in runtime_env.items():
                 docker_exec_cmd.extend(["-e", f"{env_name}={env_value}"])
             docker_exec_cmd.extend([f"frb:{self.fuzzer}"])

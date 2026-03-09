@@ -351,6 +351,18 @@ def stop_job():
         if not job_id:
             return jsonify({"error": "job_id is required", "success": False}), 400
 
+        job = job_manager.get_job(job_id)
+        if not job:
+            return (
+                jsonify({"error": f"Job {job_id} not found", "success": False}),
+                404,
+            )
+
+        for task in job.tasks:
+            if task.status == "running":
+                task.status = "stopping"
+
+        refresh_jobs_snapshot(force=True)
         job_manager.stop_job(job_id)
         refresh_jobs_snapshot(force=True)
 

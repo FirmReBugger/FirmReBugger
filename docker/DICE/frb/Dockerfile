@@ -1,4 +1,4 @@
-FROM ubuntu:22.04 as fuzzer-base
+FROM ubuntu:22.04 AS fuzzer-base
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 ENV PIP_NO_CACHE_DIR=1
 

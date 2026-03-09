@@ -3,6 +3,7 @@ import sys
 import os
 import subprocess
 import json
+import concurrent.futures
 
 
 def remove_local_image(image_name):
