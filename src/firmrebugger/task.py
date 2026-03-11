@@ -453,6 +453,7 @@ class Task:
             return
 
         runtime_env = get_runtime_docker_env()
+        runtime_ulimits = get_runtime_docker_ulimits()
 
         bug_descriptor_path = os.path.join(
             base_dir, self.benchmark, self.binary, "bug_descriptor.c"

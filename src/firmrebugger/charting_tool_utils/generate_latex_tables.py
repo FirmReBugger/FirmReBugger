@@ -144,12 +144,6 @@ def reshape_and_convert_to_latex(
     else:
         fuzzers = list(combined_df["Fuzzer"].unique())
 
-    if expected_fuzzers is None:
-        present_fuzzers = combined_df["Fuzzer"].unique()
-        fuzzers = [f for f in desired_order if f in present_fuzzers]
-    else:
-        fuzzers = [f for f in desired_order if f in expected_fuzzers]
-
     table_label = "fuzzing-results"
     caption_text = "Fuzzing Results"
     if total_tables > 1:
