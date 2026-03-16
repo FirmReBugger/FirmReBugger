@@ -47,7 +47,7 @@ function toDateOrUndefined(value: unknown): Date | undefined {
 
 export function Manager() {
   const [tasks, setTasks] = useState<Task[]>([])
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+  const API_URL = import.meta.env.VITE_API_URL || ''
 
   const applyJobs = (jobs: any[]) => {
     setTasks(prevTasks => {

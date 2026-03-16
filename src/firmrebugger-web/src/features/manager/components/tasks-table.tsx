@@ -95,7 +95,7 @@ export function TasksTable({
   const [queueDropTargetJobId, setQueueDropTargetJobId] = useState<string | null>(null)
   const [cpuCount, setCpuCount] = useState<number | ''>('')
   const [maxCores, setMaxCores] = useState<number>(32)
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+  const API_URL = import.meta.env.VITE_API_URL || ''
 
   const handleShowTriagingLog = useCallback(async (job: Task) => {
     setLoadingTriagingLogForJobId(job.id)

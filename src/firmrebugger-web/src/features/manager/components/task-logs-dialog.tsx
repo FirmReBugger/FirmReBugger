@@ -139,7 +139,7 @@ export function TaskLogsDialog({
   const [error, setError] = useState<string | null>(null)
   const [logPath, setLogPath] = useState<string>('')
   const scrollAreaRef = useRef<HTMLDivElement>(null)
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+  const API_URL = import.meta.env.VITE_API_URL || ''
   const ansiSegments = parseAnsiToSegments(logs)
 
   const fetchLogs = async () => {

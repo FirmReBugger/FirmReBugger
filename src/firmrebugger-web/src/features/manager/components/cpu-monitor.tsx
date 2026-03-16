@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils'
 export function CpuMonitor() {
   const [cpuUsage, setCpuUsage] = useState<number[]>([])
   const [coreCount, setCoreCount] = useState(0)
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+  const API_URL = import.meta.env.VITE_API_URL || ''
 
   useEffect(() => {
     const fetchCpuUsage = async () => {

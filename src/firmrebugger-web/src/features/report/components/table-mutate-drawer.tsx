@@ -71,7 +71,7 @@ export function TableMutateDrawer({
   const [expandedBinaries, setExpandedBinaries] = useState<Set<string>>(
     new Set(),
   );
-  const API_URL = import.meta.env.VITE_API_URL || "http://localhost:5000";
+  const API_URL = import.meta.env.VITE_API_URL || "";
 
   const reportsByBinaryAndFuzzer: Record<string, Record<string, string[]>> = {};
 
