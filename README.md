@@ -66,6 +66,12 @@ It is recommneded to run FirmReBugger through the webapp
 uv run frb app --help
 uv run frb app -p <port>
 
+# By default the app binds to 127.0.0.1 (localhost only).
+# If you are connecting from a remote machine over SSH, forward the port to your
+# local browser (adjust the port to match the -p value you used above):
+ssh -L <port>:localhost:<port> user@remote-host
+# Then open http://localhost:<port> in your local browser
+
 # If you want/need to rebuild the front end 
 cd src/firmrebugger-web
 npm install

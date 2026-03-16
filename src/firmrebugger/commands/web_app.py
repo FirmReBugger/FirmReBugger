@@ -896,11 +896,11 @@ def serve_react_app(path):
         return send_from_directory(app.static_folder, "index.html")
 
 
-def run_flask(port=5000):
-    app.run(debug=False, port=port, host="0.0.0.0")
+def run_flask(port=5000, host="127.0.0.1"):
+    app.run(debug=False, port=port, host=host)
 
 
-def run_app(port):
+def run_app(port, host="127.0.0.1"):
     global FIRMREBUGGER_BASE_DIR, STATIC_FOLDER, app, job_manager
 
     FIRMREBUGGER_BASE_DIR = get_frb_base_dir()
@@ -924,7 +924,7 @@ def run_app(port):
     snapshot_thread = threading.Thread(target=jobs_snapshot_worker, daemon=True)
     snapshot_thread.start()
 
-    flask_thread = threading.Thread(target=run_flask, args=(port,))
+    flask_thread = threading.Thread(target=run_flask, args=(port, host))
     flask_thread.start()
 
     start_manager(job_manager)
