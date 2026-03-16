@@ -520,26 +520,12 @@ class JobManager:
                                 )
                                 candidate_tasks_to_start = candidate_job_tasks[:1]
                             else:
-                                candidate_startable = min(
-                                    len(candidate_job_tasks),
-                                    available_slots,
-                                    available_cores,
-                                )
-                                candidate_cores_needed = candidate_startable
-                                candidate_tasks_to_start = candidate_job_tasks[
-                                    :candidate_startable
-                                ]
+                                candidate_cores_needed = len(candidate_job_tasks)
+                                candidate_tasks_to_start = candidate_job_tasks
                         else:
                             candidate_job = None
-                            candidate_startable = min(
-                                len(candidate_job_tasks),
-                                available_slots,
-                                available_cores,
-                            )
-                            candidate_cores_needed = candidate_startable
-                            candidate_tasks_to_start = candidate_job_tasks[
-                                :candidate_startable
-                            ]
+                            candidate_cores_needed = len(candidate_job_tasks)
+                            candidate_tasks_to_start = candidate_job_tasks
 
                         if (
                             candidate_job is not None
@@ -551,7 +537,11 @@ class JobManager:
                                 and candidate_cores_needed <= available_cores
                             )
                         else:
-                            can_schedule = candidate_cores_needed > 0
+                            can_schedule = (
+                                candidate_cores_needed > 0
+                                and candidate_cores_needed <= available_cores
+                                and candidate_cores_needed <= available_slots
+                            )
 
                         if can_schedule:
                             selected_job = candidate_job
@@ -734,14 +724,20 @@ class JobManager:
             with self.job_queue.mutex:
                 tasks_list = list(self.job_queue.queue)
 
+        running_jobs = [job for job in self.jobs.values() if job.status == "running"]
+        running_job_ids = {job.job_id for job in running_jobs}
+
         seen_jobs = set()
         queued_jobs_ordered = []
         for task in tasks_list:
-            if task.job_id not in seen_jobs and task.job_id in self.jobs:
+            if (
+                task.job_id not in seen_jobs
+                and task.job_id in self.jobs
+                and task.job_id not in running_job_ids
+            ):
                 seen_jobs.add(task.job_id)
                 queued_jobs_ordered.append(self.jobs[task.job_id])
 
-        running_jobs = [job for job in self.jobs.values() if job.status == "running"]
         other_jobs = [
             job for job in self.jobs.values() if job.status not in ["queued", "running"]
         ]

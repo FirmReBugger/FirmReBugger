@@ -96,7 +96,7 @@ def multifuzzer_analyzer(
     with ThreadPoolExecutor(max_workers=num_workers) as executor:
         futures = []
         for seed_path in seeds:
-            command = f"REPLAY={seed_path} TARGET_CONFIG={config_path} {multifuzzer_env}/target/release/hail-fuzz"
+            command = f"ICICLE_DISABLE_JIT=1 REPLAY={seed_path} TARGET_CONFIG={config_path} {multifuzzer_env}/target/release/hail-fuzz"
             futures.append(
                 executor.submit(
                     run_command, command, seed_path, get_time_input(seed_path), Crash
