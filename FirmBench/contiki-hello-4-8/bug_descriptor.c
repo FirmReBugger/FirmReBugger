@@ -268,7 +268,7 @@ void H11() {
   // CVE-2022-41873
   report_reached("H11");
   uint32_t r8 = reg_state[8];
-  if ((r8 >> 8) & 0xff != 0) {
+  if (((r8 >> 8) & 0xff) != 0) {
     report_detected_triggered("H11");
   }
 }
