@@ -906,6 +906,19 @@ class JobManager:
                 seen_jobs.add(task.job_id)
                 queued_jobs_ordered.append(self.jobs[task.job_id])
 
+        # The scheduler briefly drains/rebuilds the queue under lock.
+        # During that window, queued jobs can disappear from tasks_list even
+        # though their status is still queued. Keep them visible in API output.
+        missing_queued_jobs = [
+            job
+            for job in self.jobs.values()
+            if job.status == "queued"
+            and job.job_id not in seen_jobs
+            and job.job_id not in running_job_ids
+        ]
+        missing_queued_jobs.sort(key=lambda j: getattr(j, "created_at", 0) or 0)
+        queued_jobs_ordered.extend(missing_queued_jobs)
+
         other_jobs = [
             job for job in self.jobs.values() if job.status not in ["queued", "running"]
         ]
