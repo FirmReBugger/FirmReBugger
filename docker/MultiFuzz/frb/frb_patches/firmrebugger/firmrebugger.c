@@ -13,6 +13,7 @@
 #include <sys/wait.h>
 #include <ctype.h>
 #include <stdbool.h>
+#include <limits.h>
 
 #include "firmrebugger.h"
 #include "/home/user/multifuzz/tinycc/libtcc.h"
@@ -20,6 +21,18 @@
 int init_hook_addr();
 static CrashLoggerEmu *emu_current_state;
 static TCCState *tcc_state;
+
+#define FRB_MAX_SYMBOLS 131072
+#define FRB_MAX_SYMBOL_NAME 256
+
+typedef struct {
+    char name[FRB_MAX_SYMBOL_NAME];
+    uint32_t addr;
+} frb_symbol_entry;
+
+static frb_symbol_entry g_symbols[FRB_MAX_SYMBOLS];
+static size_t g_symbol_count = 0;
+static bool g_symbols_loaded = false;
 
 void firmrebugger_init_config(void* vm, CrashLoggerEmu *emu)
 {
@@ -91,6 +104,12 @@ void frb_print_reg_state(uint32_t *reg_state){
     printf("sp:  0x%08X\n", reg_state[13]);
     printf("lr:  0x%08X\n", reg_state[14]);
     printf("pc:  0x%08X\n", reg_state[15]);
+}
+
+uint32_t reg_state[16];
+
+void frb_print_regs(void) {
+    frb_print_reg_state(reg_state);
 }
 
 char* read_bug_context(const char* filename) {
@@ -170,13 +189,11 @@ void frb_force_crash() {
     emu_current_state->force_crash(emu_current_state->cpu);
 }
 
-uint32_t reg_state[16];
-
 // //Context Struct
 // typedef void (*func_ptr_t)(void);
 // typedef struct {
 //     uint32_t address;
-//     func_ptr_t bug_func;
+//     func_ptr_t introspection_point;
 // } context_struct;
 
 //This is a pre-hook
@@ -185,9 +202,134 @@ static void firmrebugger_hook(CrashLoggerEmu *emu, context_struct context)
     emu_current_state = emu;
     populate_reg_state(reg_state, emu_current_state);
 
-    context.bug_func();
+    context.introspection_point();
 }
 
+
+
+/* Resolve symbols.txt path via FIRMREBUGGER_SYMBOLS env var (set by the Python
+   bug-analyzer which walks upward from the results directory to find it). */
+static bool frb_get_symbols_path(char *out_path, size_t out_len) {
+    const char *sym = getenv("FIRMREBUGGER_SYMBOLS");
+    if (!sym || sym[0] == '\0') {
+        return false;
+    }
+
+    if (strlen(sym) >= out_len) {
+        return false;
+    }
+
+    strncpy(out_path, sym, out_len - 1);
+    out_path[out_len - 1] = '\0';
+    return true;
+}
+
+static int frb_load_symbols_file(void) {
+    if (g_symbols_loaded) {
+        return 0;
+    }
+
+    char symbols_path[PATH_MAX];
+    if (!frb_get_symbols_path(symbols_path, sizeof(symbols_path))) {
+        printf("FirmReBugger: FIRMREBUGGER_SYMBOLS is not set - symbols.txt could not be located\n");
+        g_symbols_loaded = true;
+        g_symbol_count = 0;
+        return -1;
+    }
+
+    FILE *f = fopen(symbols_path, "r");
+    if (!f) {
+        printf("FirmReBugger: symbols file not found: %s\n", symbols_path);
+        g_symbols_loaded = true;
+        g_symbol_count = 0;
+        return -1;
+    }
+
+    char line[1024];
+    g_symbol_count = 0;
+
+    while (fgets(line, sizeof(line), f)) {
+        char *p = line;
+        while (isspace((unsigned char)*p)) p++;
+        if (*p == '\0' || *p == '#') continue;
+
+        char sym_name[FRB_MAX_SYMBOL_NAME];
+        char addr_str[128];
+
+        if (sscanf(p, "%255s %127s", sym_name, addr_str) != 2) {
+            continue;
+        }
+
+        errno = 0;
+        unsigned long parsed = strtoul(addr_str, NULL, 0);
+        if (errno != 0 || parsed > 0xFFFFFFFFUL) {
+            continue;
+        }
+
+        if (g_symbol_count < FRB_MAX_SYMBOLS) {
+            strncpy(g_symbols[g_symbol_count].name, sym_name, FRB_MAX_SYMBOL_NAME - 1);
+            g_symbols[g_symbol_count].name[FRB_MAX_SYMBOL_NAME - 1] = '\0';
+            g_symbols[g_symbol_count].addr = (uint32_t)parsed;
+            g_symbol_count++;
+        } else {
+            break;
+        }
+    }
+
+    fclose(f);
+    g_symbols_loaded = true;
+    printf("FirmReBugger: loaded %zu symbols from %s\n", g_symbol_count, symbols_path);
+    return 0;
+}
+
+static bool frb_lookup_symbol_addr(const char *symbol, uint32_t *addr_out) {
+    if (!symbol || !addr_out) return false;
+    if (!g_symbols_loaded) frb_load_symbols_file();
+
+    for (size_t i = 0; i < g_symbol_count; i++) {
+        if (strcmp(g_symbols[i].name, symbol) == 0) {
+            *addr_out = g_symbols[i].addr;
+            return true;
+        }
+    }
+    return false;
+}
+
+
+uint32_t frb_symbolize(const char *symbol_name, uint32_t offset) {
+    if (!g_symbols_loaded) frb_load_symbols_file();
+    uint32_t base = 0;
+    if (!frb_lookup_symbol_addr(symbol_name, &base)) {
+        printf("FirmReBugger: frb_symbolize failed to resolve symbol '%s'\n", symbol_name);
+        exit(1);
+    }
+    uint32_t resolved = (base & ~1u) + offset;
+    printf("FirmReBugger: frb_symbolize('%s', 0x%X) -> 0x%X\n", symbol_name, offset, resolved);
+    return resolved;
+}
+
+#define FRB_MAX_REFLECTION_POINTS 256
+
+typedef struct {
+    context_struct entry;
+} frb_reflection_point_registration;
+
+static frb_reflection_point_registration g_pending_reflection_points[FRB_MAX_REFLECTION_POINTS];
+static size_t g_pending_reflection_point_count = 0;
+
+/* frb_add_reflection_point - registers a reflection point (hook address) paired
+ * with an introspection point (the function that fires at that address).
+ */
+void frb_add_reflection_point(uint32_t address, func_ptr_t introspection_point) {
+    if (g_pending_reflection_point_count >= FRB_MAX_REFLECTION_POINTS) {
+        printf("FirmReBugger: frb_add_reflection_point exceeded max reflection points (%d), skipping 0x%X\n", FRB_MAX_REFLECTION_POINTS, address);
+        return;
+    }
+    g_pending_reflection_points[g_pending_reflection_point_count].entry.address  = address;
+    g_pending_reflection_points[g_pending_reflection_point_count].entry.introspection_point = introspection_point;
+    g_pending_reflection_point_count++;
+    printf("FirmReBugger: reflection point registered at 0x%X\n", address);
+}
 
 int init_hook_addr(void* vm)
 {
@@ -228,22 +370,27 @@ int init_hook_addr(void* vm)
     tcc_add_symbol(tcc_state, "frb_report_detected_triggered", frb_report_detected_triggered);
     tcc_add_symbol(tcc_state, "frb_report_reached", frb_report_reached);
     tcc_add_symbol(tcc_state, "frb_print_reg_state", frb_print_reg_state);
+    tcc_add_symbol(tcc_state, "frb_print_regs", frb_print_regs);
+    tcc_add_symbol(tcc_state, "frb_symbolize", frb_symbolize);
+    tcc_add_symbol(tcc_state, "frb_add_reflection_point", frb_add_reflection_point);
 
     /* relocate the code */
     if (tcc_relocate(tcc_state) < 0)
         return 1;
 
-    void (*send_context_struct)(const context_struct **arr, size_t *size) = tcc_get_symbol(tcc_state, "send_context_struct");
-    const context_struct *hook_addr;
-    size_t hook_num;
-    
-    if (!send_context_struct)
+    void (*register_reflection_points)(void) = tcc_get_symbol(tcc_state, "register_reflection_points");
+    if (!register_reflection_points) {
+        fprintf(stderr, "FirmReBugger: register_reflection_points not found in bug descriptor\n");
         exit(1);
-    send_context_struct(&hook_addr, &hook_num);
+    }
 
-    for (size_t i = 0; i < hook_num; ++i) {
-        printf("adding hook at hook_addr[%zu] = 0x%X\n", i, hook_addr[i].address);
-        emu_current_state->add_hook(vm, emu_current_state, hook_addr[i], firmrebugger_hook);
+    frb_load_symbols_file();
+    g_pending_reflection_point_count = 0;
+    register_reflection_points();
+
+    for (size_t i = 0; i < g_pending_reflection_point_count; ++i) {
+        printf("FirmReBugger: installing reflection point[%zu] at 0x%X\n", i, g_pending_reflection_points[i].entry.address);
+        emu_current_state->add_hook(vm, emu_current_state, g_pending_reflection_points[i].entry, firmrebugger_hook);
     }
     return 0;
 }

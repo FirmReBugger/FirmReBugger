@@ -1,23 +1,23 @@
-#include <stdint.h>
 #include <tcclib.h>
+#include <stdint.h>
+#include <stdbool.h>
 
 extern uint32_t reg_state[16];
 extern uint32_t frb_mem_read(uint32_t read_addr, size_t size);
-extern void frb_report_detected_triggered(char *bug_id);
-extern void frb_report_reached(char *bug_id);
+extern void frb_mem_write(uint32_t write_addr, uint32_t write_value, size_t size);
+extern void frb_report_detected_triggered(const char* bug_id);
+extern void frb_report_reached(const char* bug_id);
+extern uint32_t frb_symbolize(const char *symbol_name, uint32_t offset);
+extern void frb_add_reflection_point(uint32_t address, void (*introspection_point)(void));
+extern void frb_print_regs(void);
 
-typedef void (*func_ptr_t)(void);
-
-typedef struct {
-  uint32_t address;
-  func_ptr_t bug_func;
-} context_struct;
-
-static void report_detected_triggered(char *bug_id) {
-  frb_report_detected_triggered(bug_id);
+static void report_detected_triggered(const char* bug_id) {
+    frb_report_detected_triggered(bug_id);
 }
 
-static void report_reached(char *bug_id) { frb_report_reached(bug_id); }
+static void report_reached(const char* bug_id) {
+    frb_report_reached(bug_id);
+}
 
 void FRB38() {
   report_reached("FRB38");
@@ -50,12 +50,9 @@ void on_protocol_process_ReadValue() {
   }
 }
 
-context_struct context_array[] = {{0x08009494, FRB38},
-                                  {0x08006f36, FRB39},
-                                  {0x080094b4, test},
-                                  {0x08006f40, on_protocol_process_ReadValue}};
-
-void send_context_struct(const context_struct **arr, size_t *size) {
-  *arr = context_array;
-  *size = sizeof(context_array) / sizeof(context_array[0]);
+void register_reflection_points() {
+    frb_add_reflection_point(0x08009494, FRB38);
+    frb_add_reflection_point(0x08006f36, FRB39);
+    frb_add_reflection_point(0x080094b4, test);
+    frb_add_reflection_point(0x08006f40, on_protocol_process_ReadValue);
 }

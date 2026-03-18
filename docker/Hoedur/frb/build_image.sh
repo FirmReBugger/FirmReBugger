@@ -13,7 +13,7 @@ fi
 docker buildx build \
   --tag "$HOEDUR_IMAGE" \
   --load \
-  --no-cache \
+  \
   --build-arg USERID="${USERID:-1000}" \
   -f $FIRMREBUGGER_BASE_DIR/docker/Hoedur/frb/Dockerfile \
   . \

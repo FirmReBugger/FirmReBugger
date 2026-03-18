@@ -1,9 +1,10 @@
 import os
+import shutil
+import subprocess
 import threading
 import time
+
 from firmrebugger.common import get_frb_base_dir
-import subprocess
-import shutil
 
 
 def get_runtime_docker_env():
@@ -23,20 +24,28 @@ def get_runtime_docker_env():
 def get_runtime_docker_ulimits():
     nofile_soft = os.getenv("FRB_ULIMIT_NOFILE_SOFT", "524288")
     nofile_hard = os.getenv("FRB_ULIMIT_NOFILE_HARD", nofile_soft)
+    core_soft = os.getenv("FRB_ULIMIT_CORE_SOFT", "0")
+    core_hard = os.getenv("FRB_ULIMIT_CORE_HARD", core_soft)
     return {
         "nofile": f"{nofile_soft}:{nofile_hard}",
+        "core": f"{core_soft}:{core_hard}",
     }
 
 
 def _ensure_writable_directory(
     path, repair_image=None, verify_with_image=None, verify_user=None
 ):
+    import uuid as _uuid
+
     try:
         os.makedirs(path, exist_ok=True)
     except Exception as e:
         return False, f"Failed to create directory {path}: {e}"
 
-    probe_file = os.path.join(path, ".frb_write_probe")
+    # Use a unique suffix per call so concurrent triage jobs probing the same
+    # directory never collide on the same probe filename.
+    probe_suffix = _uuid.uuid4().hex
+    probe_file = os.path.join(path, f".frb_write_probe_{probe_suffix}")
 
     def can_write():
         try:
@@ -49,42 +58,12 @@ def _ensure_writable_directory(
 
     writable, write_error = can_write()
 
-    def container_can_write(image, user):
-        cmd = [
-            "docker",
-            "run",
-            "--rm",
-            "--mount",
-            f"type=bind,source={path},target=/target",
-            "--entrypoint",
-            "/bin/sh",
-        ]
-        if user:
-            cmd.extend(["--user", user])
-        cmd.extend(
-            [
-                image,
-                "-lc",
-                "touch /target/.frb_container_write_probe && rm -f /target/.frb_container_write_probe",
-            ]
-        )
-        result = subprocess.run(
-            cmd,
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        return result.returncode == 0, (result.stderr or result.stdout or "").strip()
-
-    container_writable = True
-    container_error = None
-    if verify_with_image:
-        container_writable, container_error = container_can_write(
-            verify_with_image, verify_user
-        )
-
-    if writable and container_writable:
+    # If the host can already write we skip the container write-probe entirely.
+    # The directory was produced by a fuzzer container that already ran fine, so
+    # there is no need to spin up another Docker container just to verify it.
+    # This also avoids a second race window where the container probe command
+    # could collide with a concurrent triage's probe in the same directory.
+    if writable:
         return True, None
 
     if not repair_image:
@@ -116,26 +95,16 @@ def _ensure_writable_directory(
             f"Directory is not writable and auto-repair failed for {path}: {e}",
         )
 
+    # Re-probe with a fresh unique filename after the repair attempt.
+    probe_file = os.path.join(path, f".frb_write_probe_{_uuid.uuid4().hex}")
     writable, write_error = can_write()
-    if verify_with_image:
-        container_writable, container_error = container_can_write(
-            verify_with_image, verify_user
-        )
-    else:
-        container_writable = True
-        container_error = None
 
-    if writable and container_writable:
+    if writable:
         return True, None
 
-    if not writable:
-        return (
-            False,
-            f"Directory remains non-writable on host after repair: {path}. Error: {write_error}",
-        )
     return (
         False,
-        f"Directory is writable on host but not in container user context: {path}. Error: {container_error}",
+        f"Directory remains non-writable on host after repair: {path}. Error: {write_error}",
     )
 
 
@@ -486,6 +455,8 @@ class Task:
                 container_name,
                 "--mount",
                 f"type=bind,source={output_dir},target=/home/user/firmrebugger/target",
+                "--mount",
+                f"type=bind,source={os.path.join(base_dir, 'src')},target=/home/user/firmrebugger/src",
                 "--cpuset-cpus",
                 core_str,
             ]

@@ -1,23 +1,24 @@
-#include <stdbool.h>
-#include <stdint.h>
 #include <tcclib.h>
+#include <stdint.h>
+#include <stdbool.h>
 
 extern uint32_t reg_state[16];
 extern uint32_t frb_mem_read(uint32_t read_addr, size_t size);
-extern void report_detected_triggered(char *bug_id);
-extern void frb_report_reached(char *bug_id);
-typedef void (*func_ptr_t)(void);
+extern void frb_mem_write(uint32_t write_addr, uint32_t write_value, size_t size);
+extern void frb_report_detected_triggered(const char* bug_id);
+extern void frb_report_reached(const char* bug_id);
+extern uint32_t frb_symbolize(const char *symbol_name, uint32_t offset);
+extern void frb_add_reflection_point(uint32_t address, void (*introspection_point)(void));
+extern void frb_print_regs(void);
 
-typedef struct {
-  uint32_t address;
-  func_ptr_t bug_func;
-} context_struct;
-
-static void report_detected_triggered(char *bug_id) {
-  report_detected_triggered(bug_id);
+static void report_detected_triggered(const char* bug_id) {
+    frb_report_detected_triggered(bug_id);
 }
 
-static void report_reached(char *bug_id) { frb_report_reached(bug_id); }
+static void report_reached(const char* bug_id) {
+    frb_report_reached(bug_id);
+}
+
 
 typedef struct {
   bool hit;
@@ -505,62 +506,44 @@ void z_fatal_error() {
   report_detected_triggered("ERROR-Bug-z_fatal_error");
 }
 
-context_struct context_array[] = {
-    {0x0000affc, on_semaphore_init},
-    {0x00002cf4, on_bt_init},
-    {0x00003648, on_CVE_2021_3329},
-    {0x00007248, on_z_impl_k_sem_take},
-    {0x000076ec, on_timeout_callback},
-    {0x000035c4, on_tx_free},
-    {0x0000a61e, on_net_buf_simple_push},
-    {0x00007574, on_z_add_timeout},
-    {0x0000b0fe, on_k_delayed_work_init},
-
-    {0x00002cce, on_le_init_check_1},
-    {0x00002dc2, on_le_init_check_2},
-    {0x00007248, on_le_init_sem_take},
-
-    {0x00001914, on_isr_state_enter},
-    {0x00001b28, on_isr_state_exit},
-    {0x0000599a, on_net_buf_alloc_len_ret_check_nullptr_in_isr},
-
-    {0x0000345e, on_bt_buf_get_cmd_complete_sent_cmd_reuse},
-    {0x0000a58a, on_net_buf_put_check_rx_tx_fifo_state},
-
-    {0x0000233c, on_bt_hci_cmd_send_sync_set_valid},
-    {0x00002390, on_bt_hci_cmd_send_sync_set_invalid},
-    {0x00002192, on_bt_hci_cmd_done_check_sema_validity},
-
-    {0x00002584, on_set_le_adv_enable_legacy_send_sync},
-    {0x00002162, on_hci_cmd_done_state_update},
-
-    {0x00001748, on_arch_swap_enter},
-    {0x0000177c, on_z_arm_pendsv},
-    {0x00001768, on_arch_swap_after_pendsv},
-    {0x0000ade2, on_k_queue_get_poll},
-
-    {0x000099ec, on_bt_att_sent},
-    {0x000043a2, on_bt_att_recv},
-    {0x000043a4, on_bt_att_recv},
-    {0x000043da, on_bt_att_recv},
-    {0x000099a2, on_bt_att_status},
-
-    {0x000027f2, on_conn_auto_initiate_call_work_submit},
-    {0x00003940, on_bt_conn_add_le_work_init},
-
-    {0x0000993c, on_bt_att_chan_req_send},
-
-    {0x0000214e, on_cmd_data_index},
-    {0x000022da, on_cmd_data_index},
-    {0x0000233c, on_cmd_data_index},
-    {0x00002584, on_cmd_data_index},
-
-    {0x0000aad2, z_fatal_error},
-};
-
-void send_context_struct(const context_struct **arr, size_t *size) {
-  semaphores[sem_count] = 0x20002f98;
-  sem_count++;
-  *arr = context_array;
-  *size = sizeof(context_array) / sizeof(context_array[0]);
+void register_reflection_points() {
+    frb_add_reflection_point(0x0000affc, on_semaphore_init);
+    frb_add_reflection_point(0x00002cf4, on_bt_init);
+    frb_add_reflection_point(0x00003648, on_CVE_2021_3329);
+    frb_add_reflection_point(0x00007248, on_z_impl_k_sem_take);
+    frb_add_reflection_point(0x000076ec, on_timeout_callback);
+    frb_add_reflection_point(0x000035c4, on_tx_free);
+    frb_add_reflection_point(0x0000a61e, on_net_buf_simple_push);
+    frb_add_reflection_point(0x00007574, on_z_add_timeout);
+    frb_add_reflection_point(0x0000b0fe, on_k_delayed_work_init);
+    frb_add_reflection_point(0x00002cce, on_le_init_check_1);
+    frb_add_reflection_point(0x00002dc2, on_le_init_check_2);
+    frb_add_reflection_point(0x00007248, on_le_init_sem_take);
+    frb_add_reflection_point(0x00001914, on_isr_state_enter);
+    frb_add_reflection_point(0x00001b28, on_isr_state_exit);
+    frb_add_reflection_point(0x0000599a, on_net_buf_alloc_len_ret_check_nullptr_in_isr);
+    frb_add_reflection_point(0x0000345e, on_bt_buf_get_cmd_complete_sent_cmd_reuse);
+    frb_add_reflection_point(0x0000a58a, on_net_buf_put_check_rx_tx_fifo_state);
+    frb_add_reflection_point(0x0000233c, on_bt_hci_cmd_send_sync_set_valid);
+    frb_add_reflection_point(0x00002390, on_bt_hci_cmd_send_sync_set_invalid);
+    frb_add_reflection_point(0x00002192, on_bt_hci_cmd_done_check_sema_validity);
+    frb_add_reflection_point(0x00002584, on_set_le_adv_enable_legacy_send_sync);
+    frb_add_reflection_point(0x00002162, on_hci_cmd_done_state_update);
+    frb_add_reflection_point(0x00001748, on_arch_swap_enter);
+    frb_add_reflection_point(0x0000177c, on_z_arm_pendsv);
+    frb_add_reflection_point(0x00001768, on_arch_swap_after_pendsv);
+    frb_add_reflection_point(0x0000ade2, on_k_queue_get_poll);
+    frb_add_reflection_point(0x000099ec, on_bt_att_sent);
+    frb_add_reflection_point(0x000043a2, on_bt_att_recv);
+    frb_add_reflection_point(0x000043a4, on_bt_att_recv);
+    frb_add_reflection_point(0x000043da, on_bt_att_recv);
+    frb_add_reflection_point(0x000099a2, on_bt_att_status);
+    frb_add_reflection_point(0x000027f2, on_conn_auto_initiate_call_work_submit);
+    frb_add_reflection_point(0x00003940, on_bt_conn_add_le_work_init);
+    frb_add_reflection_point(0x0000993c, on_bt_att_chan_req_send);
+    frb_add_reflection_point(0x0000214e, on_cmd_data_index);
+    frb_add_reflection_point(0x000022da, on_cmd_data_index);
+    frb_add_reflection_point(0x0000233c, on_cmd_data_index);
+    frb_add_reflection_point(0x00002584, on_cmd_data_index);
+    frb_add_reflection_point(0x0000aad2, z_fatal_error);
 }

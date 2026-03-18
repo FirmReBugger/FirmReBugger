@@ -46,12 +46,12 @@ RUN pip3 install watchdog
 # Install FirmReBugger
 USER user
 
-RUN pip3 install --user uv && \
-    git clone --depth 1 https://github.com/FirmReBugger/FirmReBugger.git /home/user/firmrebugger
+RUN pip3 install --user uv
 ENV PATH=$PATH:/home/user/.local/bin
 
+COPY --chown=user pyproject.toml uv.lock .python-version README.md /home/user/firmrebugger/
+RUN mkdir -p /home/user/firmrebugger/src/firmrebugger /home/user/firmrebugger/target
 WORKDIR /home/user/firmrebugger/target
-RUN uv run frb -h
 
 ENV GHIDRA_SRC=$FUZZER/ghidra
 ENV FIRMREBUGGER_BASE_DIR=/home/user/firmrebugger

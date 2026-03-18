@@ -1,24 +1,22 @@
 #include <tcclib.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 extern uint32_t reg_state[16];
 extern uint32_t frb_mem_read(uint32_t read_addr, size_t size);
-extern uint32_t frb_report_reached(const char* bug_id);
-extern uint32_t frb_report_detected_triggered(const char* bug_id);
+extern void frb_mem_write(uint32_t write_addr, uint32_t write_value, size_t size);
+extern void frb_report_detected_triggered(const char* bug_id);
+extern void frb_report_reached(const char* bug_id);
+extern uint32_t frb_symbolize(const char *symbol_name, uint32_t offset);
+extern void frb_add_reflection_point(uint32_t address, void (*introspection_point)(void));
+extern void frb_print_regs(void);
 
-typedef void (*func_ptr_t)(void);
-
-typedef struct {
-    uint32_t address;
-    func_ptr_t bug_func;
-} context_struct;
-
-static void report_detected_triggered(char* bug_id) {
+static void report_detected_triggered(const char* bug_id) {
     frb_report_detected_triggered(bug_id);
 }
 
-static void report_reached(char* bug_id) {
-   frb_report_reached(bug_id);
+static void report_reached(const char* bug_id) {
+    frb_report_reached(bug_id);
 }
 
 void BUG_FW43() {
@@ -63,7 +61,6 @@ void BUG_MF08() {
         report_detected_triggered("MF08");
     }
 }
-
 
 void BUG_FP_MF09() {
     report_reached("FP_MF09");
@@ -172,28 +169,22 @@ void div_by_zero_2() {
     }
 }
 
-context_struct context_array[] = {
-    {0x08004964, BUG_FW43},
-    {0x0800c538, BUG_FP_FW44},
-    {0x08005ba2, BUG_MF06}, //attach
-    {0x08005dfe, BUG_MF07}, // config
-    {0x08005d52, BUG_MF08}, //detach
-    {0x080058e6, BUG_FP_MF09},
-    {0x08001e36, BUG_E03},
-    {0x08008c4e, BUG_S05},
-    {0x08005e28, BUG_MF10}, //canbus config
-    {0x08005c6c, BUG_MF11}, //canbus attach
-    {0x08005d80, BUG_MF12}, //canbus detach
-    {0x08005f74, BUG_MF13}, //canbus send
-    {0x0800945a, BUG_MF14}, //pwm usec
-    {0x080004fa, BUG_MF15}, //pwm nsec
-    {0x080093be, BUG_MF16}, //pwm cycle
-    {0x0800c02c, div_by_zero},
-    {0x080023ce, div_by_zero_2}
-};
-
-void send_context_struct(const context_struct **arr, size_t *size) {
-    *arr = context_array;
-    *size = sizeof(context_array) / sizeof(context_array[0]);
+void register_reflection_points() {
+    frb_add_reflection_point(0x08004964, BUG_FW43);
+    frb_add_reflection_point(0x0800c538, BUG_FP_FW44);
+    frb_add_reflection_point(0x08005ba2, BUG_MF06);
+    frb_add_reflection_point(0x08005dfe, BUG_MF07);
+    frb_add_reflection_point(0x08005d52, BUG_MF08);
+    frb_add_reflection_point(0x080058e6, BUG_FP_MF09);
+    frb_add_reflection_point(0x08001e36, BUG_E03);
+    frb_add_reflection_point(0x08008c4e, BUG_S05);
+    frb_add_reflection_point(0x08005e28, BUG_MF10);
+    frb_add_reflection_point(0x08005c6c, BUG_MF11);
+    frb_add_reflection_point(0x08005d80, BUG_MF12);
+    frb_add_reflection_point(0x08005f74, BUG_MF13);
+    frb_add_reflection_point(0x0800945a, BUG_MF14);
+    frb_add_reflection_point(0x080004fa, BUG_MF15);
+    frb_add_reflection_point(0x080093be, BUG_MF16);
+    frb_add_reflection_point(0x0800c02c, div_by_zero);
+    frb_add_reflection_point(0x080023ce, div_by_zero_2);
 }
-

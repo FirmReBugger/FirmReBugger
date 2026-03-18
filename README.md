@@ -101,8 +101,14 @@ cd FirmReBugger
 export FIRMREBUGGER_BASE_DIR=$(pwd)
 # Fuzz your choice of binaries with 
 uv run frb fuzz -h
-# Recommened to connect to the frb docker and manually run the bug analyzer as it can take a while eg. 
-docker run -it --mount type=bind,source=./,target=/benchmark frb:<fuzzer> /bin/bash
+
+# Bind-mount your local FirmReBugger source for live updates in containers
+# (keeps you from rebuilding images for bug-analyzer changes)
+docker run -it \
+  --mount type=bind,source=./,target=/benchmark \
+  --mount type=bind,source=$(pwd)/src,target=/home/user/firmrebugger/src \
+  frb:<fuzzer> /bin/bash
+
 # Run the bug-analyzer
 cd <to_results_folder>
 uv run frb bug-analyzer <fuzzing_results_dir> <descriptor_path>
@@ -175,9 +181,11 @@ During execution, FirmReBugger automatically:
 ### Extending existing Ravens
 If you discover a new bug and want to extend an existing Raven:
 
-- Modify the corresponding `bug_descriptor.c` file located in the relevant binary’s directory.
+- Modify the corresponding `bug_descriptor.c` file located in the relevant binary's directory.
 
 - Follow the structure and conventions used in existing descriptors.
+
+- If your introspection point address is symbol-based, use `frb_symbolize("symbol_name", offset)` to resolve it at runtime from the binary's `symbols.txt` file. If the address is fixed, pass it directly to `frb_add_reflection_point`.
 
 
 ### Adding a New Binary and Its Corresponding Raven
@@ -185,16 +193,18 @@ If you discover a new bug and want to extend an existing Raven:
 1. Choose a benchmark suite (e.g., FirmBench, FirmBenchDMA, or FirmBenchX) and create a new folder named after your binary:
 
 ```
-src/<Benchmark>/<Binary>/
+<Benchmark>/<Binary>/
 ```
 
-2. Add the Raven implementation in:
+2. Add a `binary/` subdirectory containing the ELF.
+
+3. Add the Raven implementation in:
 
 ```
-bug_descriptor.c
+<Benchmark>/<Binary>/bug_descriptor.c
 ```
 
-3. Follow the existing directory structure for fuzzers:
+4. Follow the existing directory structure for fuzzers:
 
 ```
 <Benchmark>/<Binary>/fuzzers/<fuzzer>/fuzzing_out/<output_dir>/
@@ -234,6 +244,57 @@ FirmReBugger/
 ```
 
 
+## Raven API
+
+Every `bug_descriptor.c` starts with the same standard header:
+
+```c
+#include <tcclib.h>
+#include <stdint.h>
+#include <stdbool.h>
+
+extern uint32_t reg_state[16];
+extern uint32_t frb_mem_read(uint32_t read_addr, size_t size);
+extern void frb_mem_write(uint32_t write_addr, uint32_t write_value, size_t size);
+extern void frb_report_detected_triggered(const char* bug_id);
+extern void frb_report_reached(const char* bug_id);
+extern uint32_t frb_symbolize(const char *symbol_name, uint32_t offset);
+extern void frb_add_reflection_point(uint32_t address, void (*introspection_point)(void));
+extern void frb_print_regs(void);
+
+static void report_detected_triggered(const char* bug_id) {
+    frb_report_detected_triggered(bug_id);
+}
+
+static void report_reached(const char* bug_id) {
+    frb_report_reached(bug_id);
+}
+```
+
+Reflection points are registered in a single `register_reflection_points()` function using `frb_add_reflection_point`. Addresses can be hardcoded or resolved at runtime from `binary/symbols.txt` using `frb_symbolize(symbol_name, offset)`:
+
+```c
+void register_reflection_points() {
+    // Fixed address
+    frb_add_reflection_point(0x08004f8a, INTROSPECTION_FW11);
+    // Symbol-relative address (resolved from symbols.txt at runtime)
+    frb_add_reflection_point(frb_symbolize("printFloat", 0x1b2), INTROSPECTION_FW11);
+}
+```
+
+Available API functions:
+
+| Function | Description |
+|---|---|
+| `reg_state[0..15]` | Current ARM register values (r0–pc) at the reflection point |
+| `frb_mem_read(addr, size)` | Read `size` bytes from emulated memory at `addr` |
+| `frb_mem_write(addr, value, size)` | Write `value` of `size` bytes to emulated memory at `addr` |
+| `frb_report_reached(bug_id)` | Mark bug as reached (first time only) |
+| `frb_report_detected_triggered(bug_id)` | Mark bug as triggered/detected (first time only) |
+| `frb_symbolize(symbol, offset)` | Resolve `symbol` from `symbols.txt` and add `offset` (Thumb bit stripped) |
+| `frb_add_reflection_point(addr, fn)` | Register an introspection function at `addr` |
+| `frb_print_regs()` | Print all registers to stdout (debugging) |
+
 ## Raven Examples
 
 ### Stack Buffer Overflow
@@ -241,90 +302,83 @@ FirmReBugger/
 **Stack Buffer Overflow** occurs when data written to a buffer on the stack exceeds its allocated size, potentially corrupting adjacent memory. By introspecting buffer boundaries, sizes, and index calculations—along with placing unique reflection points—it is possible to identify buffer overflow bugs, as demonstrated in the following example.
 
 ```c
-context_struct hook_addresses[] = {
-    {0x08004f8a, BUG_FW11},
-    ...
-};
-
-// Stack buffer overflow in printFloat
-void BUG_FW11() {
+// Introspection point: FW11 - Stack buffer overflow in printFloat
+void INTROSPECTION_FW11() {
     report_reached("FW11");
-    if (frb_reg_state[2] > 9) {
+    if (reg_state[2] > 9) {
         report_detected_triggered("FW11");
     }
-    // Bug not reached
+}
+
+void register_reflection_points() {
+    frb_add_reflection_point(frb_symbolize("settings_store_global_setting", 0x1b2), INTROSPECTION_FW11);
 }
 ```
 
 _Listing: Stack buffer overflow example. A Raven crafted for bug "FW11" in the `CNC` target binary from P2IM._
 
-The listing above shows a Raven that captures a real-world stack buffer overflow (Bug ID: FW11) in the `CNC` binary, originally identified by fuzzware. The vulnerability occurs in the `printFloat` function, where user-controlled input sets the value of `settings.decimal_places`. This value is later used as an index into a stack-allocated buffer of size 10. Without bounds checking, values greater than 9 cause a stack buffer overflow.
+The listing above shows a Raven that captures a real-world stack buffer overflow (Bug ID: FW11) in the `CNC` binary, originally identified by Fuzzware. The vulnerability occurs in the `printFloat` function, where user-controlled input sets the value of `settings.decimal_places`. This value is later used as an index into a stack-allocated buffer of size 10. Without bounds checking, values greater than 9 cause a stack buffer overflow.
 
-The Raven for bug `BUG_FW11` creates a reflection point at the program counter address where the buffer indexing occurs. Introspection then checks if the index exceeds the buffer bounds. At this critical location in execution (address `0x08004fa`), the buffer index (`settings.decimal_places`) is held in register `R2`. By checking if the value in `R2` is greater than 9, the Raven precisely captures the triggering condition for this stack buffer overflow bug.
+The Raven registers a reflection point via `frb_symbolize`, resolving the hook address from `symbols.txt` at runtime rather than hardcoding it. At the hooked location, the buffer index (`settings.decimal_places`) is held in register `R2`. By checking if the value in `R2` is greater than 9, the Raven precisely captures the triggering condition for this stack buffer overflow bug.
 
 ### Type Confusion
 
 **Type Confusion** arises when a program erroneously interprets an incorrect type for a region of memory. As a consequence, the program may access fields, invoke functions, or perform operations that are invalid for the underlying data, leading to undefined behavior. Introspection of object types and pointer usage can help identify type confusion bugs.
 
-An illustrative example of a Raven is shown in the code below, based on the bug ID `MF01` reported by MultiFuzz in the **Zephyr SocketCAN** binary. In Zephyr's device model, each device is represented by a struct containing a pointer named `driver_api`. This pointer references a table of function pointers that define the operations supported by the device's driver, such as configuration or data transmission.
+An illustrative example of a Raven is shown in the code below, based on the bug ID `MF04` reported by MultiFuzz in the **Zephyr SocketCAN** binary. In Zephyr's device model, each device is represented by a struct containing a pointer named `driver_api`. This pointer references a table of function pointers that define the operations supported by the device's driver, such as configuration or data transmission.
 
 ```c
-context_struct hook_addresses[] = {
-    {0x08005e28, BUG_MF04},
-    ...
-}
-
-void BUG_MF04() {
+void INTROSPECTION_MF04() {
     report_reached("MF04");
-    //canbus fail to verify device type
-    uint32_t read_addr = frb_reg_state[0] + 0x4;
-    if (frb_mem_read(read_addr,4) != 0x0800f7e4){
+    // canbus fail to verify device type
+    uint32_t read_addr = reg_state[0] + 0x4;
+    if (frb_mem_read(read_addr, 4) != 0x0800f7e4) {
         report_detected_triggered("MF04");
     }
+}
+
+void register_reflection_points() {
+    frb_add_reflection_point(0x08005e28, INTROSPECTION_MF04);
 }
 ```
 
 The CAN bus subcommands allow users to specify a target device for command execution. At runtime, the target device is resolved using the `z_impl_device_get_binding` function, which returns a pointer to a generic device struct. However, no type verification is performed to ensure that the selected device implements the CAN bus API. As a result, if a non-CAN device is specified (such as a GPIO device), the subcommand will erroneously perform CAN bus operations on an incompatible device struct.
 
 
-### Danling Pointer
+### Dangling Pointer
 
 **Dangling Pointer** refers to a pointer that continues to reference freed memory or a stack frame that no longer exists. Dereferencing such pointers in C or C++ is considered undefined behavior and can result in unpredictable or erroneous program states. This is a common issue in manual memory management environments, particularly in C/C++ firmware.
 
 Identifying dangling pointer usage involves combining introspection at points where pointers become invalid with checks at locations where the invalid pointer may later be used.
 
 ```c
-context_struct hook_addresses[] = {
-    {0x0800c9b0, HAL_I2C_Mem_Read_ret},
-    {0x0800bd02, check_I2C_MasterTransmit_BTF},
-    ...
-}
-// Dangling pointer in HAL_I2C_Mem_Read
-void HAL_I2C_Mem_Read_ret(){
+// Dangling pointer in HAL_I2C_Mem_Read — poison the pointer on return
+void INTROSPECTION_HAL_I2C_Mem_Read_ret() {
     report_reached("FW19");
-    frb_mem_write(0x200030cc,0xDEADBEEF,4);
+    frb_mem_write(0x200030cc, 0xDEADBEEF, 4);
 }
 
-void check_I2C_MasterReceive_BTF () {
-    // check I2C_MasterReceive_BTF
-    /// uses invalid pointer
-    uint32_t ptr = frb_mem_read(0x200030cc,4);
+// Check whether the now-invalid pointer is later dereferenced
+void INTROSPECTION_check_I2C_MasterReceive_BTF() {
+    uint32_t ptr = frb_mem_read(0x200030cc, 4);
     if (ptr == 0xDEADBEEF) {
         report_detected_triggered("FW19");
     }
-    // Bug not reached
+}
+
+void register_reflection_points() {
+    frb_add_reflection_point(0x0800c9b0, INTROSPECTION_HAL_I2C_Mem_Read_ret);
+    frb_add_reflection_point(0x0800bd02, INTROSPECTION_check_I2C_MasterReceive_BTF);
 }
 ```
 
-_Listing: Real-world example of a Raven for bug "FW19" in the `Soldering_Iron` binary from P2IM. Here, writes to memory are used to invalidate pointer use._
+_Listing: Real-world example of a Raven for bug "FW19" in the `Soldering_Iron` binary from P2IM. Here, writes to memory are used to poison a dangling pointer so that any later use is detectable._
 
-Listing above highlights a dangling pointer bug (Bug ID: FW19) identified by fuzzware in the `Soldering_Iron` binary. The root cause lies in the function `HAL_I2C_Mem_Read`, which assigns a stack-allocated buffer from a higher-level function to the `pBuffPtr` member of a global I2C object. Once the calling function returns, the stack buffer becomes invalid, but the global I2C object continues to reference it.
+The listing above highlights a dangling pointer bug (Bug ID: FW19) identified by Fuzzware in the `Soldering_Iron` binary. The root cause lies in the function `HAL_I2C_Mem_Read`, which assigns a stack-allocated buffer from a higher-level function to the `pBuffPtr` member of a global I2C object. Once the calling function returns, the stack buffer becomes invalid, but the global I2C object continues to reference it.
 
 Later, in another interrupt, `MMA8652FC::getAxisReadings` is called, which invokes `FRToSI2C::Mem_Read` with a temporary stack buffer and its length as arguments. Due to the calling convention, the last two arguments (including the buffer length) are stored on the stack. If a hardware timer interrupt occurs before `HAL_I2C_Mem_Read` is called, the interrupt handler function `I2C_MasterReceive_BTF` writes to the global `pBuffPtr`, which still points to the now-reused stack location. This corrupts the buffer length argument, leading to a stack buffer overflow in `MMA8652FC::getAxisReadings`, which could overwrite the return address and grant arbitrary control over the instruction pointer.
 
-Dangling pointers are particularly hard to detect because a stale pointer might be dereferenced at many locations throughout the program. To facilitate triage, the introspection function `frb_mem_write` overwrites such pointers with garbage data. Consequently, any later use of the dangling pointer will crash the program, making the bug easier to identify.
-
-To capture this bug in a Raven, observe that once `HAL_I2C_Mem_Read` returns (at `0x0800c9b0`), the pointer stored in `pBuffPtr` becomes invalid. With `frb_mem_write`, we overwrite this pointer with a sentinel value (`0xDEADBEEF`). Each time the pointer is subsequently accessed (e.g., at `0x0800bd02`), the Raven checks whether its value equals `0xDEADBEEF`. If so, this indicates that the pointer has been incorrectly used, precisely capturing the condition that triggers the bug.
+Dangling pointers are particularly hard to detect because a stale pointer might be dereferenced at many locations throughout the program. To facilitate triage, `frb_mem_write` overwrites the pointer with a sentinel value (`0xDEADBEEF`) at the moment it becomes invalid. Any later use of the dangling pointer will then be caught by the second reflection point, making the bug easy to identify.
 
 
 

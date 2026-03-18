@@ -1,24 +1,26 @@
+import glob
+import json
+import os
+import re
+import sys
+
 from firmrebugger.bug_analyzer_utils.common import (
-    init_run,
     add_execution_time,
-    init_bug_info,
-    get_bench_info,
-    print_bug_info,
     extract_bug_ids,
+    get_bench_info,
+    init_bug_info,
+    init_run,
+    print_bug_info,
 )
-from firmrebugger.common import get_working_dirs
+from firmrebugger.bug_analyzer_utils.dice_analyzer import dice_analyzer
 from firmrebugger.bug_analyzer_utils.ember_analyzer import ember_analyzer
 from firmrebugger.bug_analyzer_utils.fuzzware_analyzer import fuzzware_analyzer
 from firmrebugger.bug_analyzer_utils.hoedur_analyzer import hoedur_analyzer
 from firmrebugger.bug_analyzer_utils.multifuzz_analyzer import multifuzzer_analyzer
-from firmrebugger.charting_tool_utils.summarize_data import summarize_data
 from firmrebugger.bug_analyzer_utils.semu_analyzer import semu_analyzer
-from firmrebugger.bug_analyzer_utils.dice_analyzer import dice_analyzer
-
-import os
-import sys
-import re
-import json
+from firmrebugger.charting_tool_utils.summarize_data import summarize_data
+from firmrebugger.commands.gen_symbols import run_gen_symbols
+from firmrebugger.common import get_working_dirs
 
 fuzzer_function_mapping = {
     "Ember-IO-Fuzzing": ember_analyzer,
@@ -58,6 +60,22 @@ def generate_frb_report(fuzzing_results_dir, descriptor_path):
     output_dirs = get_working_dirs(fuzzing_results_dir)
     bug_list = extract_bug_ids(descriptor_path)
     bench_info = get_bench_info(fuzzing_results_dir)
+
+    symbols_path = os.path.join(fuzzing_results_dir, "symbols.txt")
+    if os.path.isfile(symbols_path):
+        print(f"Found symbols file: {symbols_path}")
+        os.environ["FIRMREBUGGER_SYMBOLS"] = symbols_path
+    else:
+        elf_files = glob.glob(os.path.join(fuzzing_results_dir, "*.elf"))
+        if elf_files:
+            elf_path = elf_files[0]
+            print(f"symbols.txt not found, generating from ELF: {elf_path}")
+            run_gen_symbols(elf_path, symbols_path)
+            os.environ["FIRMREBUGGER_SYMBOLS"] = symbols_path
+        else:
+            print(
+                "Warning: symbols.txt not found and no ELF file found in results directory. frb_symbolize() will not work."
+            )
     fuzzer = bench_info["fuzzer"]
     target = bench_info["target"]
     data = {

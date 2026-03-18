@@ -4,7 +4,7 @@ FUZZER_IMAGE="frb:Ember-IO-Fuzzing"
 docker buildx build \
   --tag "$FUZZER_IMAGE" \
   --load \
-  --no-cache \
+  \
   --build-arg USERID="${USERID:-1000}" \
   -f docker/Ember-IO-Fuzzing/frb/Dockerfile \
   . \

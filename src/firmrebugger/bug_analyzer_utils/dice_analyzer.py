@@ -1,14 +1,15 @@
 import os
-import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
-import shutil
-from firmrebugger.bug_analyzer_utils.common import (
-    update_bug_data,
-    run_command,
-    periodic_printer,
-)
 import re
+import shutil
+import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from firmrebugger.bug_analyzer_utils.common import (
+    periodic_printer,
+    run_command,
+    update_bug_data,
+)
 
 
 def _extract_elf_name_from_cmdline(output_path):
@@ -234,6 +235,8 @@ def dice_analyzer(
         "ungrouped_crashes": 0,
         "Fuzzer": bench_info["fuzzer"],
         "Target": bench_info["target"],
+        "failed": False,
+        "failure_message": None,
     }
     stop_event = threading.Event()
 
@@ -243,41 +246,66 @@ def dice_analyzer(
     printer_thread.start()
     original_dir = os.getcwd()
 
-    _prepare_dice_compat_paths(output_path)
+    failure_exc = None
+    failure_tb = None
+    try:
+        _prepare_dice_compat_paths(output_path)
 
-    with ThreadPoolExecutor(max_workers=num_workers) as executor:
-        futures = []
-        # change dir
-        os.chdir(output_path)
-        model = final_model()
-        for seed_path in seeds:
-            command = f"stdbuf -oL -eL ./run_fw.py {model} {seed_path}"
-            futures.append(
-                executor.submit(
-                    run_command, command, seed_path, get_time_input(seed_path), Crash
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            futures = []
+            # change dir
+            os.chdir(output_path)
+            model = final_model()
+            for seed_path in seeds:
+                command = f"stdbuf -oL -eL ./run_fw.py {model} {seed_path}"
+                futures.append(
+                    executor.submit(
+                        run_command,
+                        command,
+                        seed_path,
+                        get_time_input(seed_path),
+                        Crash,
+                        10,
+                    )
                 )
-            )
 
-        for future in as_completed(futures):
-            result = future.result()
-            if result is None:
-                continue
-            seed_path, bugs_triggered, bugs_reached, time_val, elapsed, errors = result
-            execution_times.append(elapsed)
+            for future in as_completed(futures):
+                result = future.result()
+                if result is None:
+                    continue
+                seed_path, bugs_triggered, bugs_reached, time_val, elapsed, errors = (
+                    result
+                )
+                execution_times.append(elapsed)
 
-            run_data = update_bug_data(
-                run_data,
-                time_val,
-                seed_path,
-                bugs_triggered=bugs_triggered,
-                bugs_reached=bugs_reached,
-                Crash=Crash,
-            )
+                run_data = update_bug_data(
+                    run_data,
+                    time_val,
+                    seed_path,
+                    bugs_triggered=bugs_triggered,
+                    bugs_reached=bugs_reached,
+                    Crash=Crash,
+                )
 
-            progress["completed"] += 1
-            progress["ungrouped_crashes"] = len(run_data[0]["ungrouped_crashes"])
+                progress["completed"] += 1
+                progress["ungrouped_crashes"] = len(run_data[0]["ungrouped_crashes"])
+    except Exception as exc:
+        progress["failed"] = True
+        progress["failure_message"] = str(exc)
+        failure_exc = exc
+        failure_tb = exc.__traceback__
+    finally:
+        stop_event.set()
+        printer_thread.join()
+        os.chdir(original_dir)
 
-    stop_event.set()
-    printer_thread.join()
-    os.chdir(original_dir)
+    if failure_exc is not None:
+        print(
+            "\n[ERROR DICE Triaging] Triaging aborted due to replay error.\n"
+            f"{progress['failure_message']}\n",
+            file=sys.stderr,
+            flush=True,
+        )
+        raise failure_exc.with_traceback(failure_tb)
+
     return run_data, execution_times

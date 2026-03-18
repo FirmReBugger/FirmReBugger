@@ -1,49 +1,24 @@
 #include <tcclib.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 extern uint32_t reg_state[16];
 extern uint32_t frb_mem_read(uint32_t read_addr, size_t size);
-extern uint32_t frb_mem_write(uint32_t write_addr, uint32_t value, size_t size);
-extern void frb_report_detected_triggered(char* bug_id);
-extern void frb_report_reached(char* bug_id);
+extern void frb_mem_write(uint32_t write_addr, uint32_t write_value, size_t size);
+extern void frb_report_detected_triggered(const char* bug_id);
+extern void frb_report_reached(const char* bug_id);
+extern uint32_t frb_symbolize(const char *symbol_name, uint32_t offset);
+extern void frb_add_reflection_point(uint32_t address, void (*introspection_point)(void));
+extern void frb_print_regs(void);
 
-typedef void (*func_ptr_t)(void);
-
-typedef struct {
-    uint32_t address;
-    func_ptr_t bug_func;
-} context_struct;
-
-
-static void print_reg_state(uint32_t *reg_state){
-    printf("Register State:\n");
-    printf("r0:  0x%08X\n", reg_state[0]);
-    printf("r1:  0x%08X\n", reg_state[1]);
-    printf("r2:  0x%08X\n", reg_state[2]);
-    printf("r3:  0x%08X\n", reg_state[3]);
-    printf("r4:  0x%08X\n", reg_state[4]);
-    printf("r5:  0x%08X\n", reg_state[5]);
-    printf("r6:  0x%08X\n", reg_state[6]);
-    printf("r7:  0x%08X\n", reg_state[7]);
-    printf("r8:  0x%08X\n", reg_state[8]);
-    printf("r9:  0x%08X\n", reg_state[9]);
-    printf("r10: 0x%08X\n", reg_state[10]);
-    printf("r11: 0x%08X\n", reg_state[11]);
-    printf("r12: 0x%08X\n", reg_state[12]);
-    printf("sp:  0x%08X\n", reg_state[13]);
-    printf("lr:  0x%08X\n", reg_state[14]);
-    printf("pc:  0x%08X\n", reg_state[15]);
-}
-
-static void report_detected_triggered(char* bug_id) {
+static void report_detected_triggered(const char* bug_id) {
     frb_report_detected_triggered(bug_id);
-    fflush(stdout);
 }
 
-static void report_reached(char* bug_id) {
+static void report_reached(const char* bug_id) {
     frb_report_reached(bug_id);
-    fflush(stdout);
 }
+
 
 void BUG_FW12() {
     report_reached("FW12");
@@ -146,33 +121,25 @@ void three_wire(){
     uint32_t wire_len = frb_mem_read(0x200003b4,4);
     if (wire_len + 1 > 7) {
     report_detected_triggered("FP_FRB10");
-    } 
+    }
 }
 
-
-context_struct context_array[] = {
-    {0x08002fc6, BUG_FW12},
-    {0x0800878e, BUG_FP_FW21},
-    {0x08008768, BUG_FP_FW21},
-    {0x080050da, BUG_FP_FW22},
-    {0x0800501c, BUG_FP_FW22},
-    {0x080071ac, pwm_ret},
-    {0x08005e72, check_FW23_use}, 
-    {0x0800348a, BUG_E01},
-    {0x08003422, BUG_MF01},
-    {0x0800515a, BUG_FP_FRB01},
-    {0x080050da, BUG_FP_FRB01},
-    {0x08004f8e, BUG_FP_FRB02},
-    {0x080050da, BUG_FP_FRB03},
-    {0x0800501c, BUG_FP_FRB03},
-    {0x08004e5e, BUG_FP_FRB04},
-    {0x0800711c, pwm_started},
-    {0x08002890, three_wire}
-};
-
-void send_context_struct(const context_struct **arr, size_t *size) {
-    *arr = context_array;
-    *size = sizeof(context_array) / sizeof(context_array[0]);
-    
+void register_reflection_points() {
+    frb_add_reflection_point(0x08002fc6, BUG_FW12);
+    frb_add_reflection_point(0x0800878e, BUG_FP_FW21);
+    frb_add_reflection_point(0x08008768, BUG_FP_FW21);
+    frb_add_reflection_point(0x080050da, BUG_FP_FW22);
+    frb_add_reflection_point(0x0800501c, BUG_FP_FW22);
+    frb_add_reflection_point(0x080071ac, pwm_ret);
+    frb_add_reflection_point(0x08005e72, check_FW23_use);
+    frb_add_reflection_point(0x0800348a, BUG_E01);
+    frb_add_reflection_point(0x08003422, BUG_MF01);
+    frb_add_reflection_point(0x0800515a, BUG_FP_FRB01);
+    frb_add_reflection_point(0x080050da, BUG_FP_FRB01);
+    frb_add_reflection_point(0x08004f8e, BUG_FP_FRB02);
+    frb_add_reflection_point(0x080050da, BUG_FP_FRB03);
+    frb_add_reflection_point(0x0800501c, BUG_FP_FRB03);
+    frb_add_reflection_point(0x08004e5e, BUG_FP_FRB04);
+    frb_add_reflection_point(0x0800711c, pwm_started);
+    frb_add_reflection_point(0x08002890, three_wire);
 }
-

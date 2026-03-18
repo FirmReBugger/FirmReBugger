@@ -9,6 +9,7 @@ from firmrebugger.commands.bug_analyzer import run_bug_analyzer
 from firmrebugger.commands.build import build_fuzzers
 from firmrebugger.commands.charting_tool import run_charting_tool
 from firmrebugger.commands.fuzz import fuzz
+from firmrebugger.commands.gen_symbols import run_gen_symbols
 from firmrebugger.commands.web_app import run_app
 from firmrebugger.common import get_frb_base_dir, menu, parse_fuzzing_time
 
@@ -46,6 +47,7 @@ Commands:
   build           Build fuzzers with Docker.
   bug-analyzer    Generate FirmReBugger bug reports.
   charting-tool   Visualizes data from FirmReBugger reports.
+  gen-symbols     Generate symbols.txt from an ELF file.
   app             Run the FirmReBugger web application.
 Note:
   It is recommended to build the FirmReBugger versions locally.
@@ -177,6 +179,24 @@ def bug_analyzer(fuzzing_results_dir, descriptor_path):
     run_bug_analyzer(fuzzing_results_dir, descriptor_path)
 
 
+@main.command("gen-symbols")
+@click.argument("elf_path")
+@click.option(
+    "--output",
+    "-o",
+    default=None,
+    help="Output path for symbols.txt [default: next to the ELF]",
+)
+def gen_symbols(elf_path, output):
+    """Generate symbols.txt from an ELF file.
+
+    \b
+    Arguments:
+      ELF_PATH  Path to the ARM ELF binary.
+    """
+    run_gen_symbols(elf_path, output)
+
+
 @main.command("charting-tool")
 def charting_tool():
     """Visualizes data from FirmReBugger reports."""
@@ -185,7 +205,13 @@ def charting_tool():
 
 @main.command("backend")
 @click.option("--port", "-p", default=5000, help="Port for backend")
-@click.option("--host", "-h", default="127.0.0.1", show_default=True, help="Host interface to bind to")
+@click.option(
+    "--host",
+    "-h",
+    default="127.0.0.1",
+    show_default=True,
+    help="Host interface to bind to",
+)
 def backend(port, host):
     """Run the FirmReBugger backend."""
     run_app(port, host)
@@ -193,7 +219,13 @@ def backend(port, host):
 
 @main.command("app")
 @click.option("--port", "-p", default=5000, help="Port for backend")
-@click.option("--host", "-h", default="127.0.0.1", show_default=True, help="Host interface to bind to")
+@click.option(
+    "--host",
+    "-h",
+    default="127.0.0.1",
+    show_default=True,
+    help="Host interface to bind to",
+)
 def app(port, host):
     """Run the FirmReBugger web application."""
     base_dir = get_frb_base_dir()

@@ -1,15 +1,17 @@
-import os
-import sys
-import subprocess
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from firmrebugger.bug_analyzer_utils.common import (
-    update_bug_data,
-    run_command,
-    periodic_printer,
-)
-import threading
-from firmrebugger.common import get_working_dirs
 import glob
+import os
+import shlex
+import subprocess
+import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from firmrebugger.bug_analyzer_utils.common import (
+    periodic_printer,
+    run_command,
+    update_bug_data,
+)
+from firmrebugger.common import get_working_dirs
 
 
 def get_time_data_fuzzware(crash_timing_path):
@@ -120,9 +122,6 @@ def fuzzware_analyzer(
     else:
         seed_info = get_time_data_fuzzware(input_timing_path)
 
-    num_cores = os.cpu_count()
-    num_workers = max(1, int(num_cores) - 1)
-
     progress = {
         "completed": 0,
         "total": len(seed_info),
@@ -130,6 +129,8 @@ def fuzzware_analyzer(
         "ungrouped_crashes": 0,
         "Fuzzer": bench_info["fuzzer"],
         "Target": bench_info["target"],
+        "failed": False,
+        "failure_message": None,
     }
     stop_event = threading.Event()
 
@@ -138,19 +139,17 @@ def fuzzware_analyzer(
     )
     printer_thread.start()
 
-    with ThreadPoolExecutor(max_workers=num_workers) as executor:
-        futures = []
+    failure_exc = None
+    failure_tb = None
+    try:
+        # Run sequentially so the first replay failure is surfaced immediately.
         for time_val, seed_path in seed_info:
             full_seed_path = os.path.join(output_path, seed_path)
-            command = f"fuzzware replay -v {full_seed_path}"
-            futures.append(
-                executor.submit(run_command, command, seed_path, time_val, Crash)
-            )
-
-        for future in as_completed(futures):
-            result = future.result()
+            command = f"fuzzware replay -v {shlex.quote(full_seed_path)}"
+            result = run_command(command, seed_path, time_val, Crash, 10)
             if result is None:
                 continue
+
             seed_path, bugs_triggered, bugs_reached, time_val, elapsed, errors = result
             execution_times.append(elapsed)
             if errors:
@@ -166,8 +165,22 @@ def fuzzware_analyzer(
             )
             progress["completed"] += 1
             progress["ungrouped_crashes"] = len(run_data[0]["ungrouped_crashes"])
+    except Exception as exc:
+        progress["failed"] = True
+        progress["failure_message"] = str(exc)
+        failure_exc = exc
+        failure_tb = exc.__traceback__
+    finally:
+        stop_event.set()
+        printer_thread.join()
 
-    stop_event.set()
-    printer_thread.join()
+    if failure_exc is not None:
+        print(
+            "\n[ERROR Fuzzware Triaging] Triaging aborted due to replay error.\n"
+            f"{progress['failure_message']}\n",
+            file=sys.stderr,
+            flush=True,
+        )
+        raise failure_exc.with_traceback(failure_tb)
 
     return run_data, execution_times

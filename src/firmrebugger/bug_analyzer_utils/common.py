@@ -1,11 +1,12 @@
-import os
-import yaml
-import time
-import subprocess
-import re
-import sys
 import io
 import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+import yaml
 
 
 def extract_bug_ids(file_path):
@@ -106,7 +107,11 @@ def periodic_printer(run_data, stop_event, progress, crash):
     prev_lines_printed = 0
     final_print_done = False
 
-    while not stop_event.is_set() and progress["completed"] < progress["total"]:
+    while (
+        not stop_event.is_set()
+        and not progress.get("failed", False)
+        and progress["completed"] < progress["total"]
+    ):
         lines_to_print = 1 + count_lines_of_bug_info(run_data)
 
         for _ in range(prev_lines_printed):
@@ -133,7 +138,29 @@ def periodic_printer(run_data, stop_event, progress, crash):
         if progress["completed"] == progress["total"]:
             final_print_done = True
 
-    if not final_print_done:
+    if progress.get("failed", False):
+        for _ in range(prev_lines_printed):
+            sys.stdout.write("\x1b[1A")
+        for _ in range(prev_lines_printed):
+            sys.stdout.write("\x1b[2K")
+            sys.stdout.write("\x1b[1B")
+        for _ in range(prev_lines_printed):
+            sys.stdout.write("\x1b[1A")
+        sys.stdout.flush()
+
+        print(
+            f"[Progress {crash_str}] ABORTED: {progress['completed']}/{progress['total']} | "
+            f"{progress['Fuzzer']} | "
+            f"{progress['Target']} | "
+            f"{progress['run_name']} | "
+            f"Total Ungrouped crashes: {progress['ungrouped_crashes']} |"
+        )
+        print_bug_info(run_data)
+        if progress.get("failure_message"):
+            print("[Progress Error] MultiFuzz replay error details:")
+            print(progress["failure_message"])
+        sys.stdout.flush()
+    elif not final_print_done and progress["completed"] >= progress["total"]:
         for _ in range(prev_lines_printed):
             sys.stdout.write("\x1b[1A")
         for _ in range(prev_lines_printed):
@@ -277,9 +304,18 @@ def get_bench_info(result_dir):
 
 
 # Run seed to get time and reached/triggered info
-def run_command(command, seed_path, time_val, Crash):
+def run_command(command, seed_path, time_val, Crash, timeout=None):
     start = time.time()
-    result = subprocess.run(command, shell=True, text=True, capture_output=True)
+    try:
+        result = subprocess.run(
+            command, shell=True, text=True, capture_output=True, timeout=timeout
+        )
+    except subprocess.TimeoutExpired:
+        elapsed = time.time() - start
+        print(
+            f"[run_command] Timeout ({timeout}s) exceeded for seed: {seed_path} — skipping."
+        )
+        return seed_path, [], [], time_val, elapsed, []
     end = time.time()
     elapsed = end - start
 
@@ -306,5 +342,33 @@ def run_command(command, seed_path, time_val, Crash):
             if "input file not read until end" in result.stderr:
                 # print(f"Warning: {seed_path} was not read until the end.")
                 errors.append(seed_path)
+
+    combined_output = f"{result.stdout or ''}\n{result.stderr or ''}"
+    combined_lower = combined_output.lower()
+    has_frb_config_init = "firmrebugger config" in combined_lower
+    has_c_parse_error = (
+        re.search(r":\d+:\s*error:", combined_output, re.IGNORECASE) is not None
+    )
+    has_descriptor_string_error = (
+        re.search(r"<string>:\d+:\s*error:", combined_output, re.IGNORECASE) is not None
+    )
+    has_bug_descriptor_hint = (
+        "bug_descriptor" in combined_lower or "firmrebugger" in combined_lower
+    )
+    has_missing_config_error = "please set firmrebugger_config path" in combined_lower
+    descriptor_error = (
+        (has_frb_config_init and has_c_parse_error)
+        or (has_descriptor_string_error and has_bug_descriptor_hint)
+        or has_descriptor_string_error
+        or has_missing_config_error
+    )
+
+    if descriptor_error:
+        output_tail = "\n".join(combined_output.splitlines()[-30:])
+        raise RuntimeError(
+            "Triaging replay failed "
+            f"(seed: {seed_path}, exit code: {result.returncode}).\n"
+            f"output (tail):\n{output_tail}"
+        )
 
     return seed_path, bugs_triggered, bugs_reached, time_val, elapsed, errors

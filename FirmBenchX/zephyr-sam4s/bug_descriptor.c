@@ -1,44 +1,24 @@
-#include <stdbool.h>
-#include <stdint.h>
 #include <tcclib.h>
+#include <stdint.h>
+#include <stdbool.h>
 
 extern uint32_t reg_state[16];
 extern uint32_t frb_mem_read(uint32_t read_addr, size_t size);
-extern void report_detected_triggered(char *bug_id);
-extern void frb_report_reached(char *bug_id);
+extern void frb_mem_write(uint32_t write_addr, uint32_t write_value, size_t size);
+extern void frb_report_detected_triggered(const char* bug_id);
+extern void frb_report_reached(const char* bug_id);
+extern uint32_t frb_symbolize(const char *symbol_name, uint32_t offset);
+extern void frb_add_reflection_point(uint32_t address, void (*introspection_point)(void));
+extern void frb_print_regs(void);
 
-typedef void (*func_ptr_t)(void);
-
-typedef struct {
-  uint32_t address;
-  func_ptr_t bug_func;
-} context_struct;
-
-static void report_detected_triggered(char *bug_id) {
-  report_detected_triggered(bug_id);
+static void report_detected_triggered(const char* bug_id) {
+    frb_report_detected_triggered(bug_id);
 }
 
-static void report_reached(char *bug_id) { frb_report_reached(bug_id); }
-
-static void print_reg_state(uint32_t *reg_state) {
-  printf("Register State:\n");
-  printf("r0:  0x%08X\n", reg_state[0]);
-  printf("r1:  0x%08X\n", reg_state[1]);
-  printf("r2:  0x%08X\n", reg_state[2]);
-  printf("r3:  0x%08X\n", reg_state[3]);
-  printf("r4:  0x%08X\n", reg_state[4]);
-  printf("r5:  0x%08X\n", reg_state[5]);
-  printf("r6:  0x%08X\n", reg_state[6]);
-  printf("r7:  0x%08X\n", reg_state[7]);
-  printf("r8:  0x%08X\n", reg_state[8]);
-  printf("r9:  0x%08X\n", reg_state[9]);
-  printf("r10: 0x%08X\n", reg_state[10]);
-  printf("r11: 0x%08X\n", reg_state[11]);
-  printf("r12: 0x%08X\n", reg_state[12]);
-  printf("sp:  0x%08X\n", reg_state[13]);
-  printf("lr:  0x%08X\n", reg_state[14]);
-  printf("pc:  0x%08X\n", reg_state[15]);
+static void report_reached(const char* bug_id) {
+    frb_report_reached(bug_id);
 }
+
 
 void on_CVE_2021_3322() {
   // Check for NULL ptr in pkt->frags
@@ -126,7 +106,7 @@ void on_ieee802154_validate_frame() {
 void on_ieee802154_recv() {
   report_reached("FP_FRB16");
   // MPDU->dst = 0
-  print_reg_state(reg_state);
+  frb_print_regs();
   uint32_t sp = reg_state[13];
   uint32_t mpdu_dst = frb_mem_read(sp + 8, 4);
   uint32_t mpdu_src = frb_mem_read(sp + 12, 4);
@@ -150,21 +130,18 @@ void on_net_6lo_uncompress() {
   }
 }
 
-context_struct context_array[] = {{0x00406c58, on_CVE_2021_3322},
-                                  {0x00406c96, on_CVE_2021_3323_callsite_1},
-                                  {0x00406c9e, on_CVE_2021_3323_callsite_2},
-                                  {0x0040cf4c, on_CVE_2021_3321},
-                                  {0x0040d302, on_CVE_2021_3319},
-                                  {0x0040d3c4, on_CVE_2021_3319},
-                                  {0x0040d41a, on_CVE_2021_3319},
-                                  {0x0040d416, on_CVE_2021_3319},
-                                  {0x0040d130, on_CVE_2021_3320},
-                                  {0x0040d4c4, on_ieee802154_validate_frame},
-                                  {0x0040d110, on_ieee802154_recv},
-                                  {0x0040d070, on_net_buf_simple_pull},
-                                  {0x00406c7a, on_net_6lo_uncompress}};
-
-void send_context_struct(const context_struct **arr, size_t *size) {
-  *arr = context_array;
-  *size = sizeof(context_array) / sizeof(context_array[0]);
+void register_reflection_points() {
+    frb_add_reflection_point(0x00406c58, on_CVE_2021_3322);
+    frb_add_reflection_point(0x00406c96, on_CVE_2021_3323_callsite_1);
+    frb_add_reflection_point(0x00406c9e, on_CVE_2021_3323_callsite_2);
+    frb_add_reflection_point(0x0040cf4c, on_CVE_2021_3321);
+    frb_add_reflection_point(0x0040d302, on_CVE_2021_3319);
+    frb_add_reflection_point(0x0040d3c4, on_CVE_2021_3319);
+    frb_add_reflection_point(0x0040d41a, on_CVE_2021_3319);
+    frb_add_reflection_point(0x0040d416, on_CVE_2021_3319);
+    frb_add_reflection_point(0x0040d130, on_CVE_2021_3320);
+    frb_add_reflection_point(0x0040d4c4, on_ieee802154_validate_frame);
+    frb_add_reflection_point(0x0040d110, on_ieee802154_recv);
+    frb_add_reflection_point(0x0040d070, on_net_buf_simple_pull);
+    frb_add_reflection_point(0x00406c7a, on_net_6lo_uncompress);
 }

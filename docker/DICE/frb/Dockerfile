@@ -24,16 +24,16 @@ RUN patchelf --replace-needed librt.so.1 /lib/x86_64-linux-gnu/librt.so.1 qemu-s
 # Install FirmReBugger
 USER user
 # Install `uv`
-RUN pip3 install --user uv && \
-    git clone --depth 1 https://github.com/FirmReBugger/FirmReBugger.git /home/user/firmrebugger
+RUN pip3 install --user uv
 ENV PATH=$PATH:/home/user/.local/bin
 
-# Install UV and run FirmReBugger installation script
+COPY --chown=user pyproject.toml uv.lock .python-version README.md /home/user/firmrebugger/
+# Prepare mount points for FirmReBugger source (bind-mount at runtime)
+RUN mkdir -p /home/user/firmrebugger/src/firmrebugger /home/user/firmrebugger/target
 WORKDIR /home/user/firmrebugger/target
-RUN uv run frb -h
 
 ENV DICE_BASE_DIR=$FUZZER/build/DICE-DMA-Emulation
-ENV DICE_QEMU=/home/user/DICE/build/DICE-DMA-Emulation/p2im/qemu/src/install/debian64/qemu/bin/qemu-system-gnuarmeclipse 
+ENV DICE_QEMU=/home/user/DICE/build/DICE-DMA-Emulation/p2im/qemu/src/install/debian64/qemu/bin/qemu-system-gnuarmeclipse
 ENV FIRMREBUGGER_BASE_DIR=/home/user/firmrebugger
 
 ENTRYPOINT ["uv", "run", "frb", "bug-analyzer", "."]
