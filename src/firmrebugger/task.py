@@ -1,9 +1,10 @@
 import os
+import shutil
+import subprocess
 import threading
 import time
+
 from firmrebugger.common import get_frb_base_dir
-import subprocess
-import shutil
 
 
 def get_runtime_docker_env():
@@ -486,6 +487,8 @@ class Task:
                 container_name,
                 "--mount",
                 f"type=bind,source={output_dir},target=/home/user/firmrebugger/target",
+                "--mount",
+                f"type=bind,source={os.path.join(base_dir, 'src')},target=/home/user/firmrebugger/src",
                 "--cpuset-cpus",
                 core_str,
             ]

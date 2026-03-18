@@ -49,27 +49,8 @@ USER user
 RUN pip3 install --user uv
 ENV PATH=$PATH:/home/user/.local/bin
 
-# Copy local FirmReBugger source directly so uncommitted changes are always
-# picked up. We skip firmrebugger-web/ and commands/web_app.py since the
-# containers only need fuzz, build, bug-analyzer, and charting-tool.
-RUN mkdir -p /home/user/firmrebugger/src/firmrebugger/bug_analyzer_utils \
-             /home/user/firmrebugger/src/firmrebugger/charting_tool_utils \
-             /home/user/firmrebugger/src/firmrebugger/commands \
-             /home/user/firmrebugger/src/firmrebugger/fuzzer_runners
 COPY --chown=user pyproject.toml uv.lock .python-version README.md /home/user/firmrebugger/
-COPY --chown=user src/firmrebugger/__init__.py   /home/user/firmrebugger/src/firmrebugger/
-COPY --chown=user src/firmrebugger/cli.py        /home/user/firmrebugger/src/firmrebugger/
-COPY --chown=user src/firmrebugger/common.py     /home/user/firmrebugger/src/firmrebugger/
-COPY --chown=user src/firmrebugger/app_utils.py  /home/user/firmrebugger/src/firmrebugger/
-COPY --chown=user src/firmrebugger/fuzzer.py     /home/user/firmrebugger/src/firmrebugger/
-COPY --chown=user src/firmrebugger/manager.py    /home/user/firmrebugger/src/firmrebugger/
-COPY --chown=user src/firmrebugger/task.py       /home/user/firmrebugger/src/firmrebugger/
-COPY --chown=user src/firmrebugger/bug_analyzer_utils/   /home/user/firmrebugger/src/firmrebugger/bug_analyzer_utils/
-COPY --chown=user src/firmrebugger/charting_tool_utils/  /home/user/firmrebugger/src/firmrebugger/charting_tool_utils/
-COPY --chown=user src/firmrebugger/fuzzer_runners/       /home/user/firmrebugger/src/firmrebugger/fuzzer_runners/
-COPY --chown=user src/firmrebugger/commands/                  /home/user/firmrebugger/src/firmrebugger/commands/
-WORKDIR /home/user/firmrebugger
-RUN uv run frb -h
+RUN mkdir -p /home/user/firmrebugger/src/firmrebugger /home/user/firmrebugger/target
 WORKDIR /home/user/firmrebugger/target
 
 ENV GHIDRA_SRC=$FUZZER/ghidra

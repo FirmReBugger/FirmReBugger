@@ -101,8 +101,14 @@ cd FirmReBugger
 export FIRMREBUGGER_BASE_DIR=$(pwd)
 # Fuzz your choice of binaries with 
 uv run frb fuzz -h
-# Recommened to connect to the frb docker and manually run the bug analyzer as it can take a while eg. 
-docker run -it --mount type=bind,source=./,target=/benchmark frb:<fuzzer> /bin/bash
+
+# Bind-mount your local FirmReBugger source for live updates in containers
+# (keeps you from rebuilding images for bug-analyzer changes)
+docker run -it \
+  --mount type=bind,source=./,target=/benchmark \
+  --mount type=bind,source=$(pwd)/src,target=/home/user/firmrebugger/src \
+  frb:<fuzzer> /bin/bash
+
 # Run the bug-analyzer
 cd <to_results_folder>
 uv run frb bug-analyzer <fuzzing_results_dir> <descriptor_path>
@@ -190,14 +196,7 @@ If you discover a new bug and want to extend an existing Raven:
 <Benchmark>/<Binary>/
 ```
 
-2. Add a `binary/` subdirectory containing the ELF and a `symbols.txt` file. `symbols.txt` is a plain-text file with one `<symbol_name> <address>` entry per line, e.g.:
-
-```
-printFloat 0x08004f80
-current_block 0x20001234
-```
-
-This file is automatically discovered by FirmReBugger at triage time and exposed to Ravens via `frb_symbolize`.
+2. Add a `binary/` subdirectory containing the ELF.
 
 3. Add the Raven implementation in:
 
