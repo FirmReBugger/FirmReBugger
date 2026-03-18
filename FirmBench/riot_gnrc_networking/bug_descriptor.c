@@ -1,49 +1,27 @@
-#include <stdbool.h>
-#include <stdint.h>
 #include <tcclib.h>
+#include <stdint.h>
+#include <stdbool.h>
 
 extern uint32_t reg_state[16];
 extern uint32_t frb_mem_read(uint32_t read_addr, size_t size);
-extern void frb_report_detected_triggered(char *bug_id);
-extern void frb_report_reached(char *bug_id);
+extern void frb_mem_write(uint32_t write_addr, uint32_t write_value, size_t size);
+extern void frb_report_detected_triggered(const char* bug_id);
+extern void frb_report_reached(const char* bug_id);
+extern uint32_t frb_symbolize(const char *symbol_name, uint32_t offset);
+extern void frb_add_reflection_point(uint32_t address, void (*introspection_point)(void));
+extern void frb_print_regs(void);
 
-static void print_reg_state(uint32_t *reg_state) {
-  printf("Register State:\n");
-  printf("r0:  0x%08X\n", reg_state[0]);
-  printf("r1:  0x%08X\n", reg_state[1]);
-  printf("r2:  0x%08X\n", reg_state[2]);
-  printf("r3:  0x%08X\n", reg_state[3]);
-  printf("r4:  0x%08X\n", reg_state[4]);
-  printf("r5:  0x%08X\n", reg_state[5]);
-  printf("r6:  0x%08X\n", reg_state[6]);
-  printf("r7:  0x%08X\n", reg_state[7]);
-  printf("r8:  0x%08X\n", reg_state[8]);
-  printf("r9:  0x%08X\n", reg_state[9]);
-  printf("r10: 0x%08X\n", reg_state[10]);
-  printf("r11: 0x%08X\n", reg_state[11]);
-  printf("r12: 0x%08X\n", reg_state[12]);
-  printf("sp:  0x%08X\n", reg_state[13]);
-  printf("lr:  0x%08X\n", reg_state[14]);
-  printf("pc:  0x%08X\n", reg_state[15]);
+static void report_detected_triggered(const char* bug_id) {
+    frb_report_detected_triggered(bug_id);
 }
 
-typedef void (*func_ptr_t)(void);
+static void report_reached(const char* bug_id) {
+    frb_report_reached(bug_id);
+}
 
 typedef struct {
   uint8_t missing_src;
 } NetifHdr;
-
-typedef struct {
-  uint32_t address;
-  func_ptr_t bug_func;
-} context_struct;
-
-static void report_detected_triggered(char *bug_id) {
-  frb_report_detected_triggered(bug_id);
-}
-
-static void report_reached(char *bug_id) { frb_report_reached(bug_id); }
-
 void H19() {
   report_reached("H19");
   uint32_t rh = reg_state[1];
@@ -58,7 +36,7 @@ void H19() {
 
 uint8_t missing_src = 0;
 
-void gnrc_sixlowpan_frag_vrb_get(r) {
+void gnrc_sixlowpan_frag_vrb_get() {
   uint32_t src_len = reg_state[1];
   if (src_len == 0) {
     missing_src = 1;
@@ -271,44 +249,22 @@ void on_gnrc_sixlowpan_iphc_revec() {
   }
 }
 
-context_struct context_array[] = {
-    {0x0020c994, H19},
-    {0x0020a3c0, gnrc_netif_hdr_build},
-    {0x0020ea14, gnrc_sixlowpan_frag_vrb_get},
-    {0x0020fbea, H21},
-    {0x0020fbe2, H22},
-    {0x0020d682, H23},
-    {0x0020f156, H24},
-    {0x0020f10e, H25},
-    {0x0020f7b8, gnrc_sixlowpan_iphc_recv},
-    {0x0020ad4c, gnrc_pktbuf_mark},
-    {0x0020dd20, H27},
-    {0x00213e28, shell_command},
-    {0x00201738, core_panic_exit},
-    // {0x0020abd4, on_gnrc_pktbuf_hold},
-    // {0x00200dc8, msg_receive_start},
-    // {0x00200dfc, msg_receive_end},
-    // {0x0020aa38, on_release},
-    // {0x20acc8, set_pkt_snip},
-    // {0x00202af4, send_check},
-    // {0x0020396c, send_check},
-    // {0x00203dc0, send_check},
-    // {0x00208ed4, send_check},
-    // {0x0020a2a8, send_check},
-    // {0x0020a4f0, send_check},
-    // {0x00212d82, send_check},
-    // {0x0021181c, event_loop_check},
-    {0x00200468, RFCORE_ASSERT_failure_exit},
-    // {0x0020cb86, on_gnrc_sixlowpan_dispatch_send},
-    //     {0x0020e9ba, test},
-    {0x0021181c, check_wildcard_udp},
-    {0x0020469a, on_gnrc_ipv6_ext_process_all},
-    {0x0020fbde, on_gnrc_sixlowpan_iphc_revec},
-    // {0x00201020, on_msg_send},
-    // {0x0020cb54, on_gnrc_sixlowpan_dispatch_send_0}
-};
-
-void send_context_struct(const context_struct **arr, size_t *size) {
-  *arr = context_array;
-  *size = sizeof(context_array) / sizeof(context_array[0]);
+void register_reflection_points() {
+    frb_add_reflection_point(0x0020c994, H19);
+    frb_add_reflection_point(0x0020a3c0, gnrc_netif_hdr_build);
+    frb_add_reflection_point(0x0020ea14, gnrc_sixlowpan_frag_vrb_get);
+    frb_add_reflection_point(0x0020fbea, H21);
+    frb_add_reflection_point(0x0020fbe2, H22);
+    frb_add_reflection_point(0x0020d682, H23);
+    frb_add_reflection_point(0x0020f156, H24);
+    frb_add_reflection_point(0x0020f10e, H25);
+    frb_add_reflection_point(0x0020f7b8, gnrc_sixlowpan_iphc_recv);
+    frb_add_reflection_point(0x0020ad4c, gnrc_pktbuf_mark);
+    frb_add_reflection_point(0x0020dd20, H27);
+    frb_add_reflection_point(0x00213e28, shell_command);
+    frb_add_reflection_point(0x00201738, core_panic_exit);
+    frb_add_reflection_point(0x00200468, RFCORE_ASSERT_failure_exit);
+    frb_add_reflection_point(0x0021181c, check_wildcard_udp);
+    frb_add_reflection_point(0x0020469a, on_gnrc_ipv6_ext_process_all);
+    frb_add_reflection_point(0x0020fbde, on_gnrc_sixlowpan_iphc_revec);
 }

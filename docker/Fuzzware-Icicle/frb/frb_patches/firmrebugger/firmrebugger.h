@@ -3,11 +3,11 @@
 typedef void* EmuData;
 typedef void* Vm;
 
-//Context Struct
+/* Context Struct */
 typedef void (*func_ptr_t)(void);
 typedef struct {
     uint32_t address;
-    func_ptr_t bug_func;
+    func_ptr_t introspection_point;
 } context_struct;
 
 typedef struct CrashLoggerEmu CrashLoggerEmu;

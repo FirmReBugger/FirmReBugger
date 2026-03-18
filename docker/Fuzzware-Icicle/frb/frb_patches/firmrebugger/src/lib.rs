@@ -60,7 +60,7 @@ unsafe extern "C" fn firmrebugger_mem_write(
 unsafe extern "C" fn firmrebugger_add_hook(
     vm: *mut std::ffi::c_void,
     emu: *mut CrashLoggerEmu,
-    context: context_struct,  
+    context: context_struct,
     callback: firmrebugger_callback,
 ) {
     let vm: *mut icicle_vm::Vm = vm.cast();
@@ -70,3 +70,4 @@ unsafe extern "C" fn firmrebugger_add_hook(
         (callback)(emu, context);
     });
 }
+

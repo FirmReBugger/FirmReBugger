@@ -14,40 +14,63 @@
 #include <sys/wait.h>
 #include <ctype.h>
 #include <stdbool.h>
+#include <limits.h>
 
 #include "firmrebugger.h"
 #include "/home/user/SEmu-Fuzz/tinycc/libtcc.h"
 
 static TCCState *tcc_state;
 uint32_t reg_state[16];
-static size_t global_hook_num;
 static uc_engine *uc_state;
 
-//Context Struct
+/* Context Struct */
 typedef void (*func_ptr_t)(void);
 typedef struct {
     uint32_t address;
-    func_ptr_t bug_func;
+    func_ptr_t introspection_point;
 } context_struct;
-static const context_struct *bug_struct;
 
-static void populate_reg_state(uint32_t *reg_state, uc_engine *uc, uint64_t curr_addr) {
-  uc_reg_read(uc, UC_ARM_REG_R0, &reg_state[0]);
-  uc_reg_read(uc, UC_ARM_REG_R1, &reg_state[1]);
-  uc_reg_read(uc, UC_ARM_REG_R2, &reg_state[2]);
-  uc_reg_read(uc, UC_ARM_REG_R3, &reg_state[3]);
-  uc_reg_read(uc, UC_ARM_REG_R4, &reg_state[4]);
-  uc_reg_read(uc, UC_ARM_REG_R5, &reg_state[5]);
-  uc_reg_read(uc, UC_ARM_REG_R6, &reg_state[6]);
-  uc_reg_read(uc, UC_ARM_REG_R7, &reg_state[7]);
-  uc_reg_read(uc, UC_ARM_REG_R8, &reg_state[8]);
-  uc_reg_read(uc, UC_ARM_REG_R9, &reg_state[9]);
-  uc_reg_read(uc, UC_ARM_REG_R10, &reg_state[10]);
-  uc_reg_read(uc, UC_ARM_REG_R11, &reg_state[11]);
-  uc_reg_read(uc, UC_ARM_REG_R12, &reg_state[12]);
-  uc_reg_read(uc, UC_ARM_REG_R13, &reg_state[13]);
-  uc_reg_read(uc, UC_ARM_REG_R14, &reg_state[14]);
-  uc_reg_read(uc, UC_ARM_REG_R15, &reg_state[15]);
+#define FRB_MAX_SYMBOLS 131072
+#define FRB_MAX_SYMBOL_NAME 256
+
+typedef struct {
+    char name[FRB_MAX_SYMBOL_NAME];
+    uint32_t addr;
+} frb_symbol_entry;
+
+static frb_symbol_entry g_symbols[FRB_MAX_SYMBOLS];
+static size_t g_symbol_count = 0;
+static bool g_symbols_loaded = false;
+
+#define FRB_MAX_REFLECTION_POINTS 256
+
+typedef struct {
+    context_struct entry;
+} frb_reflection_point_registration;
+
+static frb_reflection_point_registration g_pending_reflection_points[FRB_MAX_REFLECTION_POINTS];
+static size_t g_pending_reflection_point_count = 0;
+
+static frb_reflection_point_registration g_reflection_points[FRB_MAX_REFLECTION_POINTS];
+static size_t g_reflection_point_count = 0;
+
+static void populate_reg_state(uint32_t *reg_state, uc_engine *uc) {
+    uc_reg_read(uc, UC_ARM_REG_R0,  &reg_state[0]);
+    uc_reg_read(uc, UC_ARM_REG_R1,  &reg_state[1]);
+    uc_reg_read(uc, UC_ARM_REG_R2,  &reg_state[2]);
+    uc_reg_read(uc, UC_ARM_REG_R3,  &reg_state[3]);
+    uc_reg_read(uc, UC_ARM_REG_R4,  &reg_state[4]);
+    uc_reg_read(uc, UC_ARM_REG_R5,  &reg_state[5]);
+    uc_reg_read(uc, UC_ARM_REG_R6,  &reg_state[6]);
+    uc_reg_read(uc, UC_ARM_REG_R7,  &reg_state[7]);
+    uc_reg_read(uc, UC_ARM_REG_R8,  &reg_state[8]);
+    uc_reg_read(uc, UC_ARM_REG_R9,  &reg_state[9]);
+    uc_reg_read(uc, UC_ARM_REG_R10, &reg_state[10]);
+    uc_reg_read(uc, UC_ARM_REG_R11, &reg_state[11]);
+    uc_reg_read(uc, UC_ARM_REG_R12, &reg_state[12]);
+    uc_reg_read(uc, UC_ARM_REG_R13, &reg_state[13]);
+    uc_reg_read(uc, UC_ARM_REG_R14, &reg_state[14]);
+    uc_reg_read(uc, UC_ARM_REG_R15, &reg_state[15]);
 }
 
 char* reached_bug_ids[100];
@@ -56,31 +79,30 @@ char* triggered_bug_ids[100];
 int triggered_bug_count = 0;
 
 void frb_report_reached(const char* bug_id) {
-  for (int i = 0; i < reached_bug_count; i++) {
-    if (strcmp(reached_bug_ids[i], bug_id) == 0) {
-      return; // Bug already reported
+    for (int i = 0; i < reached_bug_count; i++) {
+        if (strcmp(reached_bug_ids[i], bug_id) == 0) {
+            return;
+        }
     }
-  }
-  reached_bug_ids[reached_bug_count] = strdup(bug_id);
-  reached_bug_count++;
-  printf("REACHED: %s\n", bug_id);
+    reached_bug_ids[reached_bug_count] = strdup(bug_id);
+    reached_bug_count++;
+    printf("REACHED: %s\n", bug_id);
 }
 
 void frb_report_detected_triggered(const char* bug_id) {
-  for (int i = 0; i < triggered_bug_count; i++) {
-    if (strcmp(triggered_bug_ids[i], bug_id) == 0) {
-      return; // Bug already reported
+    for (int i = 0; i < triggered_bug_count; i++) {
+        if (strcmp(triggered_bug_ids[i], bug_id) == 0) {
+            return;
+        }
     }
-  }
-  if (triggered_bug_count < 100) {
-    triggered_bug_ids[triggered_bug_count] = strdup(bug_id);
-    triggered_bug_count++;
-  }
-  printf("TRIGGERED: %s\n", bug_id);
+    if (triggered_bug_count < 100) {
+        triggered_bug_ids[triggered_bug_count] = strdup(bug_id);
+        triggered_bug_count++;
+    }
+    printf("TRIGGERED: %s\n", bug_id);
 }
 
-
-void frb_print_reg_state(uint32_t *reg_state){
+void frb_print_reg_state(uint32_t *reg_state) {
     printf("Register State:\n");
     printf("r0:  0x%08X\n", reg_state[0]);
     printf("r1:  0x%08X\n", reg_state[1]);
@@ -100,6 +122,10 @@ void frb_print_reg_state(uint32_t *reg_state){
     printf("pc:  0x%08X\n", reg_state[15]);
 }
 
+void frb_print_regs(void) {
+    frb_print_reg_state(reg_state);
+}
+
 uint32_t frb_mem_read(uint32_t read_addr, size_t size) {
     uint32_t mem_value = 0;
     uc_mem_read(uc_state, read_addr, &mem_value, size);
@@ -112,27 +138,24 @@ void frb_mem_write(uint32_t write_addr, uint32_t value, size_t size) {
     printf("Writing %x at address %x\n", value, write_addr);
 }
 
-char* read_bug_context(const char* filename) {
-    FILE* file = fopen(filename, "rb");  
+static char* read_bug_context(const char* filename) {
+    FILE* file = fopen(filename, "rb");
     if (file == NULL) {
         perror("Failed to open file");
         exit(EXIT_FAILURE);
     }
 
-    // Find the size of the file
     fseek(file, 0, SEEK_END);
-    size_t file_size = (size_t)ftell(file); 
+    size_t file_size = (size_t)ftell(file);
     rewind(file);
 
-    // Allocate memory for the file content
-    char* buffer = (char*)malloc(file_size + 1);  
+    char* buffer = (char*)malloc(file_size + 1);
     if (buffer == NULL) {
         perror("Failed to allocate memory");
-        fclose(file);  
+        fclose(file);
         exit(EXIT_FAILURE);
     }
 
-    // Read the file content into the buffer
     size_t bytes_read = fread(buffer, 1, file_size, file);
     if (bytes_read != file_size) {
         if (feof(file)) {
@@ -140,40 +163,150 @@ char* read_bug_context(const char* filename) {
         } else if (ferror(file)) {
             perror("Error reading file");
         }
-        free(buffer);  
-        fclose(file); 
+        free(buffer);
+        fclose(file);
         exit(EXIT_FAILURE);
     }
 
-    // Null-terminate the string
     buffer[file_size] = '\0';
-
     fclose(file);
     return buffer;
 }
 
-void handle_error(void *opaque, const char *msg) {
+static void handle_error(void *opaque, const char *msg) {
     fprintf(opaque, "%s\n", msg);
 }
 
-static void firmrebugger_hook(uc_engine *uc, uc_mem_type oracle_address, uint64_t addr, int size, int64_t value, void *user_data) 
+/* Resolve symbols.txt path via FIRMREBUGGER_SYMBOLS env var (set by the Python
+   bug-analyzer which walks upward from the results directory to find it). */
+static bool frb_get_symbols_path(char *out_path, size_t out_len) {
+    const char *sym = getenv("FIRMREBUGGER_SYMBOLS");
+    if (!sym || sym[0] == '\0') {
+        return false;
+    }
+
+    if (strlen(sym) >= out_len) {
+        return false;
+    }
+
+    strncpy(out_path, sym, out_len - 1);
+    out_path[out_len - 1] = '\0';
+    return true;
+}
+
+static int frb_load_symbols_file(void) {
+    if (g_symbols_loaded) {
+        return 0;
+    }
+
+    char symbols_path[PATH_MAX];
+    if (!frb_get_symbols_path(symbols_path, sizeof(symbols_path))) {
+        printf("FirmReBugger: FIRMREBUGGER_SYMBOLS is not set — symbols.txt could not be located\n");
+        g_symbols_loaded = true;
+        g_symbol_count = 0;
+        return -1;
+    }
+
+    FILE *f = fopen(symbols_path, "r");
+    if (!f) {
+        printf("FirmReBugger: symbols file not found: %s\n", symbols_path);
+        g_symbols_loaded = true;
+        g_symbol_count = 0;
+        return -1;
+    }
+
+    char line[1024];
+    g_symbol_count = 0;
+
+    while (fgets(line, sizeof(line), f)) {
+        char *p = line;
+        while (isspace((unsigned char)*p)) p++;
+        if (*p == '\0' || *p == '#') continue;
+
+        char sym_name[FRB_MAX_SYMBOL_NAME];
+        char addr_str[128];
+
+        if (sscanf(p, "%255s %127s", sym_name, addr_str) != 2) {
+            continue;
+        }
+
+        errno = 0;
+        unsigned long parsed = strtoul(addr_str, NULL, 0);
+        if (errno != 0 || parsed > 0xFFFFFFFFUL) {
+            continue;
+        }
+
+        if (g_symbol_count < FRB_MAX_SYMBOLS) {
+            strncpy(g_symbols[g_symbol_count].name, sym_name, FRB_MAX_SYMBOL_NAME - 1);
+            g_symbols[g_symbol_count].name[FRB_MAX_SYMBOL_NAME - 1] = '\0';
+            g_symbols[g_symbol_count].addr = (uint32_t)parsed;
+            g_symbol_count++;
+        } else {
+            break;
+        }
+    }
+
+    fclose(f);
+    g_symbols_loaded = true;
+    printf("FirmReBugger: loaded %zu symbols from %s\n", g_symbol_count, symbols_path);
+    return 0;
+}
+
+static bool frb_lookup_symbol_addr(const char *symbol, uint32_t *addr_out) {
+    if (!symbol || !addr_out) return false;
+    if (!g_symbols_loaded) frb_load_symbols_file();
+
+    for (size_t i = 0; i < g_symbol_count; i++) {
+        if (strcmp(g_symbols[i].name, symbol) == 0) {
+            *addr_out = g_symbols[i].addr;
+            return true;
+        }
+    }
+    return false;
+}
+
+uint32_t frb_symbolize(const char *symbol_name, uint32_t offset) {
+    if (!g_symbols_loaded) frb_load_symbols_file();
+    uint32_t base = 0;
+    if (!frb_lookup_symbol_addr(symbol_name, &base)) {
+        printf("FirmReBugger: frb_symbolize failed to resolve symbol '%s'\n", symbol_name);
+        exit(1);
+    }
+    uint32_t resolved = (base & ~1u) + offset;
+    printf("FirmReBugger: frb_symbolize('%s', 0x%X) -> 0x%X\n", symbol_name, offset, resolved);
+    return resolved;
+}
+
+void frb_add_reflection_point(uint32_t address, func_ptr_t introspection_point) {
+    if (g_pending_reflection_point_count >= FRB_MAX_REFLECTION_POINTS) {
+        printf("FirmReBugger: frb_add_reflection_point exceeded max reflection points (%d), skipping 0x%X\n",
+               FRB_MAX_REFLECTION_POINTS, address);
+        return;
+    }
+    g_pending_reflection_points[g_pending_reflection_point_count].entry.address             = address;
+    g_pending_reflection_points[g_pending_reflection_point_count].entry.introspection_point = introspection_point;
+    g_pending_reflection_point_count++;
+    printf("FirmReBugger: reflection point registered at 0x%X\n", address);
+}
+
+static void firmrebugger_hook(uc_engine *uc, uc_mem_type oracle_address, uint64_t addr, int size, int64_t value, void *user_data)
 {
-  uc_state = uc;
-  for (size_t i = 0; i < global_hook_num; ++i) {
-      if (bug_struct[i].address == oracle_address) {
-        populate_reg_state(reg_state, uc_state, oracle_address);
-        bug_struct[i].bug_func();
-      }
-  }
+    uc_state = uc;
+    for (size_t i = 0; i < g_reflection_point_count; i++) {
+        if (g_reflection_points[i].entry.address == oracle_address) {
+            populate_reg_state(reg_state, uc_state);
+            g_reflection_points[i].entry.introspection_point();
+        }
+    }
 }
 
 void firmrebugger_init_config(uc_engine *uc)
 {
-    printf("Initilising firmrebugger\n");
+    printf("FirmReBugger Initilisation\n");
+
     char *firmrebugger_config_path = getenv("FIRMREBUGGER_CONFIG");
     char *bug_context = read_bug_context(firmrebugger_config_path);
-    if (!bug_context)
-    {
+    if (!bug_context) {
         printf("Please set FIRMREBUGGER_CONFIG path.\n");
         exit(1);
     }
@@ -183,38 +316,47 @@ void firmrebugger_init_config(uc_engine *uc)
         fprintf(stderr, "Could not create tcc state\n");
         exit(1);
     }
-    tcc_set_error_func(tcc_state, stderr, handle_error);
 
-     // /* if tcclib.h and libtcc1.a are not installed, where can we find them */
+    tcc_set_error_func(tcc_state, stderr, handle_error);
     tcc_add_include_path(tcc_state, "/home/user/SEmu-Fuzz/tinycc");
     tcc_set_lib_path(tcc_state, "/home/user/SEmu-Fuzz/tinycc");
-    /* MUST BE CALLED before any compilation */
     tcc_set_output_type(tcc_state, TCC_OUTPUT_MEMORY);
 
     if (tcc_compile_string(tcc_state, bug_context) == -1)
         exit(1);
 
-    /* as a test, we add symbols that the compiled program can use.
-       You may also open a dll with tcc_add_dll() and use symbols from that */
-    tcc_add_symbol(tcc_state, "reg_state", reg_state);
-    tcc_add_symbol(tcc_state, "frb_mem_read", frb_mem_read);
-    tcc_add_symbol(tcc_state, "frb_mem_write", frb_mem_write);
+    tcc_add_symbol(tcc_state, "reg_state",                    reg_state);
+    tcc_add_symbol(tcc_state, "frb_mem_read",                  frb_mem_read);
+    tcc_add_symbol(tcc_state, "frb_mem_write",                 frb_mem_write);
     tcc_add_symbol(tcc_state, "frb_report_detected_triggered", frb_report_detected_triggered);
-    tcc_add_symbol(tcc_state, "frb_report_reached", frb_report_reached);
-    tcc_add_symbol(tcc_state, "frb_print_reg_state", frb_print_reg_state);
+    tcc_add_symbol(tcc_state, "frb_report_reached",            frb_report_reached);
+    tcc_add_symbol(tcc_state, "frb_print_reg_state",           frb_print_reg_state);
+    tcc_add_symbol(tcc_state, "frb_print_regs",                frb_print_regs);
+    tcc_add_symbol(tcc_state, "frb_symbolize",                 frb_symbolize);
+    tcc_add_symbol(tcc_state, "frb_add_reflection_point",      frb_add_reflection_point);
 
-        /* relocate the code */
     if (tcc_relocate(tcc_state) < 0)
         exit(1);
 
-    void (*send_context_struct)(const context_struct **arr, size_t *size) = tcc_get_symbol(tcc_state, "send_context_struct");
-    if (!send_context_struct)
-      exit(1);
-    send_context_struct(&bug_struct, &global_hook_num);
+    void (*register_reflection_points)(void) = tcc_get_symbol(tcc_state, "register_reflection_points");
+    if (!register_reflection_points) {
+        fprintf(stderr, "FirmReBugger: register_reflection_points not found in bug descriptor\n");
+        exit(1);
+    }
+
+    frb_load_symbols_file();
+    g_pending_reflection_point_count = 0;
+    register_reflection_points();
+
+    /* Move pending into active table and install unicorn hooks */
+    g_reflection_point_count = g_pending_reflection_point_count;
     uc_hook tmp;
-    for (size_t i = 0; i < global_hook_num; ++i) {
-        printf("Hooking: %x \n", bug_struct[i].address );
-        uc_hook_add(uc, &tmp, UC_HOOK_CODE, firmrebugger_hook, NULL, (bug_struct[i].address
-                             & 0xfffffffe), (bug_struct[i].address | 0x1));
+    for (size_t i = 0; i < g_reflection_point_count; i++) {
+        g_reflection_points[i] = g_pending_reflection_points[i];
+        printf("FirmReBugger: installing reflection point[%zu] at 0x%X\n",
+               i, g_reflection_points[i].entry.address);
+        uc_hook_add(uc, &tmp, UC_HOOK_CODE, firmrebugger_hook, NULL,
+                    (g_reflection_points[i].entry.address & 0xfffffffe),
+                    (g_reflection_points[i].entry.address | 0x1));
     }
 }

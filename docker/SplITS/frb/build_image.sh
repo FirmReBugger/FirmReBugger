@@ -4,7 +4,7 @@ FUZZER_IMAGE="frb:SplITS"
 docker buildx build \
   --tag "$FUZZER_IMAGE" \
   --load \
-  --no-cache \
+  \
   --build-arg USERID="${USERID:-1000}" \
   -f docker/SplITS/frb/Dockerfile \
   . \

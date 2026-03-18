@@ -1,11 +1,12 @@
-import os
-import yaml
-import time
-import subprocess
-import re
-import sys
 import io
 import json
+import os
+import re
+import subprocess
+import sys
+import time
+
+import yaml
 
 
 def extract_bug_ids(file_path):

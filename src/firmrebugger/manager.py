@@ -1,17 +1,19 @@
+import glob
+import json
 import multiprocessing
 import os
+import shutil
+import subprocess
+import threading
 import time
 import uuid
 from queue import Queue
-import threading
 from typing import List
-from firmrebugger.task import Task
-from firmrebugger.common import get_frb_base_dir
-import shutil
-import glob
-import subprocess
+
 import psutil
-import json
+
+from firmrebugger.common import get_frb_base_dir
+from firmrebugger.task import Task
 
 
 class Job:
@@ -44,6 +46,7 @@ class Job:
         self.elapsed_time = None
         self.output_dir = output_dir
         self.auto_queue_triaging = bool(auto_queue_triaging)
+        self.manually_stopped = False
 
         if mode == "Fuzzing":
             for run_num in range(1, runs + 1):
@@ -128,6 +131,10 @@ class Job:
                     task.kill_task()
                 else:
                     task.stop()
+                # If the process wasn't alive, stop() won't have set the status,
+                # so force it to stopped here to prevent re-queuing.
+                if task.status not in ("stopped", "completed"):
+                    task.status = "stopped"
             elif task.status == "queued":
                 task.status = "stopped"
         print(f"[Job {self.job_id}] All tasks stopped.")
@@ -221,14 +228,19 @@ class JobManager:
                 and candidate_job.binary == fuzzing_job.binary
                 and candidate_job.fuzzer == fuzzing_job.fuzzer
                 and candidate_job.output_dir == fuzzing_job.output_dir
-                and candidate_job.status in ["queued", "running", "error", "stopped"]
             ):
-                return True
+                # If it was manually stopped, block re-queuing permanently
+                if candidate_job.manually_stopped:
+                    return True
+                if candidate_job.status in ["queued", "running", "error", "stopped"]:
+                    return True
         return False
 
     def enqueue_auto_triaging_jobs(self):
         """Automatically queue triaging jobs for eligible completed fuzzing jobs."""
-        fuzzing_jobs = [job for job in list(self.jobs.values()) if job.mode == "Fuzzing"]
+        fuzzing_jobs = [
+            job for job in list(self.jobs.values()) if job.mode == "Fuzzing"
+        ]
 
         for fuzzing_job in fuzzing_jobs:
             if fuzzing_job.status != "completed":
@@ -371,6 +383,7 @@ class JobManager:
     def stop_job(self, job_id):
         """Stop a specific job (all its tasks)."""
         if job_id in self.jobs:
+            self.jobs[job_id].manually_stopped = True
             self.jobs[job_id].stop_all_tasks()
 
             with self.queue_lock:
@@ -651,7 +664,9 @@ class JobManager:
                 elapsed_time = job.duration
                 job.progress = 100
 
-                if job.mode == "Triaging":
+                if job.mode == "Triaging" and not getattr(
+                    job, "manually_stopped", False
+                ):
                     jobs_to_remove.append(job_id)
 
             elif job.status == "stopped" and job.started_at is not None:
@@ -669,11 +684,15 @@ class JobManager:
                     elapsed_time = round(time.time() - job.started_at, 0)
                 job.progress = min(100, round((elapsed_time / job.duration) * 100, 2))
 
-                if job.mode == "Triaging":
+                if job.mode == "Triaging" and not getattr(
+                    job, "manually_stopped", False
+                ):
                     jobs_to_remove.append(job_id)
 
             elif job.status == "stopped" and job.started_at is None:
-                if job.mode == "Triaging":
+                if job.mode == "Triaging" and not getattr(
+                    job, "manually_stopped", False
+                ):
                     jobs_to_remove.append(job_id)
 
             elif job.status == "error":
