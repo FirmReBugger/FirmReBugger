@@ -376,6 +376,8 @@ export const tasksColumns: ColumnDef<Task>[] = [
       const hasActiveTriaging = relatedTriagingJobs.some(
         (task) => task.status === "running" || task.status === "queued",
       );
+      const showTriagingFailed =
+        hasTriagingError && !hasActiveTriaging && !isTriagingMode;
 
       return (
         <div
@@ -394,19 +396,7 @@ export const tasksColumns: ColumnDef<Task>[] = [
               </Tooltip>
             </TooltipProvider>
           )}
-          {isFinished && triaged && !hasActiveTriaging && (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <FileCheck className="h-4 w-4 text-blue-500" />
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Triaged</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          )}
-          {isFinished && !triaged && hasTriagingError && !isTriagingMode && (
+          {isFinished && showTriagingFailed && (
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -414,6 +404,18 @@ export const tasksColumns: ColumnDef<Task>[] = [
                 </TooltipTrigger>
                 <TooltipContent>
                   <p>Triaging failed</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+          {isFinished && triaged && !showTriagingFailed && !hasActiveTriaging && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <FileCheck className="h-4 w-4 text-blue-500" />
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Triaged</p>
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>

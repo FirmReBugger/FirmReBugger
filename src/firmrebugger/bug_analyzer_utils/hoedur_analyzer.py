@@ -1,4 +1,5 @@
 import os
+import sys
 import zstandard
 import tarfile
 import yaml
@@ -124,6 +125,8 @@ def hoedur_analyzer(
         "ungrouped_crashes": 0,
         "Fuzzer": bench_info["fuzzer"],
         "Target": bench_info["target"],
+        "failed": False,
+        "failure_message": None,
     }
 
     stop_event = threading.Event()
@@ -132,40 +135,58 @@ def hoedur_analyzer(
     )
     printer_thread.start()
 
-    # Begin bug analysis on seeds
-    with ThreadPoolExecutor(max_workers=num_workers) as executor:
-        futures = []
-        get_hoedur_env()
-        for seed, time_val in sorted(working_folder):
-            seed_path = os.path.abspath(seed)
-            if "README" in seed_path:
-                continue
-            command = f"hoedur-dict-arm --import-config {corpus_path} run {seed_path}"
-            futures.append(
-                executor.submit(run_command, command, seed_path, time_val, Crash)
-            )
+    failure_exc = None
+    failure_tb = None
+    try:
+        # Begin bug analysis on seeds
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            futures = []
+            get_hoedur_env()
+            for seed, time_val in sorted(working_folder):
+                seed_path = os.path.abspath(seed)
+                if "README" in seed_path:
+                    continue
+                command = f"hoedur-dict-arm --import-config {corpus_path} run {seed_path}"
+                futures.append(
+                    executor.submit(run_command, command, seed_path, time_val, Crash)
+                )
 
-        for future in as_completed(futures):
-            result = future.result()
-            if result is None:
-                continue
-            seed_path, bugs_triggered, bugs_reached, time_val, elapsed, errors = result
-            execution_times.append(elapsed)
+            for future in as_completed(futures):
+                result = future.result()
+                if result is None:
+                    continue
+                seed_path, bugs_triggered, bugs_reached, time_val, elapsed, errors = result
+                execution_times.append(elapsed)
 
-            run_data = update_bug_data(
-                run_data,
-                time_val,
-                seed_path,
-                bugs_triggered=bugs_triggered,
-                bugs_reached=bugs_reached,
-                Crash=Crash,
-            )
+                run_data = update_bug_data(
+                    run_data,
+                    time_val,
+                    seed_path,
+                    bugs_triggered=bugs_triggered,
+                    bugs_reached=bugs_reached,
+                    Crash=Crash,
+                )
 
-            progress["completed"] += 1
-            progress["ungrouped_crashes"] = len(run_data[0]["ungrouped_crashes"])
+                progress["completed"] += 1
+                progress["ungrouped_crashes"] = len(run_data[0]["ungrouped_crashes"])
+    except Exception as exc:
+        progress["failed"] = True
+        progress["failure_message"] = str(exc)
+        failure_exc = exc
+        failure_tb = exc.__traceback__
+    finally:
+        stop_event.set()
+        printer_thread.join()
 
-    stop_event.set()
-    printer_thread.join()
+    if failure_exc is not None:
+        print(
+            "\n[ERROR Hoedur Triaging] Triaging aborted due to replay error.\n"
+            f"{progress['failure_message']}\n",
+            file=sys.stderr,
+            flush=True,
+        )
+        raise failure_exc.with_traceback(failure_tb)
+
     # shutil.rmtree(os.path.join(os.path.dirname(corpus_path), "tmp"))
 
     return run_data, execution_times

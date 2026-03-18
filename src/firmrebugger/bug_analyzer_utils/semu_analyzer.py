@@ -1,4 +1,5 @@
 import os
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
 from firmrebugger.bug_analyzer_utils.common import (
@@ -58,6 +59,8 @@ def semu_analyzer(
         "ungrouped_crashes": 0,
         "Fuzzer": bench_info["fuzzer"],
         "Target": bench_info["target"],
+        "failed": False,
+        "failure_message": None,
     }
     stop_event = threading.Event()
 
@@ -66,36 +69,53 @@ def semu_analyzer(
     )
     printer_thread.start()
 
-    with ThreadPoolExecutor(max_workers=num_workers) as executor:
-        futures = []
-        for seed_path in seeds:
-            command = f"stdbuf -oL -eL semu-fuzz {seed_path} {config_path}"
-            futures.append(
-                executor.submit(
-                    run_command, command, seed_path, get_time_input(seed_path), Crash
+    failure_exc = None
+    failure_tb = None
+    try:
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            futures = []
+            for seed_path in seeds:
+                command = f"stdbuf -oL -eL semu-fuzz {seed_path} {config_path}"
+                futures.append(
+                    executor.submit(
+                        run_command, command, seed_path, get_time_input(seed_path), Crash
+                    )
                 )
-            )
 
-        for future in as_completed(futures):
-            result = future.result()
-            if result is None:
-                continue
-            seed_path, bugs_triggered, bugs_reached, time_val, elapsed, errors = result
-            execution_times.append(elapsed)
+            for future in as_completed(futures):
+                result = future.result()
+                if result is None:
+                    continue
+                seed_path, bugs_triggered, bugs_reached, time_val, elapsed, errors = result
+                execution_times.append(elapsed)
 
-            run_data = update_bug_data(
-                run_data,
-                time_val,
-                seed_path,
-                bugs_triggered=bugs_triggered,
-                bugs_reached=bugs_reached,
-                Crash=Crash,
-            )
+                run_data = update_bug_data(
+                    run_data,
+                    time_val,
+                    seed_path,
+                    bugs_triggered=bugs_triggered,
+                    bugs_reached=bugs_reached,
+                    Crash=Crash,
+                )
 
-            progress["completed"] += 1
-            progress["ungrouped_crashes"] = len(run_data[0]["ungrouped_crashes"])
+                progress["completed"] += 1
+                progress["ungrouped_crashes"] = len(run_data[0]["ungrouped_crashes"])
+    except Exception as exc:
+        progress["failed"] = True
+        progress["failure_message"] = str(exc)
+        failure_exc = exc
+        failure_tb = exc.__traceback__
+    finally:
+        stop_event.set()
+        printer_thread.join()
 
-    stop_event.set()
-    printer_thread.join()
+    if failure_exc is not None:
+        print(
+            "\n[ERROR SEmu Triaging] Triaging aborted due to replay error.\n"
+            f"{progress['failure_message']}\n",
+            file=sys.stderr,
+            flush=True,
+        )
+        raise failure_exc.with_traceback(failure_tb)
 
     return run_data, execution_times
