@@ -304,9 +304,18 @@ def get_bench_info(result_dir):
 
 
 # Run seed to get time and reached/triggered info
-def run_command(command, seed_path, time_val, Crash):
+def run_command(command, seed_path, time_val, Crash, timeout=None):
     start = time.time()
-    result = subprocess.run(command, shell=True, text=True, capture_output=True)
+    try:
+        result = subprocess.run(
+            command, shell=True, text=True, capture_output=True, timeout=timeout
+        )
+    except subprocess.TimeoutExpired:
+        elapsed = time.time() - start
+        print(
+            f"[run_command] Timeout ({timeout}s) exceeded for seed: {seed_path} — skipping."
+        )
+        return seed_path, [], [], time_val, elapsed, []
     end = time.time()
     elapsed = end - start
 
@@ -341,8 +350,7 @@ def run_command(command, seed_path, time_val, Crash):
         re.search(r":\d+:\s*error:", combined_output, re.IGNORECASE) is not None
     )
     has_descriptor_string_error = (
-        re.search(r"<string>:\d+:\s*error:", combined_output, re.IGNORECASE)
-        is not None
+        re.search(r"<string>:\d+:\s*error:", combined_output, re.IGNORECASE) is not None
     )
     has_bug_descriptor_hint = (
         "bug_descriptor" in combined_lower or "firmrebugger" in combined_lower
@@ -355,7 +363,7 @@ def run_command(command, seed_path, time_val, Crash):
         or has_missing_config_error
     )
 
-    if result.returncode != 0 or descriptor_error:
+    if descriptor_error:
         output_tail = "\n".join(combined_output.splitlines()[-30:])
         raise RuntimeError(
             "Triaging replay failed "

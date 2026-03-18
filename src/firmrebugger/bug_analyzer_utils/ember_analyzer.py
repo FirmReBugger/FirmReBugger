@@ -1,14 +1,15 @@
-import os
-import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
-import threading
-from firmrebugger.bug_analyzer_utils.common import (
-    update_bug_data,
-    run_command,
-    periodic_printer,
-)
 import glob
+import os
 import re
+import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from firmrebugger.bug_analyzer_utils.common import (
+    periodic_printer,
+    run_command,
+    update_bug_data,
+)
 
 
 def get_ember_base_dir():
@@ -115,7 +116,12 @@ def ember_analyzer(
                 command = f"{ember_env}/AFLplusplus/afl-qemu-trace -kernel {binary_path} {params[1]} {seed_path}"
                 futures.append(
                     executor.submit(
-                        run_command, command, seed_path, get_time_input(seed_path), Crash
+                        run_command,
+                        command,
+                        seed_path,
+                        get_time_input(seed_path),
+                        Crash,
+                        10,
                     )
                 )
 
@@ -123,7 +129,9 @@ def ember_analyzer(
                 result = future.result()
                 if result is None:
                     continue
-                seed_path, bugs_triggered, bugs_reached, time_val, elapsed, errors = result
+                seed_path, bugs_triggered, bugs_reached, time_val, elapsed, errors = (
+                    result
+                )
                 execution_times.append(elapsed)
 
                 run_data = update_bug_data(

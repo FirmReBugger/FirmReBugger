@@ -21,7 +21,7 @@ static void report_reached(const char* bug_id) {
 
 
 void BUG_FP_I02() {
-    // (FP) Overflow of OLED screen buffer when rendering heat indicator 
+    // (FP) Overflow of OLED screen buffer when rendering heat indicator
     report_reached("FP_I02");
     if (reg_state[7] > 162) {
         report_detected_triggered("FP_I02");
@@ -102,7 +102,7 @@ void underflow1() {
     uint32_t xcount = frb_mem_read(0x200030d2,4);
     if (xcount == 0) {
         report_detected_triggered("FP_FRB05");
-    } 
+    }
 }
 
 void flag_mem_write() {

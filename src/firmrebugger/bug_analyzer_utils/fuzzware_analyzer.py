@@ -1,16 +1,17 @@
+import glob
 import os
 import shlex
-import sys
 import subprocess
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from firmrebugger.bug_analyzer_utils.common import (
-    update_bug_data,
-    run_command,
-    periodic_printer,
-)
+import sys
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from firmrebugger.bug_analyzer_utils.common import (
+    periodic_printer,
+    run_command,
+    update_bug_data,
+)
 from firmrebugger.common import get_working_dirs
-import glob
 
 
 def get_time_data_fuzzware(crash_timing_path):
@@ -145,7 +146,7 @@ def fuzzware_analyzer(
         for time_val, seed_path in seed_info:
             full_seed_path = os.path.join(output_path, seed_path)
             command = f"fuzzware replay -v {shlex.quote(full_seed_path)}"
-            result = run_command(command, seed_path, time_val, Crash)
+            result = run_command(command, seed_path, time_val, Crash, 10)
             if result is None:
                 continue
 

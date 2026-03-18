@@ -2,11 +2,12 @@ import os
 import re
 import subprocess
 import sys
-from firmrebugger.bug_analyzer_utils.common import (
-    update_bug_data,
-    periodic_printer,
-)
 import threading
+
+from firmrebugger.bug_analyzer_utils.common import (
+    periodic_printer,
+    update_bug_data,
+)
 
 
 def get_multifuzz_env():
@@ -102,7 +103,16 @@ def multifuzzer_analyzer(
         )
 
         start = os.times()[4]
-        result = subprocess.run(command, shell=True, text=True, capture_output=True)
+        try:
+            result = subprocess.run(
+                command, shell=True, text=True, capture_output=True, timeout=10
+            )
+        except subprocess.TimeoutExpired:
+            elapsed = os.times()[4] - start
+            print(
+                f"[run_multifuzz_command] Timeout (10s) exceeded for seed: {seed_path} — skipping."
+            )
+            return seed_path, [], [], time_val, elapsed, []
         elapsed = os.times()[4] - start
 
         bugs_triggered = []
@@ -133,10 +143,12 @@ def multifuzzer_analyzer(
         has_c_parse_error = (
             re.search(r":\d+:\s*error:", combined_output, re.IGNORECASE) is not None
         )
-        has_missing_config_error = "please set firmrebugger_config path" in combined_lower
-        descriptor_error = (
-            (has_frb_config_init and has_c_parse_error) or has_missing_config_error
+        has_missing_config_error = (
+            "please set firmrebugger_config path" in combined_lower
         )
+        descriptor_error = (
+            has_frb_config_init and has_c_parse_error
+        ) or has_missing_config_error
 
         if result.returncode != 0 or descriptor_error:
             output_tail = "\n".join(combined_output.splitlines()[-30:])

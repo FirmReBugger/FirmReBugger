@@ -1,30 +1,33 @@
-import os
-import time
 import json
+import os
+import signal
+import sys
+import threading
+import time
 from pathlib import Path
+
 from flask import (
     Flask,
+    Response,
     jsonify,
     request,
     send_from_directory,
-    Response,
     stream_with_context,
 )
 from flask_cors import CORS
-from firmrebugger.common import get_frb_base_dir
+
 from firmrebugger.app_utils import (
+    all_cpu_usage,
     check_binaries,
     check_binaries_with_support,
     check_fuzzers,
     check_output_name,
     cpu_usage,
-    all_cpu_usage,
     get_reports,
     get_table_json,
 )
-from firmrebugger.manager import start_manager, Job, JobManager, list_finished_jobs
-import threading
-
+from firmrebugger.common import get_frb_base_dir
+from firmrebugger.manager import Job, JobManager, list_finished_jobs, start_manager
 
 STATIC_FOLDER = ""
 app = Flask(__name__, static_folder=STATIC_FOLDER, static_url_path="/static")
@@ -48,6 +51,9 @@ jobs_snapshot = {
     "fingerprint": "",
 }
 jobs_snapshot_lock = threading.Lock()
+# Set whenever job state mutates so the snapshot worker wakes immediately
+# instead of waiting for the next 1-second tick.
+_jobs_dirty = threading.Event()
 
 
 def serialize_jobs(jobs_list):
@@ -82,15 +88,17 @@ def serialize_jobs(jobs_list):
                 "startedAt": job.started_at,
                 "elapsedTime": job.elapsed_time,
                 "output_dir": job.output_dir,
-                "output_path": full_output_dir,
-                "autoQueueTriaging": bool(
-                    getattr(job, "auto_queue_triaging", True)
-                ),
+                "autoQueueTriaging": bool(getattr(job, "auto_queue_triaging", True)),
                 "triaged": has_been_triaged,
             }
         )
 
     return jobs_data
+
+
+def notify_jobs_changed():
+    """Signal the snapshot worker that something has changed."""
+    _jobs_dirty.set()
 
 
 def refresh_jobs_snapshot(force=False):
@@ -125,12 +133,15 @@ def get_jobs_snapshot():
 
 def jobs_snapshot_worker():
     while True:
+        # Block until something signals a change, or at most 2 seconds so
+        # progress updates from the manager loop still flow through.
+        _jobs_dirty.wait(timeout=2)
+        _jobs_dirty.clear()
         try:
             if job_manager:
                 refresh_jobs_snapshot()
         except Exception as e:
             print(f"[Snapshot] Error refreshing jobs snapshot: {e}")
-        time.sleep(1)
 
 
 def task_to_dict(task):
@@ -292,7 +303,7 @@ def add_job():
                 print(f"ERROR adding job: {e}")
                 raise
 
-        refresh_jobs_snapshot(force=True)
+        notify_jobs_changed()
 
         return jsonify(
             {
@@ -362,9 +373,9 @@ def stop_job():
             if task.status == "running":
                 task.status = "stopping"
 
-        refresh_jobs_snapshot(force=True)
+        notify_jobs_changed()
         job_manager.stop_job(job_id)
-        refresh_jobs_snapshot(force=True)
+        notify_jobs_changed()
 
         return jsonify(
             {
@@ -403,9 +414,7 @@ def set_job_auto_triage():
 
         job = job_manager.get_job(job_id)
         if not job:
-            return jsonify(
-                {"error": f"Job {job_id} not found", "success": False}
-            ), 404
+            return jsonify({"error": f"Job {job_id} not found", "success": False}), 404
 
         if job.mode != "Fuzzing":
             return jsonify(
@@ -416,7 +425,7 @@ def set_job_auto_triage():
             ), 400
 
         job.auto_queue_triaging = enabled
-        refresh_jobs_snapshot(force=True)
+        notify_jobs_changed()
 
         return jsonify(
             {
@@ -449,7 +458,7 @@ def reorder_jobs():
             return jsonify({"error": "job_id is required", "success": False}), 400
 
         job_manager.reorder_job(job_id)
-        refresh_jobs_snapshot(force=True)
+        notify_jobs_changed()
 
         return jsonify(
             {
@@ -482,7 +491,7 @@ def reorder_jobs_to_top():
             return jsonify({"error": "job_id is required", "success": False}), 400
 
         job_manager.reorder_job_to_top(job_id)
-        refresh_jobs_snapshot(force=True)
+        notify_jobs_changed()
 
         return jsonify(
             {
@@ -515,7 +524,7 @@ def delete_job():
             return jsonify({"error": "job_id is required", "success": False}), 400
 
         job_manager.delete_job(job_id)
-        refresh_jobs_snapshot(force=True)
+        notify_jobs_changed()
 
         return jsonify(
             {"success": True, "message": f"Job {job_id} deleted", "job_id": job_id}
@@ -909,6 +918,15 @@ def run_app(port, host="127.0.0.1"):
     app.static_folder = STATIC_FOLDER
 
     job_manager = JobManager()
+
+    def _shutdown(signum, frame):
+        sig_name = "SIGINT" if signum == signal.SIGINT else "SIGTERM"
+        print(f"\n[Shutdown] {sig_name} received — stopping all jobs and exiting...")
+        job_manager.shutdown_all()
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _shutdown)
 
     print("[Startup] Loading finished jobs from disk...")
     try:

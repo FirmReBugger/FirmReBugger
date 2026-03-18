@@ -1,17 +1,19 @@
+import glob
+import io
 import os
 import sys
-import zstandard
 import tarfile
-import yaml
-import io
-import glob
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from firmrebugger.bug_analyzer_utils.common import (
-    update_bug_data,
-    run_command,
-    periodic_printer,
-)
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+import yaml
+import zstandard
+
+from firmrebugger.bug_analyzer_utils.common import (
+    periodic_printer,
+    run_command,
+    update_bug_data,
+)
 
 
 def get_hoedur_env():
@@ -146,16 +148,22 @@ def hoedur_analyzer(
                 seed_path = os.path.abspath(seed)
                 if "README" in seed_path:
                     continue
-                command = f"hoedur-dict-arm --import-config {corpus_path} run {seed_path}"
+                command = (
+                    f"hoedur-dict-arm --import-config {corpus_path} run {seed_path}"
+                )
                 futures.append(
-                    executor.submit(run_command, command, seed_path, time_val, Crash)
+                    executor.submit(
+                        run_command, command, seed_path, time_val, Crash, 10
+                    )
                 )
 
             for future in as_completed(futures):
                 result = future.result()
                 if result is None:
                     continue
-                seed_path, bugs_triggered, bugs_reached, time_val, elapsed, errors = result
+                seed_path, bugs_triggered, bugs_reached, time_val, elapsed, errors = (
+                    result
+                )
                 execution_times.append(elapsed)
 
                 run_data = update_bug_data(

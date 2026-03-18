@@ -376,8 +376,14 @@ export const tasksColumns: ColumnDef<Task>[] = [
       const hasActiveTriaging = relatedTriagingJobs.some(
         (task) => task.status === "running" || task.status === "queued",
       );
+      const hasCompletedTriaging = relatedTriagingJobs.some(
+        (task) => task.status === "completed",
+      );
       const showTriagingFailed =
-        hasTriagingError && !hasActiveTriaging && !isTriagingMode;
+        hasTriagingError &&
+        !hasActiveTriaging &&
+        !hasCompletedTriaging &&
+        !isTriagingMode;
 
       return (
         <div
@@ -408,33 +414,33 @@ export const tasksColumns: ColumnDef<Task>[] = [
               </Tooltip>
             </TooltipProvider>
           )}
-          {isFinished && triaged && !showTriagingFailed && !hasActiveTriaging && (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <FileCheck className="h-4 w-4 text-blue-500" />
-                </TooltipTrigger>
-                <TooltipContent>
-                  <p>Triaged</p>
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          )}
           {isFinished &&
-            !hasTriagingError &&
-            hasActiveTriaging &&
-            !isTriagingMode && (
+            triaged &&
+            !showTriagingFailed &&
+            !hasActiveTriaging && (
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <LoaderCircle className="h-4 w-4 text-amber-500 animate-spin" />
+                    <FileCheck className="h-4 w-4 text-blue-500" />
                   </TooltipTrigger>
                   <TooltipContent>
-                    <p>Triaging in progress</p>
+                    <p>Triaged</p>
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
             )}
+          {isFinished && hasActiveTriaging && !isTriagingMode && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <LoaderCircle className="h-4 w-4 text-amber-500 animate-spin" />
+                </TooltipTrigger>
+                <TooltipContent>
+                  <p>Triaging in progress</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
           <DropdownMenu modal={false}>
             <DropdownMenuTrigger asChild>
               <Button

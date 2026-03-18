@@ -3,7 +3,9 @@ import json
 import multiprocessing
 import os
 import shutil
+import signal
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -207,6 +209,67 @@ class JobManager:
                 f"[Manager] Added Job {job.job_id} (status: {job.status}, no tasks queued)."
             )
 
+    @staticmethod
+    def _get_job_output_folder(job: Job) -> str:
+        return os.path.join(
+            get_frb_base_dir(),
+            job.benchmark,
+            job.binary,
+            "fuzzers",
+            job.fuzzer,
+            "fuzzing_out",
+            job.output_dir,
+        )
+
+    def _persist_auto_triaging_flag(self, job: Job):
+        if job.mode != "Fuzzing":
+            return
+
+        frb_info_path = os.path.join(self._get_job_output_folder(job), "frb_info.json")
+        if not os.path.isfile(frb_info_path):
+            return
+
+        try:
+            with open(frb_info_path, "r") as f:
+                data = json.load(f)
+
+            new_value = bool(getattr(job, "auto_queue_triaging", True))
+            if data.get("auto_queue_triaging", True) == new_value:
+                return
+
+            data["auto_queue_triaging"] = new_value
+
+            with open(frb_info_path, "w") as f:
+                json.dump(data, f, indent=2)
+
+            print(
+                f"[Manager] Updated auto_queue_triaging={new_value} in {frb_info_path}"
+            )
+        except Exception as e:
+            print(
+                f"[Manager] Warning: could not persist auto_queue_triaging for job {job.job_id}: {e}"
+            )
+
+    def _disable_auto_triaging_for_related_fuzzing(self, triage_job: Job):
+        if triage_job.mode != "Triaging":
+            return
+
+        for candidate_job in self.jobs.values():
+            if (
+                candidate_job.mode == "Fuzzing"
+                and candidate_job.benchmark == triage_job.benchmark
+                and candidate_job.binary == triage_job.binary
+                and candidate_job.fuzzer == triage_job.fuzzer
+                and candidate_job.output_dir == triage_job.output_dir
+            ):
+                if getattr(candidate_job, "auto_queue_triaging", True):
+                    candidate_job.auto_queue_triaging = False
+                    self._persist_auto_triaging_flag(candidate_job)
+                    print(
+                        "[Manager] Disabled auto-triaging for related fuzzing job "
+                        f"{candidate_job.job_id} after triaging interruption."
+                    )
+
     def _has_triage_report(self, job: Job) -> bool:
         report_path = os.path.join(
             get_frb_base_dir(),
@@ -383,8 +446,12 @@ class JobManager:
     def stop_job(self, job_id):
         """Stop a specific job (all its tasks)."""
         if job_id in self.jobs:
-            self.jobs[job_id].manually_stopped = True
-            self.jobs[job_id].stop_all_tasks()
+            target_job = self.jobs[job_id]
+            if target_job.mode == "Triaging":
+                self._disable_auto_triaging_for_related_fuzzing(target_job)
+
+            target_job.manually_stopped = True
+            target_job.stop_all_tasks()
 
             with self.queue_lock:
                 tasks_list = []
@@ -614,6 +681,10 @@ class JobManager:
                         self.job_queue.put(task)
 
                 time.sleep(1)
+            except KeyboardInterrupt:
+                print("[Manager] KeyboardInterrupt received — shutting down.")
+                self.shutdown_all()
+                break
             except Exception as e:
                 print(f"[Manager] Loop error: {e}")
                 time.sleep(1)
@@ -630,6 +701,76 @@ class JobManager:
     def stop_scheduler(self):
         """Backward-compatible alias for stop_manager."""
         self.stop_manager()
+
+    def shutdown_all(self):
+        """Stop the manager loop and forcibly docker-kill every running container."""
+        print("[Manager] Shutting down — killing all running containers...")
+        self.running = False
+
+        for job in list(self.jobs.values()):
+            was_active_triaging = job.mode == "Triaging" and any(
+                task.status in ("running", "stopping") for task in list(job.tasks)
+            )
+            if was_active_triaging:
+                self._disable_auto_triaging_for_related_fuzzing(job)
+
+            for task in list(job.tasks):
+                if task.status in ("running", "stopping"):
+                    # Kill the Docker container by name so it dies immediately.
+                    container = getattr(task, "container_name", None)
+                    if container:
+                        try:
+                            subprocess.run(
+                                ["docker", "kill", container],
+                                check=False,
+                                stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL,
+                                timeout=10,
+                            )
+                        except Exception as e:
+                            print(f"[Manager] Error killing container {container}: {e}")
+
+                    # Also terminate the Python subprocess wrapper if still alive.
+                    subproc = getattr(task, "subprocess", None)
+                    if subproc is not None and subproc.poll() is None:
+                        try:
+                            subproc.kill()
+                        except Exception:
+                            pass
+
+                    task.status = "stopped"
+                    task.completed_at = time.time()
+
+                elif task.status == "queued":
+                    task.status = "stopped"
+
+        print("[Manager] All containers killed.")
+
+        # Persist the stopped status for every non-completed job so that on the
+        # next startup list_finished_jobs() restores them as "stopped" and
+        # enqueue_auto_triaging_jobs() does not re-queue triage for them.
+        print("[Manager] Persisting stopped status for all interrupted jobs...")
+        for job in list(self.jobs.values()):
+            if job.status in ("stopped", "error", "running", "queued", "partial"):
+                if job.started_at is None:
+                    # Never started — nothing useful to write, skip.
+                    continue
+                try:
+                    output_folder = self._get_job_output_folder(job)
+                    frb_info_path = os.path.join(output_folder, "frb_info.json")
+                    should_force_write = not (
+                        job.mode == "Triaging" and os.path.isfile(frb_info_path)
+                    )
+
+                    finalize_job(
+                        job,
+                        stopped=True,
+                        force_status="stopped",
+                        force_write=should_force_write,
+                    )
+                except Exception as e:
+                    print(f"[Manager] Warning: could not persist job {job.job_id}: {e}")
+        print("[Manager] Shutdown complete.")
 
     def get_job(self, job_id):
         return self.jobs.get(job_id)
@@ -668,6 +809,20 @@ class JobManager:
                     job, "manually_stopped", False
                 ):
                     jobs_to_remove.append(job_id)
+                    # Also remove any sibling errored triage jobs for the same
+                    # run so the frontend no longer sees a stale error state.
+                    for other_id, other_job in self.jobs.items():
+                        if (
+                            other_id != job_id
+                            and other_job.mode == "Triaging"
+                            and other_job.status == "error"
+                            and other_job.binary == job.binary
+                            and other_job.fuzzer == job.fuzzer
+                            and other_job.benchmark == job.benchmark
+                            and other_job.output_dir == job.output_dir
+                            and other_id not in jobs_to_remove
+                        ):
+                            jobs_to_remove.append(other_id)
 
             elif job.status == "stopped" and job.started_at is not None:
                 if (
@@ -684,16 +839,10 @@ class JobManager:
                     elapsed_time = round(time.time() - job.started_at, 0)
                 job.progress = min(100, round((elapsed_time / job.duration) * 100, 2))
 
-                if job.mode == "Triaging" and not getattr(
-                    job, "manually_stopped", False
-                ):
-                    jobs_to_remove.append(job_id)
+                pass  # stopped triage jobs stay visible so they can be re-queued
 
             elif job.status == "stopped" and job.started_at is None:
-                if job.mode == "Triaging" and not getattr(
-                    job, "manually_stopped", False
-                ):
-                    jobs_to_remove.append(job_id)
+                pass  # stopped triage jobs stay visible so they can be re-queued
 
             elif job.status == "error":
                 if prev_status != "error" and job.started_at is not None:
@@ -765,11 +914,17 @@ class JobManager:
 
 
 def start_manager(manager):
+    def _handle_sigint(sig, frame):
+        print("\n[Manager] SIGINT received — shutting down.")
+        manager.shutdown_all()
+        os._exit(0)  # Force-exit all threads immediately
+
+    signal.signal(signal.SIGINT, _handle_sigint)
     print("[Manager] Starting Job Manager...")
     manager.run_manager()
 
 
-def finalize_job(job: Job, stopped=False, force_status=None):
+def finalize_job(job: Job, stopped=False, force_status=None, force_write=False):
     """Create/update the frb_info.json file with complete job and task information when job completes."""
 
     base_dir = get_frb_base_dir()
@@ -784,7 +939,7 @@ def finalize_job(job: Job, stopped=False, force_status=None):
     )
     json_path = os.path.join(output_folder, "frb_info.json")
 
-    if os.path.isfile(json_path):
+    if os.path.isfile(json_path) and not force_write:
         return
 
     try:
