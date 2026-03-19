@@ -42,6 +42,7 @@ CORS(
 )
 
 FIRMREBUGGER_BASE_DIR = ""
+APP_PORT = 5000
 job_manager = None
 jobs_snapshot = {
     "version": 0,
@@ -722,6 +723,12 @@ def get_triage_log_by_job():
         return jsonify({"error": str(e), "content": ""}), 500
 
 
+@app.route("/api/config", methods=["GET"])
+def config():
+    """Return runtime configuration for the frontend."""
+    return jsonify({"apiUrl": f"http://localhost:{APP_PORT}"})
+
+
 @app.route("/api/check_fuzzers", methods=["GET"])
 def check_fuzzers_endpoint():
     """Get valid fuzzers for a given benchmark"""
@@ -910,7 +917,9 @@ def run_flask(port=5000, host="127.0.0.1"):
 
 
 def run_app(port, host="127.0.0.1"):
-    global FIRMREBUGGER_BASE_DIR, STATIC_FOLDER, app, job_manager
+    global FIRMREBUGGER_BASE_DIR, STATIC_FOLDER, APP_PORT, app, job_manager
+
+    APP_PORT = port
 
     FIRMREBUGGER_BASE_DIR = get_frb_base_dir()
     STATIC_FOLDER = f"{FIRMREBUGGER_BASE_DIR}/src/firmrebugger-web/dist"

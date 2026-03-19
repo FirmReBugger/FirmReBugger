@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { useState, useEffect } from "react";
+import { useApiUrl } from "@/context/api-url-context";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Check, ChevronDown, ChevronRight, X } from "lucide-react";
@@ -63,15 +64,19 @@ export function TableMutateDrawer({
   const [loadingFuzzers, setLoadingFuzzers] = useState(false);
   const [validFuzzers, setValidFuzzers] = useState<string[]>([]);
   const [reportPaths, setReportPaths] = useState<string[]>([]);
-  const [reportDurations, setReportDurations] = useState<Record<string, number | null>>({});
+  const [reportDurations, setReportDurations] = useState<
+    Record<string, number | null>
+  >({});
   const [availableBinaries, setAvailableBinaries] = useState<string[]>([]);
-  const [unavailableReasons, setUnavailableReasons] = useState<Record<string, string>>({});
+  const [unavailableReasons, setUnavailableReasons] = useState<
+    Record<string, string>
+  >({});
   const [loadingReports, setLoadingReports] = useState(false);
   const [binarySearch, setBinarySearch] = useState("");
   const [expandedBinaries, setExpandedBinaries] = useState<Set<string>>(
     new Set(),
   );
-  const API_URL = import.meta.env.VITE_API_URL || "";
+  const API_URL = useApiUrl();
 
   const reportsByBinaryAndFuzzer: Record<string, Record<string, string[]>> = {};
 
@@ -454,7 +459,11 @@ export function TableMutateDrawer({
     }
 
     const durationSeconds = reportDurations[reportPath];
-    if (durationSeconds === null || durationSeconds === undefined || Number.isNaN(Number(durationSeconds))) {
+    if (
+      durationSeconds === null ||
+      durationSeconds === undefined ||
+      Number.isNaN(Number(durationSeconds))
+    ) {
       return outputName;
     }
 
@@ -463,7 +472,7 @@ export function TableMutateDrawer({
     const minutes = Math.floor((totalSeconds % 3600) / 60);
     const seconds = Math.floor(totalSeconds % 60);
 
-    let durationLabel = '';
+    let durationLabel = "";
     if (hours > 0) {
       durationLabel = `${hours}h ${minutes}m`;
     } else if (minutes > 0) {
@@ -553,11 +562,13 @@ export function TableMutateDrawer({
         );
 
         if (matchingReports.length > 0) {
-          const selectedReportPath = matchingReports.reduce((latest, current) => {
-            const latestTime = getReportTimestamp(latest);
-            const currentTime = getReportTimestamp(current);
-            return currentTime > latestTime ? current : latest;
-          });
+          const selectedReportPath = matchingReports.reduce(
+            (latest, current) => {
+              const latestTime = getReportTimestamp(latest);
+              const currentTime = getReportTimestamp(current);
+              return currentTime > latestTime ? current : latest;
+            },
+          );
           newValue[binary][fuzzer] = selectedReportPath;
         }
       }
@@ -672,8 +683,9 @@ export function TableMutateDrawer({
               control={form.control}
               name="selectedReports"
               render={({ field }) => {
-                const filteredBinaries = reportCompleteBinaries.filter((binary) =>
-                  binary.toLowerCase().includes(binarySearch.toLowerCase()),
+                const filteredBinaries = reportCompleteBinaries.filter(
+                  (binary) =>
+                    binary.toLowerCase().includes(binarySearch.toLowerCase()),
                 );
                 const unavailableBinaries = availableBinaries
                   .filter((binary) => !reportCompleteBinaries.includes(binary))
@@ -704,8 +716,8 @@ export function TableMutateDrawer({
                     </div>
                     <FormDescription className="text-xs">
                       Click a binary to expand. Select one report per fuzzer for
-                      each binary. Use "Match" to auto-pick the
-                      same output folder name across selected fuzzers.
+                      each binary. Use "Match" to auto-pick the same output
+                      folder name across selected fuzzers.
                     </FormDescription>
                     {(reportCompleteBinaries.length > 0 ||
                       availableBinaries.length > 0) && (

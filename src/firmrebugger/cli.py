@@ -228,24 +228,4 @@ def backend(port, host):
 )
 def app(port, host):
     """Run the FirmReBugger web application."""
-    base_dir = get_frb_base_dir()
-    env_path = f"{base_dir}/src/firmrebugger-web/.env"
-
-    env_vars = {}
-    if os.path.exists(env_path):
-        with open(env_path, "r") as f:
-            for line in f:
-                line = line.strip()
-                if line and not line.startswith("#") and "=" in line:
-                    key, value = line.split("=", 1)
-                    env_vars[key] = value
-
-    # Use localhost in the API URL regardless of bind address so that
-    # SSH port-forwarded and local browser connections always resolve correctly.
-    env_vars["VITE_API_URL"] = f"http://localhost:{port}"
-
-    with open(env_path, "w") as f:
-        for key, value in env_vars.items():
-            f.write(f"{key}={value}\n")
-
     run_app(port, host)

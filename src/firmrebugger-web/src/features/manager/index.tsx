@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useApiUrl } from "@/context/api-url-context";
 import { Header } from "@/components/layout/header";
 import { Main } from "@/components/layout/main";
 import { TasksDialogs } from "./components/tasks-dialogs";
@@ -49,7 +50,7 @@ function toDateOrUndefined(value: unknown): Date | undefined {
 
 export function Manager() {
   const [tasks, setTasks] = useState<Task[]>([]);
-  const API_URL = import.meta.env.VITE_API_URL || "";
+  const API_URL = useApiUrl();
 
   const applyJobs = (jobs: any[]) => {
     setTasks((prevTasks) => {
