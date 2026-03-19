@@ -716,6 +716,9 @@ class JobManager:
 
             for task in list(job.tasks):
                 if task.status in ("running", "stopping"):
+                    task.status = "stopped"
+                    task.completed_at = time.time()
+
                     # Kill the Docker container by name so it dies immediately.
                     container = getattr(task, "container_name", None)
                     if container:
@@ -738,17 +741,11 @@ class JobManager:
                         except Exception:
                             pass
 
-                    task.status = "stopped"
-                    task.completed_at = time.time()
-
                 elif task.status == "queued":
                     task.status = "stopped"
 
         print("[Manager] All containers killed.")
 
-        # Persist the stopped status for every non-completed job so that on the
-        # next startup list_finished_jobs() restores them as "stopped" and
-        # enqueue_auto_triaging_jobs() does not re-queue triage for them.
         print("[Manager] Persisting stopped status for all interrupted jobs...")
         for job in list(self.jobs.values()):
             if job.status in ("stopped", "error", "running", "queued", "partial"):
@@ -987,10 +984,14 @@ def finalize_job(job: Job, stopped=False, force_status=None, force_write=False):
 
         data["tasks"] = []
         for task in job.tasks:
+            task_status = task.status
+            if force_status == "stopped" and task_status not in ("completed",):
+                task_status = "stopped"
+
             task_info = {
                 "task_id": task.task_id,
                 "run_number": task.run_number,
-                "status": task.status,
+                "status": task_status,
                 "created_at": task.created_at,
                 "started_at": task.started_at,
                 "completed_at": task.completed_at,

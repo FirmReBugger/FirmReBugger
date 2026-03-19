@@ -141,7 +141,7 @@ export function TaskLogsDialog({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [logPath, setLogPath] = useState<string>("");
-  const scrollAreaRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
   const API_URL = useApiUrl();
   const ansiSegments = parseAnsiToSegments(logs);
 
@@ -179,15 +179,17 @@ export function TaskLogsDialog({
   }, [open, taskId, logUrl]);
 
   useEffect(() => {
-    if (logs && scrollAreaRef.current) {
-      const scrollContainer = scrollAreaRef.current.querySelector(
-        "[data-radix-scroll-area-viewport]",
-      );
-      if (scrollContainer) {
-        scrollContainer.scrollTop = scrollContainer.scrollHeight;
-      }
+    if (logs && !loading) {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          bottomRef.current?.scrollIntoView({
+            behavior: "instant",
+            block: "end",
+          });
+        });
+      });
     }
-  }, [logs]);
+  }, [logs, loading, open]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(logs);
@@ -272,16 +274,14 @@ export function TaskLogsDialog({
               </div>
             </div>
           ) : logs ? (
-            <ScrollArea
-              ref={scrollAreaRef}
-              className="h-full rounded-md border bg-muted/30"
-            >
+            <ScrollArea className="h-full rounded-md border bg-muted/30">
               <pre className="p-4 text-xs font-mono whitespace-pre-wrap break-words">
                 {ansiSegments.map((segment, index) => (
                   <span key={index} className={segment.className || undefined}>
                     {segment.text}
                   </span>
                 ))}
+                <div ref={bottomRef} />
               </pre>
             </ScrollArea>
           ) : (
