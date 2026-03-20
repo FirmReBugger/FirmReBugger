@@ -1,8 +1,15 @@
-import { useState, Fragment, useEffect } from 'react';
-import {KaplanMeier} from './kaplan-meier'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { ChevronDown, ChevronRight } from 'lucide-react';
-import { TableMutateDrawer, TableForm } from './table-mutate-drawer';
+import { useState, Fragment, useEffect, useRef } from "react";
+import { KaplanMeier } from "./kaplan-meier";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { ChevronDown, ChevronRight } from "lucide-react";
+import { TableMutateDrawer, TableForm } from "./table-mutate-drawer";
+import { useApiUrl, useApiUrlLoading } from "@/context/api-url-context";
 
 interface BugTableProps {
   benchmark: string;
@@ -45,7 +52,7 @@ interface TooltipState {
 }
 
 const isErrorBugId = (bugId: string | undefined | null) =>
-  typeof bugId === 'string' && bugId.toUpperCase().startsWith('ERROR');
+  typeof bugId === "string" && bugId.toUpperCase().startsWith("ERROR");
 
 const filterErrorBugs = (tableData: BinaryGroup[]): BinaryGroup[] =>
   tableData
@@ -55,13 +62,24 @@ const filterErrorBugs = (tableData: BinaryGroup[]): BinaryGroup[] =>
     }))
     .filter((binaryGroup) => binaryGroup.bugs.length > 0);
 
-export function BugTable({ benchmark, openDrawer, onOpenChange, onDataUpdate }: BugTableProps) {
+export function BugTable({
+  benchmark,
+  openDrawer,
+  onOpenChange,
+  onDataUpdate,
+}: BugTableProps) {
+  const API_URL = useApiUrl();
+  const apiUrlLoading = useApiUrlLoading();
 
-  const [expandedBinaries, setExpandedBinaries] = useState<Set<string>>(new Set());
+  const [expandedBinaries, setExpandedBinaries] = useState<Set<string>>(
+    new Set(),
+  );
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<BinaryGroup[] | null>(null);
+  const [isAutoFetching, setIsAutoFetching] = useState(false);
   const [internalShowDrawer, setInternalShowDrawer] = useState(false);
-  const showDrawer = typeof openDrawer === 'boolean' ? openDrawer : internalShowDrawer;
+  const showDrawer =
+    typeof openDrawer === "boolean" ? openDrawer : internalShowDrawer;
   const handleDrawerChange = (v: boolean) => {
     if (onOpenChange) {
       onOpenChange(v);
@@ -74,43 +92,118 @@ export function BugTable({ benchmark, openDrawer, onOpenChange, onDataUpdate }: 
     x: 0,
     y: 0,
     content: [],
-    metric: ''
+    metric: "",
   });
   const [fuzzers, setFuzzers] = useState<string[]>([]);
-  const [tableFormSelections, setTableFormSelections] = useState<TableForm | null>(null);
+  const [tableFormSelections, setTableFormSelections] =
+    useState<TableForm | null>(() => {
+      try {
+        const stored = localStorage.getItem(`report-config-${benchmark}`);
+        return stored ? (JSON.parse(stored) as TableForm) : null;
+      } catch {
+        return null;
+      }
+    });
+  const initialSelectionsRef = useRef(tableFormSelections);
   const [tooltipEnabled, setTooltipEnabled] = useState(true);
 
-  const [kmOpen, setKmOpen] = useState(false)
-  const [kmBugId, setKmBugId] = useState<string | null>(null)
-  const [kmFuzzerRuns, setKmFuzzerRuns] = useState<Record<string, Array<{ run: string; reached?: number | null; triggered?: number | null; detected?: number | null }>>>({})
-  const [kmMetric, setKmMetric] = useState<'reached' | 'triggered' | 'detected'>('reached')
+  const [kmOpen, setKmOpen] = useState(false);
+  const [kmBugId, setKmBugId] = useState<string | null>(null);
+  const [kmFuzzerRuns, setKmFuzzerRuns] = useState<
+    Record<
+      string,
+      Array<{
+        run: string;
+        reached?: number | null;
+        triggered?: number | null;
+        detected?: number | null;
+      }>
+    >
+  >({});
+  const [kmMetric, setKmMetric] = useState<
+    "reached" | "triggered" | "detected"
+  >("reached");
+
+  useEffect(() => {
+    if (apiUrlLoading) return;
+
+    const selections = initialSelectionsRef.current;
+    if (!selections) return;
+
+    const selectedFuzzers = selections.fuzzer;
+    const selectedReportPaths: string[] = [];
+    Object.values(selections.selectedReports).forEach((fuzzerReports) => {
+      Object.values(fuzzerReports).forEach((reportPath) => {
+        selectedReportPaths.push(reportPath);
+      });
+    });
+
+    if (selectedFuzzers.length === 0 || selectedReportPaths.length === 0)
+      return;
+
+    setIsAutoFetching(true);
+    fetch(`${API_URL}/api/table/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        benchmark,
+        fuzzers: selectedFuzzers,
+        report_paths: selectedReportPaths,
+      }),
+    })
+      .then((res) => {
+        if (!res.ok)
+          return res
+            .json()
+            .then((err) =>
+              Promise.reject(
+                new Error(err.error || "Failed to restore configuration"),
+              ),
+            );
+        return res.json();
+      })
+      .then((result) => {
+        fetchBugData(result);
+      })
+      .catch((err) => {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Failed to restore configuration",
+        );
+      })
+      .finally(() => {
+        setIsAutoFetching(false);
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiUrlLoading]);
 
   const fetchBugData = (response: any) => {
-    console.log('Received response:', response);
-    
+    console.log("Received response:", response);
+
     setError(null);
-    
+
     const tableData = response.table_data || response;
-    
+
     if (!Array.isArray(tableData)) {
       setError(`Invalid data format: expected array, got ${typeof tableData}`);
       return;
     }
 
     const filteredTableData = filterErrorBugs(tableData as BinaryGroup[]);
-    
+
     setData(filteredTableData);
-    
+
     if (onDataUpdate) {
       onDataUpdate(filteredTableData);
     }
-    
+
     const fuzzerSet = new Set<string>();
     filteredTableData.forEach((binaryGroup: BinaryGroup) => {
       if (binaryGroup.bugs && Array.isArray(binaryGroup.bugs)) {
         binaryGroup.bugs.forEach((bug: BugRow) => {
-          if (bug.fuzzerStats && typeof bug.fuzzerStats === 'object') {
-            Object.keys(bug.fuzzerStats).forEach(fuzzer => {
+          if (bug.fuzzerStats && typeof bug.fuzzerStats === "object") {
+            Object.keys(bug.fuzzerStats).forEach((fuzzer) => {
               fuzzerSet.add(fuzzer);
             });
           }
@@ -120,8 +213,23 @@ export function BugTable({ benchmark, openDrawer, onOpenChange, onDataUpdate }: 
     setFuzzers(Array.from(fuzzerSet).sort());
   };
 
+  const handleSuccess = (response: any, query?: TableForm) => {
+    fetchBugData(response);
+    if (query) {
+      try {
+        localStorage.setItem(
+          `report-config-${benchmark}`,
+          JSON.stringify(query),
+        );
+        setTableFormSelections(query);
+      } catch {
+        // ignore
+      }
+    }
+  };
+
   const toggleBinary = (binary: string) => {
-    setExpandedBinaries(prev => {
+    setExpandedBinaries((prev) => {
       const newSet = new Set(prev);
       if (newSet.has(binary)) {
         newSet.delete(binary);
@@ -132,13 +240,17 @@ export function BugTable({ benchmark, openDrawer, onOpenChange, onDataUpdate }: 
     });
   };
 
-  const showTooltip = (e: React.MouseEvent, runs: BugEntry[], metric: 'reached' | 'triggered' | 'detected') => {
+  const showTooltip = (
+    e: React.MouseEvent,
+    runs: BugEntry[],
+    metric: "reached" | "triggered" | "detected",
+  ) => {
     if (!tooltipEnabled) return;
 
     const rect = e.currentTarget.getBoundingClientRect();
-    const content = runs.map(run => ({
+    const content = runs.map((run) => ({
       run: run.run,
-      value: run[metric]
+      value: run[metric],
     }));
 
     setTooltip({
@@ -146,26 +258,26 @@ export function BugTable({ benchmark, openDrawer, onOpenChange, onDataUpdate }: 
       x: rect.left + rect.width / 2,
       y: rect.top - 10,
       content,
-      metric
+      metric,
     });
   };
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      const tooltipElement = document.querySelector('.tooltip-class');
+      const tooltipElement = document.querySelector(".tooltip-class");
       if (tooltipElement && !tooltipElement.contains(event.target as Node)) {
-        setTooltip(prev => ({ ...prev, visible: false }));
+        setTooltip((prev) => ({ ...prev, visible: false }));
       }
     };
 
     if (tooltip.visible) {
-      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener("mousedown", handleClickOutside);
     } else {
-      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener("mousedown", handleClickOutside);
     }
 
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener("mousedown", handleClickOutside);
     };
   }, [tooltip.visible]);
 
@@ -174,10 +286,10 @@ export function BugTable({ benchmark, openDrawer, onOpenChange, onDataUpdate }: 
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
-              <CardTitle>Bug Table</CardTitle>
-              <CardDescription>
-                {error ? `Error: ${error}` : 'No bug table configured yet'}
-              </CardDescription>
+            <CardTitle>Bug Table</CardTitle>
+            <CardDescription>
+              {error ? `Error: ${error}` : "No bug table configured yet"}
+            </CardDescription>
           </div>
         </CardHeader>
         <CardContent>
@@ -187,6 +299,10 @@ export function BugTable({ benchmark, openDrawer, onOpenChange, onDataUpdate }: 
                 <p className="font-semibold">Error loading data:</p>
                 <p>{error}</p>
               </div>
+            ) : isAutoFetching ? (
+              <p className="text-muted-foreground text-center animate-pulse">
+                Restoring previous configuration for {benchmark}…
+              </p>
             ) : (
               <p className="text-muted-foreground text-center">
                 No bug table data available for {benchmark}.
@@ -199,7 +315,7 @@ export function BugTable({ benchmark, openDrawer, onOpenChange, onDataUpdate }: 
         <TableMutateDrawer
           open={showDrawer}
           onOpenChange={handleDrawerChange}
-          onSuccess={fetchBugData}
+          onSuccess={handleSuccess}
           benchmark={benchmark}
           initialValues={tableFormSelections ?? undefined}
           onSelectionsChange={(v) => setTableFormSelections(v)}
@@ -209,9 +325,9 @@ export function BugTable({ benchmark, openDrawer, onOpenChange, onDataUpdate }: 
   }
 
   const formatValue = (val: number | null, hasSuccess: boolean = false) => {
-    if (val === null) return '✗';
-    if (!isFinite(val)) return 'infinite';
-    console.log('Has Success:', hasSuccess);
+    if (val === null) return "✗";
+    if (!isFinite(val)) return "infinite";
+    console.log("Has Success:", hasSuccess);
 
     const totalSeconds = Math.floor(val);
     const hours = Math.floor(totalSeconds / 3600);
@@ -227,36 +343,54 @@ export function BugTable({ benchmark, openDrawer, onOpenChange, onDataUpdate }: 
     }
   };
 
-  const hasAnySuccess = (runs: BugEntry[], metric: 'reached' | 'triggered' | 'detected') => {
-    return runs.some(run => run[metric] !== null);
+  const hasAnySuccess = (
+    runs: BugEntry[],
+    metric: "reached" | "triggered" | "detected",
+  ) => {
+    return runs.some((run) => run[metric] !== null);
   };
 
-  const totalBugs = Array.isArray(data) ? data.reduce((sum, bg) => sum + bg.bugs.length, 0) : 0;
+  const totalBugs = Array.isArray(data)
+    ? data.reduce((sum, bg) => sum + bg.bugs.length, 0)
+    : 0;
 
   const getBestValues = (bug: BugRow) => {
     const reached: number[] = [];
     const triggered: number[] = [];
     const detected: number[] = [];
 
-    Object.values(bug.fuzzerStats).forEach(stats => {
-      if (stats.meanReached !== null && isFinite(stats.meanReached)) reached.push(stats.meanReached);
-      if (stats.meanTriggered !== null && isFinite(stats.meanTriggered)) triggered.push(stats.meanTriggered);
-      if (stats.meanDetected !== null && isFinite(stats.meanDetected)) detected.push(stats.meanDetected);
+    Object.values(bug.fuzzerStats).forEach((stats) => {
+      if (stats.meanReached !== null && isFinite(stats.meanReached))
+        reached.push(stats.meanReached);
+      if (stats.meanTriggered !== null && isFinite(stats.meanTriggered))
+        triggered.push(stats.meanTriggered);
+      if (stats.meanDetected !== null && isFinite(stats.meanDetected))
+        detected.push(stats.meanDetected);
     });
 
     return {
       bestReached: reached.length > 0 ? Math.min(...reached) : null,
       bestTriggered: triggered.length > 0 ? Math.min(...triggered) : null,
-      bestDetected: detected.length > 0 ? Math.min(...detected) : null
+      bestDetected: detected.length > 0 ? Math.min(...detected) : null,
     };
   };
 
   const isBestValue = (value: number | null, bestValue: number | null) => {
-    return value !== null && bestValue !== null && Math.abs(value - bestValue) < 0.01;
+    return (
+      value !== null && bestValue !== null && Math.abs(value - bestValue) < 0.01
+    );
   };
 
   const calculateFuzzerStats = (binaryGroup: BinaryGroup) => {
-    const fuzzerStats: Record<string, { reached: string; triggered: string; detected: string; tooltips: Record<string, string> }> = {};
+    const fuzzerStats: Record<
+      string,
+      {
+        reached: string;
+        triggered: string;
+        detected: string;
+        tooltips: Record<string, string>;
+      }
+    > = {};
 
     fuzzers.forEach((fuzzer) => {
       let reachedBugs = 0;
@@ -274,9 +408,18 @@ export function BugTable({ benchmark, openDrawer, onOpenChange, onDataUpdate }: 
       });
 
       fuzzerStats[fuzzer] = {
-        reached: totalBugs > 0 ? `${((reachedBugs / totalBugs) * 100).toFixed(1)}%` : '0.0%',
-        triggered: totalBugs > 0 ? `${((triggeredBugs / totalBugs) * 100).toFixed(1)}%` : '0.0%',
-        detected: totalBugs > 0 ? `${((detectedBugs / totalBugs) * 100).toFixed(1)}%` : '0.0%',
+        reached:
+          totalBugs > 0
+            ? `${((reachedBugs / totalBugs) * 100).toFixed(1)}%`
+            : "0.0%",
+        triggered:
+          totalBugs > 0
+            ? `${((triggeredBugs / totalBugs) * 100).toFixed(1)}%`
+            : "0.0%",
+        detected:
+          totalBugs > 0
+            ? `${((detectedBugs / totalBugs) * 100).toFixed(1)}%`
+            : "0.0%",
         tooltips: {
           reached: `${reachedBugs}/${totalBugs} bugs`,
           triggered: `${triggeredBugs}/${totalBugs} bugs`,
@@ -296,7 +439,11 @@ export function BugTable({ benchmark, openDrawer, onOpenChange, onDataUpdate }: 
             <div>
               <CardTitle>Bug Table</CardTitle>
               <CardDescription>
-                Showing {totalBugs} unique bug{totalBugs !== 1 ? 's' : ''} across {data.length} binar{data.length !== 1 ? 'ies' : 'y'} and {fuzzers.length} fuzzer{fuzzers.length !== 1 ? 's' : ''} for {benchmark}. You can click on a bug ID to see bug survival curves, or hover over the times to see details for each run. 
+                Showing {totalBugs} unique bug{totalBugs !== 1 ? "s" : ""}{" "}
+                across {data.length} binar{data.length !== 1 ? "ies" : "y"} and{" "}
+                {fuzzers.length} fuzzer{fuzzers.length !== 1 ? "s" : ""} for{" "}
+                {benchmark}. You can click on a bug ID to see bug survival
+                curves, or hover over the times to see details for each run.
               </CardDescription>
             </div>
           </div>
@@ -307,7 +454,10 @@ export function BugTable({ benchmark, openDrawer, onOpenChange, onDataUpdate }: 
               <table className="w-full caption-bottom text-sm">
                 <thead className="[&_tr]:border-b bg-muted/50">
                   <tr className="border-b">
-                    <th className="h-12 px-3 text-left align-middle font-bold text-muted-foreground w-24" rowSpan={2}>
+                    <th
+                      className="h-12 px-3 text-left align-middle font-bold text-muted-foreground w-24"
+                      rowSpan={2}
+                    >
                       Binary
                     </th>
                     {fuzzers.map((fuzzer) => (
@@ -339,7 +489,9 @@ export function BugTable({ benchmark, openDrawer, onOpenChange, onDataUpdate }: 
                 <tbody className="[&_tr:last-child]:border-0">
                   {data.length > 0 ? (
                     data.map((binaryGroup) => {
-                      const isExpanded = expandedBinaries.has(binaryGroup.binary);
+                      const isExpanded = expandedBinaries.has(
+                        binaryGroup.binary,
+                      );
                       return (
                         <Fragment key={binaryGroup.binary}>
                           <tr
@@ -353,100 +505,202 @@ export function BugTable({ benchmark, openDrawer, onOpenChange, onDataUpdate }: 
                                 ) : (
                                   <ChevronRight className="h-4 w-4 text-muted-foreground flex-shrink-0" />
                                 )}
-                                <span className="truncate">{binaryGroup.binary}</span>
+                                <span className="truncate">
+                                  {binaryGroup.binary}
+                                </span>
                                 <span className="text-xs font-normal text-muted-foreground whitespace-nowrap">
                                   ({binaryGroup.bugs.length})
                                 </span>
                               </div>
                             </td>
                             {fuzzers.map((fuzzer) => {
-                              const stats = calculateFuzzerStats(binaryGroup)[fuzzer];
+                              const stats =
+                                calculateFuzzerStats(binaryGroup)[fuzzer];
                               return (
                                 <Fragment key={fuzzer}>
-                                  <td className="text-center text-muted-foreground">{stats.reached}</td>
-                                  <td className="text-center text-muted-foreground">{stats.triggered}</td>
-                                  <td className="text-center text-muted-foreground">{stats.detected}</td>
+                                  <td className="text-center text-muted-foreground">
+                                    {stats.reached}
+                                  </td>
+                                  <td className="text-center text-muted-foreground">
+                                    {stats.triggered}
+                                  </td>
+                                  <td className="text-center text-muted-foreground">
+                                    {stats.detected}
+                                  </td>
                                 </Fragment>
                               );
                             })}
                           </tr>
-                          {isExpanded && binaryGroup.bugs.map((bug) => {
-                            const bestValues = getBestValues(bug);
+                          {isExpanded &&
+                            binaryGroup.bugs.map((bug) => {
+                              const bestValues = getBestValues(bug);
 
-                            return (
-                              <tr
-                                key={`${binaryGroup.binary}-${bug.bugId}`}
-                                className="border-b transition-colors hover:bg-muted/30"
-                              >
-                                <td className="px-3 py-2 align-middle text-muted-foreground text-sm pl-6">
-                                  <button
-                                    className="text-left underline underline-offset-1 text-sm hover:text-primary"
-                                    onClick={(e) => {
-                                      e.stopPropagation()
-                                      const runsByFuzzer: Record<string, Array<{ run: string; reached?: number | null; triggered?: number | null; detected?: number | null }>> = {}
-                                      Object.entries(bug.fuzzerStats || {}).forEach(([f, stats]) => {
-                                        runsByFuzzer[f] = (stats as any).runs || []
-                                      })
-                                      setKmFuzzerRuns(runsByFuzzer)
-                                      setKmBugId(bug.bugId)
-                                      setKmMetric('reached')
-                                      setKmOpen(true)
-                                    }}
-                                  >
-                                    {bug.bugId}
-                                  </button>
-                                </td>
-                                {fuzzers.map((fuzzer) => {
-                                  const stats = bug.fuzzerStats[fuzzer];
-                                  const isReachedBest = stats && isBestValue(stats.meanReached, bestValues.bestReached);
-                                  const isTriggeredBest = stats && isBestValue(stats.meanTriggered, bestValues.bestTriggered);
-                                  const isDetectedBest = stats && isBestValue(stats.meanDetected, bestValues.bestDetected);
+                              return (
+                                <tr
+                                  key={`${binaryGroup.binary}-${bug.bugId}`}
+                                  className="border-b transition-colors hover:bg-muted/30"
+                                >
+                                  <td className="px-3 py-2 align-middle text-muted-foreground text-sm pl-6">
+                                    <button
+                                      className="text-left underline underline-offset-1 text-sm hover:text-primary"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const runsByFuzzer: Record<
+                                          string,
+                                          Array<{
+                                            run: string;
+                                            reached?: number | null;
+                                            triggered?: number | null;
+                                            detected?: number | null;
+                                          }>
+                                        > = {};
+                                        Object.entries(
+                                          bug.fuzzerStats || {},
+                                        ).forEach(([f, stats]) => {
+                                          runsByFuzzer[f] =
+                                            (stats as any).runs || [];
+                                        });
+                                        setKmFuzzerRuns(runsByFuzzer);
+                                        setKmBugId(bug.bugId);
+                                        setKmMetric("reached");
+                                        setKmOpen(true);
+                                      }}
+                                    >
+                                      {bug.bugId}
+                                    </button>
+                                  </td>
+                                  {fuzzers.map((fuzzer) => {
+                                    const stats = bug.fuzzerStats[fuzzer];
+                                    const isReachedBest =
+                                      stats &&
+                                      isBestValue(
+                                        stats.meanReached,
+                                        bestValues.bestReached,
+                                      );
+                                    const isTriggeredBest =
+                                      stats &&
+                                      isBestValue(
+                                        stats.meanTriggered,
+                                        bestValues.bestTriggered,
+                                      );
+                                    const isDetectedBest =
+                                      stats &&
+                                      isBestValue(
+                                        stats.meanDetected,
+                                        bestValues.bestDetected,
+                                      );
 
-                                  const hasReached = stats && hasAnySuccess(stats.runs, 'reached');
-                                  const hasTriggered = stats && hasAnySuccess(stats.runs, 'triggered');
-                                  const hasDetected = stats && hasAnySuccess(stats.runs, 'detected');
+                                    const hasReached =
+                                      stats &&
+                                      hasAnySuccess(stats.runs, "reached");
+                                    const hasTriggered =
+                                      stats &&
+                                      hasAnySuccess(stats.runs, "triggered");
+                                    const hasDetected =
+                                      stats &&
+                                      hasAnySuccess(stats.runs, "detected");
 
-                                  return (
-                                    <Fragment key={fuzzer}>
-                                      <td 
-                                        className={`px-1.5 py-2 text-center align-middle border-l text-xs cursor-pointer transition-colors ${
-                                          isReachedBest 
-                                            ? 'bg-green-100 dark:bg-green-900/30 font-semibold text-green-900 dark:text-green-300' 
-                                            : 'hover:bg-muted/50'
-                                        } ${stats?.meanReached === null && hasReached ? 'text-yellow-600 dark:text-yellow-400 font-semibold' : ''}`}
-                                        onMouseEnter={(e) => tooltipEnabled && stats && stats.runs.length > 0 && showTooltip(e, stats.runs, 'reached')}
-                                        onMouseLeave={() => tooltipEnabled && setTooltip(prev => ({ ...prev, visible: false }))}
-                                      >
-                                        {stats ? formatValue(stats.meanReached, hasReached) : '✗'}
-                                      </td>
-                                      <td 
-                                        className={`px-1.5 py-2 text-center align-middle text-xs cursor-pointer transition-colors ${
-                                          isTriggeredBest 
-                                            ? 'bg-green-100 dark:bg-green-900/30 font-semibold text-green-900 dark:text-green-300' 
-                                            : 'hover:bg-muted/50'
-                                        } ${stats?.meanTriggered === null && hasTriggered ? 'text-yellow-600 dark:text-yellow-400 font-semibold' : ''}`}
-                                        onMouseEnter={(e) => tooltipEnabled && stats && stats.runs.length > 0 && showTooltip(e, stats.runs, 'triggered')}
-                                        onMouseLeave={() => tooltipEnabled && setTooltip(prev => ({ ...prev, visible: false }))}
-                                      >
-                                        {stats ? formatValue(stats.meanTriggered, hasTriggered) : '✗'}
-                                      </td>
-                                      <td 
-                                        className={`px-1.5 py-2 text-center align-middle text-xs cursor-pointer transition-colors ${
-                                          isDetectedBest 
-                                            ? 'bg-green-100 dark:bg-green-900/30 font-semibold text-green-900 dark:text-green-300' 
-                                            : 'hover:bg-muted/50'
-                                        } ${stats?.meanDetected === null && hasDetected ? 'text-yellow-600 dark:text-yellow-400 font-semibold' : ''}`}
-                                        onMouseEnter={(e) => tooltipEnabled && stats && stats.runs.length > 0 && showTooltip(e, stats.runs, 'detected')}
-                                        onMouseLeave={() => tooltipEnabled && setTooltip(prev => ({ ...prev, visible: false }))}
-                                      >
-                                        {stats ? formatValue(stats.meanDetected, hasDetected) : '✗'}
-                                      </td>
-                                    </Fragment>
-                                  );
-                                })}
-                              </tr>
-                            );
-                          })}
+                                    return (
+                                      <Fragment key={fuzzer}>
+                                        <td
+                                          className={`px-1.5 py-2 text-center align-middle border-l text-xs cursor-pointer transition-colors ${
+                                            isReachedBest
+                                              ? "bg-green-100 dark:bg-green-900/30 font-semibold text-green-900 dark:text-green-300"
+                                              : "hover:bg-muted/50"
+                                          } ${stats?.meanReached === null && hasReached ? "text-yellow-600 dark:text-yellow-400 font-semibold" : ""}`}
+                                          onMouseEnter={(e) =>
+                                            tooltipEnabled &&
+                                            stats &&
+                                            stats.runs.length > 0 &&
+                                            showTooltip(
+                                              e,
+                                              stats.runs,
+                                              "reached",
+                                            )
+                                          }
+                                          onMouseLeave={() =>
+                                            tooltipEnabled &&
+                                            setTooltip((prev) => ({
+                                              ...prev,
+                                              visible: false,
+                                            }))
+                                          }
+                                        >
+                                          {stats
+                                            ? formatValue(
+                                                stats.meanReached,
+                                                hasReached,
+                                              )
+                                            : "✗"}
+                                        </td>
+                                        <td
+                                          className={`px-1.5 py-2 text-center align-middle text-xs cursor-pointer transition-colors ${
+                                            isTriggeredBest
+                                              ? "bg-green-100 dark:bg-green-900/30 font-semibold text-green-900 dark:text-green-300"
+                                              : "hover:bg-muted/50"
+                                          } ${stats?.meanTriggered === null && hasTriggered ? "text-yellow-600 dark:text-yellow-400 font-semibold" : ""}`}
+                                          onMouseEnter={(e) =>
+                                            tooltipEnabled &&
+                                            stats &&
+                                            stats.runs.length > 0 &&
+                                            showTooltip(
+                                              e,
+                                              stats.runs,
+                                              "triggered",
+                                            )
+                                          }
+                                          onMouseLeave={() =>
+                                            tooltipEnabled &&
+                                            setTooltip((prev) => ({
+                                              ...prev,
+                                              visible: false,
+                                            }))
+                                          }
+                                        >
+                                          {stats
+                                            ? formatValue(
+                                                stats.meanTriggered,
+                                                hasTriggered,
+                                              )
+                                            : "✗"}
+                                        </td>
+                                        <td
+                                          className={`px-1.5 py-2 text-center align-middle text-xs cursor-pointer transition-colors ${
+                                            isDetectedBest
+                                              ? "bg-green-100 dark:bg-green-900/30 font-semibold text-green-900 dark:text-green-300"
+                                              : "hover:bg-muted/50"
+                                          } ${stats?.meanDetected === null && hasDetected ? "text-yellow-600 dark:text-yellow-400 font-semibold" : ""}`}
+                                          onMouseEnter={(e) =>
+                                            tooltipEnabled &&
+                                            stats &&
+                                            stats.runs.length > 0 &&
+                                            showTooltip(
+                                              e,
+                                              stats.runs,
+                                              "detected",
+                                            )
+                                          }
+                                          onMouseLeave={() =>
+                                            tooltipEnabled &&
+                                            setTooltip((prev) => ({
+                                              ...prev,
+                                              visible: false,
+                                            }))
+                                          }
+                                        >
+                                          {stats
+                                            ? formatValue(
+                                                stats.meanDetected,
+                                                hasDetected,
+                                              )
+                                            : "✗"}
+                                        </td>
+                                      </Fragment>
+                                    );
+                                  })}
+                                </tr>
+                              );
+                            })}
                         </Fragment>
                       );
                     })
@@ -470,16 +724,23 @@ export function BugTable({ benchmark, openDrawer, onOpenChange, onDataUpdate }: 
                 style={{
                   left: `${tooltip.x}px`,
                   top: `${tooltip.y}px`,
-                  transform: 'translate(-50%, -100%)',
-                  maxWidth: '250px'
+                  transform: "translate(-50%, -100%)",
+                  maxWidth: "250px",
                 }}
               >
-                <div className="font-semibold mb-1 capitalize">{tooltip.metric} Times</div>
+                <div className="font-semibold mb-1 capitalize">
+                  {tooltip.metric} Times
+                </div>
                 <div className="space-y-1">
                   {tooltip.content.map((item, idx) => (
-                    <div key={idx} className="flex justify-between gap-4 text-xs">
+                    <div
+                      key={idx}
+                      className="flex justify-between gap-4 text-xs"
+                    >
                       <span className="text-muted-foreground">{item.run}:</span>
-                      <span className="font-mono">{formatValue(item.value)}</span>
+                      <span className="font-mono">
+                        {formatValue(item.value)}
+                      </span>
                     </div>
                   ))}
                 </div>
@@ -494,7 +755,9 @@ export function BugTable({ benchmark, openDrawer, onOpenChange, onDataUpdate }: 
                 <span>Best time for bug</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="font-semibold text-yellow-600 dark:text-yellow-400">✗</span>
+                <span className="font-semibold text-yellow-600 dark:text-yellow-400">
+                  ✗
+                </span>
                 <span>Success in at least 1 run</span>
               </div>
               <div className="flex items-center gap-2">
@@ -509,38 +772,38 @@ export function BugTable({ benchmark, openDrawer, onOpenChange, onDataUpdate }: 
             </div>
             <div className="flex items-center gap-2">
               <button
-                className={`text-xs underline ${tooltipEnabled ? 'text-primary' : 'text-muted-foreground'}`}
+                className={`text-xs underline ${tooltipEnabled ? "text-primary" : "text-muted-foreground"}`}
                 onClick={() => setTooltipEnabled(!tooltipEnabled)}
               >
-                {tooltipEnabled ? 'Disable Hover' : 'Enable Hover'}
+                {tooltipEnabled ? "Disable Hover" : "Enable Hover"}
               </button>
             </div>
           </div>
         </CardContent>
       </Card>
 
-        <TableMutateDrawer
-          open={showDrawer}
-          onOpenChange={handleDrawerChange}
-          onSuccess={fetchBugData}
-          benchmark={benchmark}
-          initialValues={tableFormSelections ?? undefined}
-          onSelectionsChange={(v) => setTableFormSelections(v)}
-        />
+      <TableMutateDrawer
+        open={showDrawer}
+        onOpenChange={handleDrawerChange}
+        onSuccess={handleSuccess}
+        benchmark={benchmark}
+        initialValues={tableFormSelections ?? undefined}
+        onSelectionsChange={(v) => setTableFormSelections(v)}
+      />
 
-        {kmBugId && (
-          <KaplanMeier
-            open={kmOpen}
-            onOpenChange={(v: boolean) => {
-              setKmOpen(v)
-              if (!v) setKmMetric('reached')
-            }}
-            bugId={kmBugId}
-            fuzzerRuns={kmFuzzerRuns}
-            metric={kmMetric}
-            onMetricChange={setKmMetric}
-          />
-        )}
+      {kmBugId && (
+        <KaplanMeier
+          open={kmOpen}
+          onOpenChange={(v: boolean) => {
+            setKmOpen(v);
+            if (!v) setKmMetric("reached");
+          }}
+          bugId={kmBugId}
+          fuzzerRuns={kmFuzzerRuns}
+          metric={kmMetric}
+          onMetricChange={setKmMetric}
+        />
+      )}
     </>
   );
 }

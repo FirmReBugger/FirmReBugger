@@ -46,6 +46,7 @@ export function UpSetPlot({ benchmark, tableData }: UpSetPlotProps) {
   } | null>(null);
   const [dimensions, setDimensions] = useState({ width: 1200, height: 600 });
   const [detailsOpen, setDetailsOpen] = useState(false);
+
   const [selectedIntersectionBugs, setSelectedIntersectionBugs] = useState<{
     tp: string[];
     fp: string[];
@@ -213,7 +214,11 @@ export function UpSetPlot({ benchmark, tableData }: UpSetPlotProps) {
     selectedElems.forEach((elemName) => {
       const elem = elems.find((e: any) => e.name === elemName);
       if (!elem) return;
-      const bugName = String(elem.name || "").split(":").slice(1).join(":") || String(elem.name || "");
+      const bugName =
+        String(elem.name || "")
+          .split(":")
+          .slice(1)
+          .join(":") || String(elem.name || "");
       if (elem.isFP) {
         fp.push(bugName);
       } else {
@@ -235,8 +240,9 @@ export function UpSetPlot({ benchmark, tableData }: UpSetPlotProps) {
           <div>
             <CardTitle>Bug UpSet Plot - {benchmark}</CardTitle>
             <CardDescription>
-              Interactive UpSet plot for bugs (
-              {currentMetric} metric). You can click on the plot to view details about the bugs in the selected intersection.
+              Interactive UpSet plot for bugs ({currentMetric} metric). You can
+              click on the plot to view details about the bugs in the selected
+              intersection.
               {processedMap[currentMetric]?.stats && (
                 <span className="block mt-1">
                   {processedMap[currentMetric].stats.hitBugs} of{" "}
@@ -286,9 +292,10 @@ export function UpSetPlot({ benchmark, tableData }: UpSetPlotProps) {
               style={{ height: `${dimensions.height}px` }}
             >
               <div
+                className="[&_rect]:cursor-pointer [&_circle]:cursor-pointer"
                 onClickCapture={(e) => {
                   const target = e.target as HTMLElement;
-                  if (target.closest("rect")) {
+                  if (target.closest("rect") || target.closest("circle")) {
                     openSelectionDetails();
                   }
                 }}
@@ -315,8 +322,10 @@ export function UpSetPlot({ benchmark, tableData }: UpSetPlotProps) {
                   }
 
                   const rectElement = target.closest("rect");
+                  const circleElement = target.closest("circle");
+                  const isInteractiveElement = rectElement || circleElement;
                   if (
-                    rectElement &&
+                    isInteractiveElement &&
                     (selection?.type === "intersection" ||
                       selection?.type === "distinctIntersection")
                   ) {
@@ -343,7 +352,7 @@ export function UpSetPlot({ benchmark, tableData }: UpSetPlotProps) {
                       total: fpCount + tpCount,
                     });
                     setIntersectionTooltipPos({ x: e.clientX, y: e.clientY });
-                  } else if (!rectElement) {
+                  } else if (!isInteractiveElement) {
                     setHoveredIntersection(null);
                     setIntersectionTooltipPos(null);
                   }
@@ -402,6 +411,9 @@ export function UpSetPlot({ benchmark, tableData }: UpSetPlotProps) {
                   <div className="text-red-600 dark:text-red-400">
                     FP: {hoveredIntersection.fp}
                   </div>
+                  <div className="mt-2 pt-2 border-t border-border text-xs text-muted-foreground">
+                    Click for details
+                  </div>
                 </div>
               )}
             </div>
@@ -419,10 +431,14 @@ export function UpSetPlot({ benchmark, tableData }: UpSetPlotProps) {
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              {currentMetric.charAt(0).toUpperCase() + currentMetric.slice(1)} bugs in selection
+              {currentMetric.charAt(0).toUpperCase() + currentMetric.slice(1)}{" "}
+              bugs in selection
             </DialogTitle>
             <DialogDescription>
-              {selectedIntersectionBugs.tp.length + selectedIntersectionBugs.fp.length} total · {selectedIntersectionBugs.tp.length} true positive · {selectedIntersectionBugs.fp.length} false positive
+              {selectedIntersectionBugs.tp.length +
+                selectedIntersectionBugs.fp.length}{" "}
+              total · {selectedIntersectionBugs.tp.length} true positive ·{" "}
+              {selectedIntersectionBugs.fp.length} false positive
             </DialogDescription>
           </DialogHeader>
 
