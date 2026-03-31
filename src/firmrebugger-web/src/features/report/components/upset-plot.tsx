@@ -600,8 +600,9 @@ export function UpSetPlot({
             </div>
           )}
         </div>
+        <hr className="my-4 border-border" />
         {/* Info area */}
-        <div className="mt-4" onClick={(e) => e.stopPropagation()}>
+        <div onClick={(e) => e.stopPropagation()}>
           {/* Header: title + counts + optional dismiss */}
           <div className="flex items-center justify-between mb-2 gap-2">
             <div className="min-w-0 flex items-baseline gap-1.5 flex-wrap">
@@ -651,15 +652,15 @@ export function UpSetPlot({
               {(() => {
                 const currentSets = processedMap[currentMetric]?.sets || [];
                 if (currentSets.length === 0) {
-                  return <div className="text-xs text-muted-foreground py-1">No data loaded yet.</div>;
+                  return <div className="text-sm text-muted-foreground py-1">No data loaded yet.</div>;
                 }
                 return (
                   <table className="w-full border-collapse">
                     <thead>
                       <tr className="border-b border-border">
-                        <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wide pb-1.5 pr-3 w-[130px]">Fuzzer</th>
-                        <th className="text-left text-[10px] font-semibold text-green-600 dark:text-green-400 uppercase tracking-wide pb-1.5 pr-2">True Positives</th>
-                        <th className="text-left text-[10px] font-semibold text-red-500 uppercase tracking-wide pb-1.5">False Positives</th>
+                        <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide pb-1.5 pr-3 w-[130px]">Fuzzer</th>
+                        <th className="text-left text-xs font-semibold text-green-600 dark:text-green-400 uppercase tracking-wide pb-1.5 pr-2">True Positives</th>
+                        <th className="text-left text-xs font-semibold text-red-500 uppercase tracking-wide pb-1.5">False Positives</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -676,15 +677,15 @@ export function UpSetPlot({
                         return (
                           <tr key={fuzzerName} className="border-b border-border/40">
                             <td className="py-1.5 pr-3 align-middle">
-                              <span className="text-[11px] font-medium text-foreground" title={fuzzerName}>{fuzzerName}</span>
+                              <span className="text-sm font-medium text-foreground" title={fuzzerName}>{fuzzerName}</span>
                             </td>
                             <td className="py-1.5 pr-2 align-middle">
                               <div className="flex flex-wrap gap-0.5">
                                 {tpBugs.length > 0
                                   ? tpBugs.map((b) => (
-                                      <span key={b} className="font-mono text-[10px] px-1 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">{b}</span>
+                                      <span key={b} className="font-mono text-xs px-1 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">{b}</span>
                                     ))
-                                  : <span className="text-[11px] text-muted-foreground">—</span>
+                                  : <span className="text-sm text-muted-foreground">—</span>
                                 }
                               </div>
                             </td>
@@ -692,9 +693,9 @@ export function UpSetPlot({
                               <div className="flex flex-wrap gap-0.5">
                                 {fpBugs.length > 0
                                   ? fpBugs.map((b) => (
-                                      <span key={b} className="font-mono text-[10px] px-1 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400">{b}</span>
+                                      <span key={b} className="font-mono text-xs px-1 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400">{b}</span>
                                     ))
-                                  : <span className="text-[11px] text-muted-foreground">—</span>
+                                  : <span className="text-sm text-muted-foreground">—</span>
                                 }
                               </div>
                             </td>
@@ -713,10 +714,10 @@ export function UpSetPlot({
                 <table className="w-full border-collapse">
                   <thead>
                     <tr className="border-b border-border">
-                      <th className="text-left text-[10px] font-semibold text-green-600 dark:text-green-400 uppercase tracking-wide pb-1.5 pr-2">
+                      <th className="text-left text-xs font-semibold text-green-600 dark:text-green-400 uppercase tracking-wide pb-1.5 pr-2">
                         True Positives ({selectedIntersectionBugs.tp.length})
                       </th>
-                      <th className="text-left text-[10px] font-semibold text-red-500 uppercase tracking-wide pb-1.5">
+                      <th className="text-left text-xs font-semibold text-red-500 uppercase tracking-wide pb-1.5">
                         False Positives ({selectedIntersectionBugs.fp.length})
                       </th>
                     </tr>
@@ -727,19 +728,19 @@ export function UpSetPlot({
                         {selectedIntersectionBugs.tp.length > 0 ? (
                           <div className="flex flex-wrap gap-0.5">
                             {selectedIntersectionBugs.tp.map((b) => (
-                              <span key={`tp-${b}`} className="font-mono text-[10px] px-1 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">{b}</span>
+                              <span key={`tp-${b}`} className="font-mono text-xs px-1 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">{b}</span>
                             ))}
                           </div>
-                        ) : <span className="text-[11px] text-muted-foreground">—</span>}
+                        ) : <span className="text-sm text-muted-foreground">—</span>}
                       </td>
                       <td className="py-1.5 align-middle">
                         {selectedIntersectionBugs.fp.length > 0 ? (
                           <div className="flex flex-wrap gap-0.5">
                             {selectedIntersectionBugs.fp.map((b) => (
-                              <span key={`fp-${b}`} className="font-mono text-[10px] px-1 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400">{b}</span>
+                              <span key={`fp-${b}`} className="font-mono text-xs px-1 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400">{b}</span>
                             ))}
                           </div>
-                        ) : <span className="text-[11px] text-muted-foreground">—</span>}
+                        ) : <span className="text-sm text-muted-foreground">—</span>}
                       </td>
                     </tr>
                   </tbody>

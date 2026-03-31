@@ -105,16 +105,7 @@ export function BugTable({
     content: [],
     metric: "",
   });
-  const [consistencyTooltip, setConsistencyTooltip] = useState<{
-    visible: boolean;
-    x: number;
-    y: number;
-    fuzzer: string;
-    B: number;
-    T: number;
-    sumC: number;
-    pct: number;
-  } | null>(null);
+
   const [fuzzers, setFuzzers] = useState<string[]>([]);
   const [tableFormSelections, setTableFormSelections] =
     useState<TableForm | null>(() => {
@@ -511,40 +502,6 @@ export function BugTable({
           <div className="rounded-md border relative">
             <div className="relative w-full overflow-auto">
               <table className="w-full caption-bottom text-sm">
-                <thead className="[&_tr]:border-b bg-muted/50">
-                  <tr className="border-b">
-                    <th
-                      className="h-12 px-3 text-left align-middle font-bold text-muted-foreground w-24"
-                      rowSpan={2}
-                    >
-                      Binary
-                    </th>
-                    {fuzzers.map((fuzzer) => (
-                      <th
-                        key={fuzzer}
-                        className="h-12 px-2 text-center align-middle font-bold text-muted-foreground border-l"
-                        colSpan={3}
-                      >
-                        {fuzzer}
-                      </th>
-                    ))}
-                  </tr>
-                  <tr className="border-b">
-                    {fuzzers.map((fuzzer) => (
-                      <Fragment key={fuzzer}>
-                        <th className="h-10 px-1.5 text-center align-middle text-xs font-semibold text-muted-foreground border-l w-16">
-                          R
-                        </th>
-                        <th className="h-10 px-1.5 text-center align-middle text-xs font-semibold text-muted-foreground w-16">
-                          T
-                        </th>
-                        <th className="h-10 px-1.5 text-center align-middle text-xs font-semibold text-muted-foreground w-16">
-                          D
-                        </th>
-                      </Fragment>
-                    ))}
-                  </tr>
-                </thead>
                 <tbody className="[&_tr:last-child]:border-0">
                   {data.length > 0 ? (
                     data.map((binaryGroup) => {
@@ -557,7 +514,10 @@ export function BugTable({
                             className="border-b bg-muted/20 cursor-pointer hover:bg-muted/40 transition-colors"
                             onClick={() => toggleBinary(binaryGroup.binary)}
                           >
-                            <td className="px-3 py-2 align-middle font-semibold">
+                            <td
+                              className="px-3 py-2 align-middle font-semibold"
+                              colSpan={1 + fuzzers.length * 3}
+                            >
                               <div className="flex items-center gap-2">
                                 {isExpanded ? (
                                   <ChevronDown className="h-4 w-4 text-muted-foreground flex-shrink-0" />
@@ -572,64 +532,35 @@ export function BugTable({
                                 </span>
                               </div>
                             </td>
-                            {fuzzers.map((fuzzer) => {
-                              const bugs = binaryGroup.bugs;
-                              const B = bugs.length;
-                              let sum = 0;
-                              bugs.forEach((bug) => {
-                                const stats = bug.fuzzerStats[fuzzer];
-                                if (!stats || stats.runs.length === 0) return;
-                                const T = stats.runs.length;
-                                const c = stats.runs.filter((r) => r.detected !== null).length;
-                                sum += c / T;
-                              });
-                              const consistency = B > 0 ? sum / B : null;
-                              const pct = consistency !== null ? consistency * 100 : null;
-                              // pre-compute per-bug T for tooltip (use first bug's run count as representative)
-                              const repT = bugs.find((bug) => bug.fuzzerStats[fuzzer]?.runs?.length)?.fuzzerStats[fuzzer]?.runs?.length ?? 0;
-                              const sumC = bugs.reduce((acc, bug) => {
-                                const s = bug.fuzzerStats[fuzzer];
-                                if (!s || s.runs.length === 0) return acc;
-                                return acc + s.runs.filter((r) => r.detected !== null).length;
-                              }, 0);
-                              return (
-                                <td
-                                  key={fuzzer}
-                                  colSpan={3}
-                                  className="border-l px-2 py-2 text-center cursor-default"
-                                  onMouseEnter={(e) => {
-                                    if (pct === null || !tooltipEnabled) return;
-                                    const rect = e.currentTarget.getBoundingClientRect();
-                                    setConsistencyTooltip({
-                                      visible: true,
-                                      x: rect.left + rect.width / 2,
-                                      y: rect.top - 10,
-                                      fuzzer,
-                                      B,
-                                      T: repT,
-                                      sumC,
-                                      pct,
-                                    });
-                                  }}
-                                  onMouseLeave={() => setConsistencyTooltip(null)}
-                                >
-                                  <span
-                                    className={`inline-block text-[11px] font-mono tabular-nums px-1.5 py-0.5 rounded-md border ${
-                                      pct === null
-                                        ? "border-border text-muted-foreground bg-muted/30"
-                                        : pct >= 70
-                                        ? "border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 font-semibold"
-                                        : pct >= 30
-                                        ? "border-yellow-300 dark:border-yellow-700 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-400"
-                                        : "border-border text-muted-foreground bg-muted/30"
-                                    }`}
-                                  >
-                                    {pct !== null ? `${pct.toFixed(1)}%` : "—"}
-                                  </span>
-                                </td>
-                              );
-                            })}
                           </tr>
+                          {isExpanded && (
+                            <>
+                              <tr className="border-b bg-muted/50">
+                                <th className="h-10 px-3 text-left align-middle font-bold text-muted-foreground w-24">
+                                  Bug ID
+                                </th>
+                                {fuzzers.map((fuzzer) => (
+                                  <th
+                                    key={fuzzer}
+                                    className="h-10 px-2 text-center align-middle font-bold text-muted-foreground border-l"
+                                    colSpan={3}
+                                  >
+                                    {fuzzer}
+                                  </th>
+                                ))}
+                              </tr>
+                              <tr className="border-b bg-muted/50">
+                                <th className="h-8 px-3" />
+                                {fuzzers.map((fuzzer) => (
+                                  <Fragment key={fuzzer}>
+                                    <th className="h-8 px-1.5 text-center align-middle text-xs font-semibold text-muted-foreground border-l w-16">R</th>
+                                    <th className="h-8 px-1.5 text-center align-middle text-xs font-semibold text-muted-foreground w-16">T</th>
+                                    <th className="h-8 px-1.5 text-center align-middle text-xs font-semibold text-muted-foreground w-16">D</th>
+                                  </Fragment>
+                                ))}
+                              </tr>
+                            </>
+                          )}
                           {isExpanded &&
                             binaryGroup.bugs.map((bug) => {
                               const bestValues = getBestValues(bug);
@@ -817,57 +748,6 @@ export function BugTable({
               </table>
             </div>
 
-            {consistencyTooltip?.visible && (
-              <div
-                className="fixed z-50 bg-popover text-popover-foreground border rounded-lg shadow-lg pointer-events-none"
-                style={{
-                  left: `${consistencyTooltip.x}px`,
-                  top: `${consistencyTooltip.y}px`,
-                  transform: "translate(-50%, -100%)",
-                  minWidth: "200px",
-                  marginBottom: "6px",
-                }}
-              >
-                <div className="px-3 pt-2.5 pb-1 border-b">
-                  <span className="text-xs font-semibold tracking-wide">
-                    Consistency (hover for formula)
-                  </span>
-                </div>
-                <div className="px-3 py-2.5 flex flex-col items-center gap-2">
-                  {/* visual fraction */}
-                  <div className="flex items-center gap-1.5 text-xs">
-                    <span className="text-muted-foreground text-[11px]">C =</span>
-                    <div className="inline-flex flex-col items-center leading-none">
-                      <span className="pb-0.5 font-mono">
-                        Σ c<sub>f,b</sub>
-                      </span>
-                      <span className="w-full border-t border-foreground/60" />
-                      <span className="pt-0.5 font-mono">|B| × T</span>
-                    </div>
-                  </div>
-                  {/* computed values */}
-                  <div className="w-full rounded-md bg-muted/50 px-2.5 py-1.5 space-y-0.5 text-[11px] font-mono">
-                    <div className="flex justify-between gap-3">
-                      <span className="text-muted-foreground">Σ c<sub>f,b</sub></span>
-                      <span>{consistencyTooltip.sumC}</span>
-                    </div>
-                    <div className="flex justify-between gap-3">
-                      <span className="text-muted-foreground">|B|</span>
-                      <span>{consistencyTooltip.B} bug{consistencyTooltip.B !== 1 ? "s" : ""}</span>
-                    </div>
-                    <div className="flex justify-between gap-3">
-                      <span className="text-muted-foreground">T</span>
-                      <span>{consistencyTooltip.T} trial{consistencyTooltip.T !== 1 ? "s" : ""}</span>
-                    </div>
-                    <div className="flex justify-between gap-3 border-t border-border pt-0.5 mt-0.5">
-                      <span className="text-muted-foreground">= </span>
-                      <span className="font-semibold">{consistencyTooltip.pct.toFixed(1)}%</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
             {tooltip.visible && tooltip.content.length > 0 && (
               <div
                 className="fixed z-50 px-3 py-2 text-sm bg-popover text-popover-foreground border rounded-md shadow-md pointer-events-none"
@@ -919,10 +799,7 @@ export function BugTable({
               <div className="flex items-center gap-2">
                 <span className="font-semibold">D</span> = Detected
               </div>
-              <div className="flex items-center gap-2">
-                <span className="inline-block text-[11px] font-mono px-1.5 py-0.5 rounded-md border border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400">75%</span>
-                <span>= consistency (hover for formula)</span>
-              </div>
+
               <div className="flex items-center gap-2">
                 <MousePointerClick className="h-3.5 w-3.5" />
                 <span>Click a bug ID for survival graph</span>
