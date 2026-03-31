@@ -1065,7 +1065,7 @@ export function TasksTable({
                     colSpan={columns.length}
                     className="h-24 text-center"
                   >
-                    No results.
+                    No Active Jobs.
                   </TableCell>
                 </TableRow>
               )}

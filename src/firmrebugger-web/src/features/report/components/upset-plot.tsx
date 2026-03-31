@@ -3,6 +3,13 @@ import { UpSetJS } from "@upsetjs/react";
 import { generateCombinations } from "@upsetjs/model";
 import { ChevronLeft, ChevronRight, Download } from "lucide-react";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Card,
   CardContent,
   CardDescription,
@@ -10,15 +17,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { useApiUrl } from "@/context/api-url-context";
 import { toast } from "sonner";
 
 interface UpSetPlotProps {
@@ -30,8 +29,10 @@ interface UpSetPlotProps {
 export function UpSetPlot({
   benchmark,
   tableData,
-  reportPaths = [],
+  reportPaths: _reportPaths = [],
 }: UpSetPlotProps) {
+  const selectionHighlightColor = "#E3B341";
+
   const [processedMap, setProcessedMap] = useState<Record<string, any>>({
     reached: null,
     triggered: null,
@@ -39,35 +40,17 @@ export function UpSetPlot({
   });
   const [currentMetric, setCurrentMetric] = useState<
     "reached" | "triggered" | "detected"
-  >("reached");
+  >("detected");
   const [selection, setSelection] = useState<any>(null);
-  const [hoveredSetName, setHoveredSetName] = useState<string | null>(null);
-  const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number } | null>(
-    null,
-  );
-  const [hoveredIntersection, setHoveredIntersection] = useState<{
-    fp: number;
-    tp: number;
-    total: number;
-  } | null>(null);
-  const [intersectionTooltipPos, setIntersectionTooltipPos] = useState<{
-    x: number;
-    y: number;
-  } | null>(null);
   const [dimensions, setDimensions] = useState({ width: 1200, height: 600 });
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
-  const [previewPngBase64, setPreviewPngBase64] = useState("");
-  const [exportPdfBase64, setExportPdfBase64] = useState("");
-  const [exportFilename, setExportFilename] = useState("upset_plot.pdf");
 
   const [selectedIntersectionBugs, setSelectedIntersectionBugs] = useState<{
     tp: string[];
     fp: string[];
   }>({ tp: [], fp: [] });
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const API_URL = useApiUrl();
 
   const UpSetComponent: any = UpSetJS;
   const metrics: Array<"reached" | "triggered" | "detected"> = [
@@ -75,10 +58,30 @@ export function UpSetPlot({
     "triggered",
     "detected",
   ];
+  const metricVerb: Record<"reached" | "triggered" | "detected", string> = {
+    reached: "reached",
+    triggered: "triggered",
+    detected: "detected",
+  };
 
   const truncateSetName = (name: string, maxLength: number = 12): string => {
     if (name.length <= maxLength) return name;
     return name.substring(0, maxLength) + "...";
+  };
+
+  const sanitizePatternId = (value: string) =>
+    value.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+
+  const patternIdForCombination = (set: any) => {
+    const name = String(set?.name ?? "combination");
+    const safe = sanitizePatternId(name);
+    return `tpfp-${currentMetric}-${safe || "combination"}`;
+  };
+
+  const patternIdForSet = (set: any) => {
+    const name = String(set?.displayName ?? set?.name ?? "set");
+    const safe = sanitizePatternId(name);
+    return `tpfp-set-${currentMetric}-${safe || "set"}`;
   };
 
   useEffect(() => {
@@ -105,6 +108,26 @@ export function UpSetPlot({
       resizeObserver.disconnect();
     };
   }, []);
+
+  useEffect(() => {
+    const onDocMouseDown = (evt: MouseEvent) => {
+      if (!containerRef.current) return;
+      if (!containerRef.current.contains(evt.target as Node)) {
+        setSelection(null);
+      }
+    };
+
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => {
+      document.removeEventListener("mousedown", onDocMouseDown);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!selection) {
+      setDetailsOpen(false);
+    }
+  }, [selection]);
 
   const convertTableToUpset = (
     tableData: any[],
@@ -240,22 +263,84 @@ export function UpSetPlot({
     } as any);
 
     // Keep all intersections with bugs plus exactly one empty intersection.
-    return (generated || []).filter(
+    return (generated || [])
+      .filter(
       (c: any) => c.cardinality > 0 || c.degree === 0,
-    );
+      )
+      .map((c: any) => ({
+        ...c,
+        color: `url(#${patternIdForCombination(c)})`,
+      }));
   }, [processedMap, currentMetric]);
 
-  const openSelectionDetails = () => {
-    if (!selection) return;
-    if (
-      selection?.type !== "intersection" &&
-      selection?.type !== "distinctIntersection"
-    ) {
-      return;
-    }
+  const bugByName = useMemo(() => {
+    const m = new Map<string, { isFP: boolean }>();
+    (processedMap[currentMetric]?.elems || []).forEach((e: any) => {
+      m.set(String(e.name), { isFP: Boolean(e.isFP) });
+    });
+    return m;
+  }, [processedMap, currentMetric]);
 
+  const tpFpByCombination = useMemo(() => {
+    const counts = new Map<string, { tp: number; fp: number }>();
+
+    (visibleCombinations || []).forEach((set: any) => {
+      const elems: string[] = set?.elems || [];
+      let tp = 0;
+      let fp = 0;
+      elems.forEach((name) => {
+        const info = bugByName.get(String(name));
+        if (!info) return;
+        if (info.isFP) fp += 1;
+        else tp += 1;
+      });
+      counts.set(String(set?.name ?? ""), { tp, fp });
+    });
+
+    return counts;
+  }, [visibleCombinations, bugByName]);
+
+  const tpFpBySet = useMemo(() => {
+    const currentSets = processedMap[currentMetric]?.sets || [];
+    const counts = new Map<string, { tp: number; fp: number }>();
+
+    currentSets.forEach((set: any) => {
+      const elems: string[] = set?.elems || [];
+      let tp = 0;
+      let fp = 0;
+      elems.forEach((name) => {
+        const info = bugByName.get(String(name));
+        if (!info) return;
+        if (info.isFP) fp += 1;
+        else tp += 1;
+      });
+      counts.set(String(set?.displayName ?? set?.name ?? ""), { tp, fp });
+    });
+
+    return counts;
+  }, [processedMap, currentMetric, bugByName]);
+
+  const setPatternSpecs = useMemo(() => {
+    const currentSets = processedMap[currentMetric]?.sets || [];
+    return currentSets.map((set: any, idx: number) => {
+      const key = String(set?.displayName ?? set?.name ?? "");
+      const counts = tpFpBySet.get(key) || { tp: 0, fp: 0 };
+      const total = counts.tp + counts.fp;
+      const tpRatio = total > 0 ? counts.tp / total : 0;
+      const fpRatio = total > 0 ? counts.fp / total : 0;
+
+      return {
+        index: idx + 1,
+        id: patternIdForSet(set),
+        tpRatio,
+        fpRatio,
+      };
+    });
+  }, [processedMap, currentMetric, tpFpBySet]);
+
+  const classifySelectionBugs = (activeSelection: any) => {
     const elems = processedMap[currentMetric]?.elems || [];
-    const selectedElems: string[] = selection?.elems || [];
+    const selectedElems: string[] = activeSelection?.elems || [];
 
     const tp: string[] = [];
     const fp: string[] = [];
@@ -275,63 +360,95 @@ export function UpSetPlot({
       }
     });
 
-    setSelectedIntersectionBugs({
+    return {
       tp: tp.sort((a, b) => a.localeCompare(b)),
       fp: fp.sort((a, b) => a.localeCompare(b)),
-    });
+    };
+  };
+
+  const openSelectionDetails = (selectionOverride?: any) => {
+    const activeSelection =
+      selectionOverride !== undefined ? selectionOverride : selection;
+    if (!activeSelection) return;
+    if (
+      activeSelection?.type !== "intersection" &&
+      activeSelection?.type !== "distinctIntersection" &&
+      activeSelection?.type !== "composite"
+    ) {
+      return;
+    }
+
+    setSelectedIntersectionBugs(classifySelectionBugs(activeSelection));
     setDetailsOpen(true);
   };
 
   const handleExportUpSet = async () => {
-    if (!reportPaths || reportPaths.length === 0) {
-      toast.error("Configure the bug table first to select report paths");
-      return;
-    }
-
     setExportLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/report/export-upset`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          benchmark,
-          metric: currentMetric,
-          report_paths: reportPaths,
-        }),
-      });
-      const result = await response.json();
-      if (!response.ok) {
-        throw new Error(result.error || "Failed to export UpSet plot");
+      const svg = containerRef.current?.querySelector("svg");
+      if (!svg) {
+        throw new Error("No UpSet chart available to export");
       }
 
-      setPreviewPngBase64(result.preview_png_base64 || "");
-      setExportPdfBase64(result.pdf_base64 || "");
-      setExportFilename(result.filename || `${benchmark.toLowerCase()}_upset_plot.pdf`);
-      setExportDialogOpen(true);
+      const rect = svg.getBoundingClientRect();
+      const width = Math.max(1, Math.floor(rect.width));
+      const height = Math.max(1, Math.floor(rect.height));
+
+      const svgClone = svg.cloneNode(true) as SVGSVGElement;
+      svgClone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+      svgClone.setAttribute("width", String(width));
+      svgClone.setAttribute("height", String(height));
+
+      const svgData = new XMLSerializer().serializeToString(svgClone);
+      const svgBlob = new Blob([svgData], {
+        type: "image/svg+xml;charset=utf-8",
+      });
+      const svgUrl = URL.createObjectURL(svgBlob);
+
+      const image = new Image();
+      await new Promise<void>((resolve, reject) => {
+        image.onload = () => resolve();
+        image.onerror = () =>
+          reject(new Error("Unable to render current UpSet graph for export"));
+        image.src = svgUrl;
+      });
+
+      const scale = 2;
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.floor(width * scale);
+      canvas.height = Math.floor(height * scale);
+
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        URL.revokeObjectURL(svgUrl);
+        throw new Error("Unable to initialize export canvas");
+      }
+
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(svgUrl);
+
+      const pngData = canvas.toDataURL("image/png");
+      const { jsPDF } = await import("jspdf");
+      const pdf = new jsPDF({
+        orientation: canvas.width >= canvas.height ? "landscape" : "portrait",
+        unit: "pt",
+        format: [canvas.width, canvas.height],
+      });
+
+      pdf.addImage(pngData, "PNG", 0, 0, canvas.width, canvas.height);
+      pdf.save(`${benchmark.toLowerCase()}_${currentMetric}_upset_plot.pdf`);
+      toast.success("UpSet PDF downloaded from current view");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to export UpSet plot");
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "Failed to export current UpSet graph",
+      );
     } finally {
       setExportLoading(false);
     }
-  };
-
-  const handleDownloadUpSetPdf = () => {
-    if (!exportPdfBase64) return;
-    const bytes = atob(exportPdfBase64);
-    const buffer = new Uint8Array(bytes.length);
-    for (let i = 0; i < bytes.length; i++) {
-      buffer[i] = bytes.charCodeAt(i);
-    }
-    const blob = new Blob([buffer], { type: "application/pdf" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = exportFilename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    toast.success("UpSet PDF downloaded");
   };
 
   return (
@@ -339,16 +456,9 @@ export function UpSetPlot({
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle>Bug UpSet Plot - {benchmark}</CardTitle>
-            <CardDescription>
-              Click on the plot to view details about the bugs in the selected intersection.
-              {processedMap[currentMetric]?.stats && (
-                <span className="block mt-1">
-                  {processedMap[currentMetric].stats.totalBugs} total bugs;{" "}
-                  {processedMap[currentMetric].stats.missedBugs} bugs with 0
-                  hits (no selected fuzzer hit)
-                </span>
-              )}
+            <CardTitle>Bug UpSet Plot</CardTitle>
+           <CardDescription>
+              Right click on the intersection to view details about the bugs {metricVerb[currentMetric]} by the selected fuzzers. Left click to highlight the intersection.
             </CardDescription>
           </div>
           <Button
@@ -357,7 +467,8 @@ export function UpSetPlot({
             onClick={handleExportUpSet}
             disabled={exportLoading}
           >
-            {exportLoading ? "Preparing..." : "Export"}
+            <Download className="h-4 w-4 mr-2" />
+            {exportLoading ? "Exporting..." : "Export Current View"}
           </Button>
         </div>
       </CardHeader>
@@ -369,128 +480,100 @@ export function UpSetPlot({
               className="relative"
               style={{ height: `${dimensions.height}px` }}
             >
-              <div
-                className="[&_rect]:cursor-pointer [&_circle]:cursor-pointer"
-                onClickCapture={(e) => {
-                  const target = e.target as HTMLElement;
-                  if (target.closest("rect") || target.closest("circle")) {
-                    openSelectionDetails();
-                  }
-                }}
-                onMouseMove={(e) => {
-                  const target = e.target as HTMLElement;
-
-                  // Check for text elements (fuzzer names)
-                  const textElement = target.closest("text");
-                  if (textElement) {
-                    const textContent = textElement.textContent || "";
-                    const set = processedMap[currentMetric].sets?.find(
-                      (s: any) =>
-                        truncateSetName(
-                          s.displayName || s.fullName || s.name,
-                        ) === textContent,
-                    );
-                    if (set && set.displayName && set.displayName.length > 12) {
-                      setHoveredSetName(set.displayName);
-                      setTooltipPos({ x: e.clientX, y: e.clientY });
-                    } else {
-                      setHoveredSetName(null);
-                      setTooltipPos(null);
+              <div className="upset-plot-inner [&_rect]:cursor-pointer [&_circle]:cursor-pointer">
+                <style>
+                  {`
+                    ${setPatternSpecs
+                      .map(
+                        (s: { id: string; index: number }) => `
+                    .upset-plot-inner [data-upset="sets"] > g:nth-child(${s.index}) rect[class*="fillPrimary-"] {
+                      fill: url(#${s.id}) !important;
                     }
-                  }
-
-                  const rectElement = target.closest("rect");
-                  const circleElement = target.closest("circle");
-                  const isInteractiveElement = rectElement || circleElement;
-                  if (
-                    isInteractiveElement &&
-                    (selection?.type === "intersection" ||
-                      selection?.type === "distinctIntersection")
-                  ) {
-                    const elems = processedMap[currentMetric].elems || [];
-                    const selectedElems = selection.elems || [];
-
-                    let fpCount = 0;
-                    let tpCount = 0;
-
-                    selectedElems.forEach((elemName: string) => {
-                      const elem = elems.find((e: any) => e.name === elemName);
-                      if (elem) {
-                        if (elem.isFP) {
-                          fpCount++;
-                        } else {
-                          tpCount++;
-                        }
-                      }
-                    });
-
-                    setHoveredIntersection({
-                      fp: fpCount,
-                      tp: tpCount,
-                      total: fpCount + tpCount,
-                    });
-                    setIntersectionTooltipPos({ x: e.clientX, y: e.clientY });
-                  } else if (!isInteractiveElement) {
-                    setHoveredIntersection(null);
-                    setIntersectionTooltipPos(null);
-                  }
-                }}
-                onMouseLeave={() => {
-                  setHoveredSetName(null);
-                  setTooltipPos(null);
-                  setHoveredIntersection(null);
-                  setIntersectionTooltipPos(null);
-                }}
-              >
+                    .upset-plot-inner [data-upset="sets"] > g:nth-child(${s.index}) rect[class*="fillOverflow"] {
+                      fill: url(#${s.id}) !important;
+                    }
+                    `,
+                      )
+                      .join("\n")}
+                  `}
+                </style>
                 <UpSetComponent
                   {...(processedMap[currentMetric] as any)}
                   combinations={visibleCombinations as any}
                   width={dimensions.width}
                   height={dimensions.height}
+                  selectionColor={selectionHighlightColor}
                   selection={selection}
-                  onHover={setSelection}
+                  onClick={(nextSelection: any, evt: any) => {
+                    if (evt?.button === 2) return;
+                    if (!nextSelection) return;
+                    openSelectionDetails(nextSelection);
+                  }}
+                  onContextMenu={(nextSelection: any, evt: any) => {
+                    evt?.preventDefault?.();
+                    setSelection(nextSelection);
+                  }}
+                  setChildrenFactory={(set: any) => {
+                    const id = patternIdForSet(set);
+                    const key = String(set?.displayName ?? set?.name ?? "");
+                    const counts = tpFpBySet.get(key) || { tp: 0, fp: 0 };
+                    const total = counts.tp + counts.fp;
+                    const tpRatio = total > 0 ? counts.tp / total : 0;
+                    const fpRatio = total > 0 ? counts.fp / total : 0;
+
+                    return (
+                      <defs>
+                        <pattern
+                          id={id}
+                          patternUnits="objectBoundingBox"
+                          patternContentUnits="objectBoundingBox"
+                          width={1}
+                          height={1}
+                        >
+                          {tpRatio > 0 && (
+                            <rect x={0} y={0} width={tpRatio} height={1} fill="#4e79a7" />
+                          )}
+                          {fpRatio > 0 && (
+                            <rect x={tpRatio} y={0} width={fpRatio} height={1} fill="#c46464" />
+                          )}
+                        </pattern>
+                      </defs>
+                    );
+                  }}
+                  combinationChildrenFactory={(set: any) => {
+                    const key = String(set?.name ?? "");
+                    const counts = tpFpByCombination.get(key) || { tp: 0, fp: 0 };
+                    const total = counts.tp + counts.fp;
+                    const tpRatio = total > 0 ? counts.tp / total : 0;
+                    const fpRatio = total > 0 ? counts.fp / total : 0;
+                    const patternId = patternIdForCombination(set);
+
+                    return (
+                      <defs>
+                        <pattern
+                          id={patternId}
+                          patternUnits="objectBoundingBox"
+                          patternContentUnits="objectBoundingBox"
+                          width={1}
+                          height={1}
+                        >
+                          {tpRatio > 0 && (
+                            <rect x={0} y={0} width={1} height={tpRatio} fill="#4e79a7" />
+                          )}
+                          {fpRatio > 0 && (
+                            <rect x={0} y={tpRatio} width={1} height={fpRatio} fill="#c46464" />
+                          )}
+                        </pattern>
+                      </defs>
+                    );
+                  }}
+                  setName={`Total Bugs (${processedMap[currentMetric]?.stats?.totalBugs ?? 0})`}
+                  combinationName="Intersection Size"
                   theme="vega"
                   exportButtons={false}
                   tooltips={false}
                 />
               </div>
-
-              {/* Tooltip for full fuzzer name */}
-              {hoveredSetName && tooltipPos && (
-                <div
-                  className="fixed z-50 px-3 py-2 text-sm bg-popover text-popover-foreground border rounded-md shadow-md pointer-events-none"
-                  style={{
-                    left: `${tooltipPos.x + 10}px`,
-                    top: `${tooltipPos.y - 30}px`,
-                  }}
-                >
-                  {hoveredSetName}
-                </div>
-              )}
-
-              {/* Tooltip for FP/TP breakdown */}
-              {hoveredIntersection && intersectionTooltipPos && (
-                <div
-                  className="fixed z-50 px-3 py-2 text-sm bg-popover text-popover-foreground border rounded-md shadow-md pointer-events-none"
-                  style={{
-                    left: `${intersectionTooltipPos.x + 10}px`,
-                    top: `${intersectionTooltipPos.y - 50}px`,
-                  }}
-                >
-                  <div className="font-semibold mb-1">
-                    Total: {hoveredIntersection.total}
-                  </div>
-                  <div className="text-green-600 dark:text-green-400">
-                    TP: {hoveredIntersection.tp}
-                  </div>
-                  <div className="text-red-600 dark:text-red-400">
-                    FP: {hoveredIntersection.fp}
-                  </div>
-                  <div className="mt-2 pt-2 border-t border-border text-xs text-muted-foreground">
-                    Click for details
-                  </div>
-                </div>
-              )}
             </div>
           ) : (
             <div className="text-sm text-muted-foreground p-6 text-center">
@@ -500,7 +583,7 @@ export function UpSetPlot({
             </div>
           )}
         </div>
-        <div className="mt-3 flex items-center justify-end">
+        <div className="mt-3 flex items-center justify-center">
           <div className="flex items-center gap-2">
             <button
               className="px-2 py-1 rounded-md border hover:bg-muted"
@@ -533,46 +616,8 @@ export function UpSetPlot({
         </div>
       </CardContent>
 
-      <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
-        <DialogContent className="!w-[96vw] !max-w-[1700px] h-[90vh] flex flex-col">
-          <DialogHeader>
-            <DialogTitle>UpSet Plot Preview</DialogTitle>
-            <DialogDescription>
-              Generated from selected reports for {benchmark}. Download the PDF
-              if this looks correct.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex items-center justify-end">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleDownloadUpSetPdf}
-              disabled={!exportPdfBase64}
-            >
-              <Download className="h-4 w-4 mr-2" />
-              Download PDF
-            </Button>
-          </div>
-          <ScrollArea className="flex-1 min-h-0 rounded-md border bg-muted/30 p-2">
-            {previewPngBase64 ? (
-              <div className="w-full h-full overflow-auto flex items-start justify-center p-2">
-                <img
-                  src={`data:image/png;base64,${previewPngBase64}`}
-                  alt="UpSet preview"
-                  className="max-w-full w-auto h-auto"
-                />
-              </div>
-            ) : (
-              <div className="text-sm text-muted-foreground p-4">
-                No preview generated.
-              </div>
-            )}
-          </ScrollArea>
-        </DialogContent>
-      </Dialog>
-
       <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle>
               {currentMetric.charAt(0).toUpperCase() + currentMetric.slice(1)}{" "}
@@ -586,39 +631,49 @@ export function UpSetPlot({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4">
-            <div>
-              <div className="text-sm font-semibold text-green-600 dark:text-green-400 mb-1">
-                True Positive Bugs
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1 min-h-0">
+            <div className="rounded-md border p-3 min-h-0 flex flex-col">
+              <div className="text-sm font-semibold text-green-600 dark:text-green-400 mb-2">
+                True Positive Bugs ({selectedIntersectionBugs.tp.length})
               </div>
-              {selectedIntersectionBugs.tp.length > 0 ? (
-                <div className="text-sm space-y-1">
-                  {selectedIntersectionBugs.tp.map((bugId) => (
-                    <div key={`tp-${bugId}`} className="font-mono">
-                      {bugId}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-sm text-muted-foreground">None</div>
-              )}
+              <ScrollArea className="flex-1 min-h-0 pr-2">
+                {selectedIntersectionBugs.tp.length > 0 ? (
+                  <div className="space-y-1">
+                    {selectedIntersectionBugs.tp.map((bugId) => (
+                      <div
+                        key={`tp-${bugId}`}
+                        className="font-mono text-xs rounded bg-muted/50 px-2 py-1"
+                      >
+                        {bugId}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-sm text-muted-foreground">None</div>
+                )}
+              </ScrollArea>
             </div>
 
-            <div>
-              <div className="text-sm font-semibold text-red-600 dark:text-red-400 mb-1">
-                False Positive Bugs
+            <div className="rounded-md border p-3 min-h-0 flex flex-col">
+              <div className="text-sm font-semibold text-red-600 dark:text-red-400 mb-2">
+                False Positive Bugs ({selectedIntersectionBugs.fp.length})
               </div>
-              {selectedIntersectionBugs.fp.length > 0 ? (
-                <div className="text-sm space-y-1">
-                  {selectedIntersectionBugs.fp.map((bugId) => (
-                    <div key={`fp-${bugId}`} className="font-mono">
-                      {bugId}
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-sm text-muted-foreground">None</div>
-              )}
+              <ScrollArea className="flex-1 min-h-0 pr-2">
+                {selectedIntersectionBugs.fp.length > 0 ? (
+                  <div className="space-y-1">
+                    {selectedIntersectionBugs.fp.map((bugId) => (
+                      <div
+                        key={`fp-${bugId}`}
+                        className="font-mono text-xs rounded bg-muted/50 px-2 py-1"
+                      >
+                        {bugId}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-sm text-muted-foreground">None</div>
+                )}
+              </ScrollArea>
             </div>
           </div>
         </DialogContent>

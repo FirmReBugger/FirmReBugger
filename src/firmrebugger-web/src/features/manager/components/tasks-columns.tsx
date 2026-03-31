@@ -436,7 +436,7 @@ export const tasksColumns: ColumnDef<Task>[] = [
                   <LoaderCircle className="h-4 w-4 text-amber-500 animate-spin" />
                 </TooltipTrigger>
                 <TooltipContent>
-                  <p>Triaging in progress</p>
+                  <p>Triaging</p>
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>

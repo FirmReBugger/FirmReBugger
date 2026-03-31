@@ -8,10 +8,7 @@ import type {
 type SearchRecord = Record<string, unknown>
 
 export type NavigateFn = (opts: {
-  search:
-    | true
-    | SearchRecord
-    | ((prev: SearchRecord) => Partial<SearchRecord> | SearchRecord)
+  search: true | SearchRecord | ((prev: unknown) => unknown)
   replace?: boolean
 }) => void
 

@@ -1,13 +1,12 @@
 import { useState, useEffect } from "react";
 import { useApiUrl } from "@/context/api-url-context";
-import { Header } from "@/components/layout/header";
-import { Main } from "@/components/layout/main";
 import { TasksDialogs } from "./components/tasks-dialogs";
 import { TasksProvider } from "./components/tasks-provider";
 import { TasksTable } from "./components/tasks-table";
 import { CpuMonitor } from "./components/cpu-monitor";
 import { type Task } from "./data/schema";
 import { FileCheck, CircleAlert, LoaderCircle } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 function toDateOrUndefined(value: unknown): Date | undefined {
   if (value === undefined || value === null || value === "") {
@@ -158,9 +157,7 @@ export function Manager() {
 
   return (
     <TasksProvider tasks={tasks} setTasks={setTasks}>
-      <Header fixed />
-
-      <Main className="flex flex-1 flex-col gap-4 sm:gap-6">
+      <section className="flex flex-1 flex-col gap-4 sm:gap-6">
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
             <h2 className="text-2xl font-bold tracking-tight">Job Manager</h2>
@@ -173,41 +170,51 @@ export function Manager() {
         <CpuMonitor />
 
         <div className="flex flex-col gap-6">
-          <div>
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-xl font-semibold">Active Jobs</h3>
-              <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
-                <div className="flex items-center gap-1.5">
-                  <FileCheck className="h-3.5 w-3.5 text-blue-500" />
-                  <span>Triaged</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <CircleAlert className="h-3.5 w-3.5 text-red-500" />
-                  <span>Triaging failed</span>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <LoaderCircle className="h-3.5 w-3.5 text-amber-500" />
-                  <span>Triaging in progress</span>
-                </div>
-              </div>
-            </div>
-            <TasksTable data={activeTasks} allTasks={tasks} />
-          </div>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-xl">Active Jobs</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <TasksTable data={activeTasks} allTasks={tasks} />
+            </CardContent>
+          </Card>
 
-          {finishedTasks.length > 0 && (
-            <div>
-              <h3 className="text-xl font-semibold mb-3">Finished Jobs</h3>
-              <TasksTable
-                data={finishedTasks}
-                showCreateButton={false}
-                enableColumnSorting={true}
-                allTasks={tasks}
-                isFinishedJobs={true}
-              />
-            </div>
-          )}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-xl">Finished Jobs</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {finishedTasks.length > 0 ? (
+                <TasksTable
+                  data={finishedTasks}
+                  showCreateButton={false}
+                  enableColumnSorting={true}
+                  allTasks={tasks}
+                  isFinishedJobs={true}
+                  toolbarExtras={
+                    <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                      <div className="flex items-center gap-1.5">
+                        <FileCheck className="h-3.5 w-3.5 text-blue-500" />
+                        <span>Triaged</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <CircleAlert className="h-3.5 w-3.5 text-red-500" />
+                        <span>Triaging failed</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <LoaderCircle className="h-3.5 w-3.5 text-amber-500" />
+                        <span>Triaging</span>
+                      </div>
+                    </div>
+                  }
+                />
+              ) : (
+                <p className="text-sm text-muted-foreground">No finished jobs yet.</p>
+              )}
+            </CardContent>
+          </Card>
         </div>
-      </Main>
+      </section>
 
       <TasksDialogs />
     </TasksProvider>

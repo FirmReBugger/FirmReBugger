@@ -74,17 +74,37 @@ def upset_plot(df, metric="triggered"):
     pastel_colors = cm.Pastel1.colors
     color_map = {"TP": pastel_colors[1], "FP": pastel_colors[0]}
 
-    fig = plt.figure(figsize=(10, 3))
+    fig = plt.figure(figsize=(10, 3.4))
     upset = UpSet(upset_df, show_counts=True, intersection_plot_elements=0)
     upset.add_stacked_bars(
         by="TP_FP", colors=color_map, title="Intersection Size", elements=3
     )
     upset.plot(fig=fig)
     fig = plt.gcf()
+
+    # Rebuild legend at figure-level in a horizontal row so it never covers the plot.
+    legend_handles = None
+    legend_labels = None
     for ax in fig.axes:
         leg = ax.get_legend()
         if leg:
-            leg.set_bbox_to_anchor((0.2, 0.9), transform=fig.transFigure)
+            legend_handles = leg.legend_handles
+            legend_labels = [text.get_text() for text in leg.get_texts()]
+            leg.remove()
+
+    if legend_handles and legend_labels:
+        fig.legend(
+            legend_handles,
+            legend_labels,
+            loc="lower center",
+            bbox_to_anchor=(0.5, -0.02),
+            ncol=2,
+            frameon=False,
+            handlelength=1.2,
+            columnspacing=1.4,
+        )
+
+    fig.subplots_adjust(top=0.9, bottom=0.2)
 
     fig.axes[2].set_xticks([])
     fig.axes[2].set_title(f"Total ({len(upset_df)})")

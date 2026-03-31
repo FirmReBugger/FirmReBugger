@@ -8,7 +8,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { ChevronDown, ChevronRight, Download } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, MousePointerClick } from "lucide-react";
 import { TableMutateDrawer, TableForm } from "./table-mutate-drawer";
 import { useApiUrl, useApiUrlLoading } from "@/context/api-url-context";
 import {
@@ -140,7 +140,7 @@ export function BugTable({
   >({});
   const [kmMetric, setKmMetric] = useState<
     "reached" | "triggered" | "detected"
-  >("reached");
+  >("detected");
 
   const getSelectedReportPaths = (form: TableForm | null): string[] => {
     if (!form) return [];
@@ -543,6 +543,7 @@ export function BugTable({
               onClick={handleExportTable}
               disabled={exportLoading}
             >
+              <Download className="h-4 w-4 mr-2" />
               {exportLoading ? "Preparing..." : "Export"}
             </Button>
           </div>
@@ -661,7 +662,7 @@ export function BugTable({
                                         });
                                         setKmFuzzerRuns(runsByFuzzer);
                                         setKmBugId(bug.bugId);
-                                        setKmMetric("reached");
+                                        setKmMetric("detected");
                                         setKmOpen(true);
                                       }}
                                     >
@@ -849,12 +850,6 @@ export function BugTable({
 
           <div className="mt-4 flex items-center text-xs text-muted-foreground">
             <div className="flex items-center gap-4">
-              <button
-                className={`text-xs underline ${tooltipEnabled ? "text-primary" : "text-muted-foreground"}`}
-                onClick={() => setTooltipEnabled(!tooltipEnabled)}
-              >
-                {tooltipEnabled ? "Disable Hover" : "Enable Hover"}
-              </button>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded"></div>
                 <span>Best time for bug</span>
@@ -875,9 +870,16 @@ export function BugTable({
                 <span className="font-semibold">D</span> = Detected
               </div>
               <div className="flex items-center gap-2">
+                <MousePointerClick className="h-3.5 w-3.5" />
                 <span>Click a bug ID for survival graph</span>
               </div>
             </div>
+            <button
+              className={`ml-auto text-xs underline ${tooltipEnabled ? "text-primary" : "text-muted-foreground"}`}
+              onClick={() => setTooltipEnabled(!tooltipEnabled)}
+            >
+              {tooltipEnabled ? "Disable Hover" : "Enable Hover"}
+            </button>
           </div>
         </CardContent>
       </Card>
@@ -950,7 +952,7 @@ export function BugTable({
           open={kmOpen}
           onOpenChange={(v: boolean) => {
             setKmOpen(v);
-            if (!v) setKmMetric("reached");
+            if (!v) setKmMetric("detected");
           }}
           bugId={kmBugId}
           fuzzerRuns={kmFuzzerRuns}
