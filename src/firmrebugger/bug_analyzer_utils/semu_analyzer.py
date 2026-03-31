@@ -50,8 +50,7 @@ def semu_analyzer(
         if "README" not in seed and os.path.basename(seed).startswith("id")
     ]
     config_path = os.path.abspath("./config.yml")
-    num_cores = os.cpu_count()
-    num_workers = max(1, int(num_cores) - 1)
+    num_workers = max(1, min(len(seeds), os.cpu_count() or 1))
 
     progress = {
         "completed": 0,

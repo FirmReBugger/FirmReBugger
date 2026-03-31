@@ -848,12 +848,35 @@ export function TasksTable({
                                                 </Badge>
                                               </TableCell>
                                               <TableCell className="font-mono text-sm">
-                                                {task.core_idx !== null &&
-                                                task.core_idx !== undefined
-                                                  ? Array.isArray(task.core_idx)
-                                                    ? task.core_idx.join(", ")
-                                                    : task.core_idx
-                                                  : "-"}
+                                                {(() => {
+                                                  if (
+                                                    task.core_idx === null ||
+                                                    task.core_idx === undefined
+                                                  ) {
+                                                    return "-";
+                                                  }
+
+                                                  if (!Array.isArray(task.core_idx)) {
+                                                    return task.core_idx;
+                                                  }
+
+                                                  const allCores = task.core_idx.join(", ");
+                                                  const previewCores =
+                                                    task.core_idx.length > 4
+                                                      ? `${task.core_idx
+                                                          .slice(0, 4)
+                                                          .join(", ")}, ...`
+                                                      : allCores;
+
+                                                  return (
+                                                    <span
+                                                      className="inline-block max-w-[120px] truncate align-bottom"
+                                                      title={allCores}
+                                                    >
+                                                      {previewCores}
+                                                    </span>
+                                                  );
+                                                })()}
                                               </TableCell>
                                               {row.original.mode !==
                                                 "Triaging" && (

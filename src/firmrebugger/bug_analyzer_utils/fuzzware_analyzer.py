@@ -63,8 +63,11 @@ def gen_fuzzware_stats(RESULT_DIR, fuzzer):
 
     output_dirs = get_working_dirs(RESULT_DIR)
 
+    if not output_dirs:
+        return
+
     with ThreadPoolExecutor(
-        max_workers=min(len(output_dirs), os.cpu_count())
+        max_workers=min(len(output_dirs), max(1, os.cpu_count() or 1))
     ) as executor:
         future_to_output = {
             executor.submit(process_output_dir, output): output
@@ -142,29 +145,54 @@ def fuzzware_analyzer(
     failure_exc = None
     failure_tb = None
     try:
-        # Run sequentially so the first replay failure is surfaced immediately.
-        for time_val, seed_path in seed_info:
+        # Use all visible CPUs, capped by replay items to avoid thread oversubscription.
+        num_workers = max(1, min(len(seed_info), os.cpu_count() or 1))
+
+        def _process_seed(seed_tuple):
+            time_val, seed_path = seed_tuple
             full_seed_path = os.path.join(output_path, seed_path)
             command = f"fuzzware replay -v {shlex.quote(full_seed_path)}"
-            result = run_command(command, seed_path, time_val, Crash, 10)
-            if result is None:
-                continue
+            return run_command(command, seed_path, time_val, Crash, 10)
 
-            seed_path, bugs_triggered, bugs_reached, time_val, elapsed, errors = result
-            execution_times.append(elapsed)
-            if errors:
-                continue
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            futures = [executor.submit(_process_seed, item) for item in seed_info]
 
-            run_data = update_bug_data(
-                run_data,
-                time_val,
-                seed_path,
-                bugs_triggered=bugs_triggered,
-                bugs_reached=bugs_reached,
-                Crash=Crash,
-            )
-            progress["completed"] += 1
-            progress["ungrouped_crashes"] = len(run_data[0]["ungrouped_crashes"])
+            for future in as_completed(futures):
+                try:
+                    result = future.result()
+                except Exception as exc:
+                    for pending in futures:
+                        pending.cancel()
+                    raise exc
+
+                if result is None:
+                    progress["completed"] += 1
+                    continue
+
+                (
+                    seed_path,
+                    bugs_triggered,
+                    bugs_reached,
+                    time_val,
+                    elapsed,
+                    errors,
+                ) = result
+                execution_times.append(elapsed)
+
+                if not errors:
+                    run_data = update_bug_data(
+                        run_data,
+                        time_val,
+                        seed_path,
+                        bugs_triggered=bugs_triggered,
+                        bugs_reached=bugs_reached,
+                        Crash=Crash,
+                    )
+                    progress["ungrouped_crashes"] = len(
+                        run_data[0]["ungrouped_crashes"]
+                    )
+
+                progress["completed"] += 1
     except Exception as exc:
         progress["failed"] = True
         progress["failure_message"] = str(exc)

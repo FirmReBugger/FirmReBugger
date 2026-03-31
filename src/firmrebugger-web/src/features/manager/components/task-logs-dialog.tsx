@@ -12,6 +12,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Copy, Download, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 
+const LOG_CHUNK_BYTES = 256 * 1024;
+
 type AnsiState = {
   bold: boolean;
   colorClass: string;
@@ -139,27 +141,62 @@ export function TaskLogsDialog({
 }: TaskLogsDialogProps) {
   const [logs, setLogs] = useState<string>("");
   const [loading, setLoading] = useState(false);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [logPath, setLogPath] = useState<string>("");
+  const [startOffset, setStartOffset] = useState<number | null>(null);
+  const [fileSize, setFileSize] = useState<number | null>(null);
+  const [hasMoreBefore, setHasMoreBefore] = useState(false);
+  const [shouldScrollToBottom, setShouldScrollToBottom] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const API_URL = useApiUrl();
   const ansiSegments = parseAnsiToSegments(logs);
 
-  const fetchLogs = async () => {
+  const fetchLogs = async ({
+    beforeOffset,
+    prepend = false,
+    scrollToBottom = true,
+  }: {
+    beforeOffset?: number;
+    prepend?: boolean;
+    scrollToBottom?: boolean;
+  } = {}) => {
     if (!taskId && !logUrl) return;
 
-    setLoading(true);
-    setError(null);
+    if (prepend) {
+      setLoadingOlder(true);
+    } else {
+      setLoading(true);
+      setError(null);
+    }
 
     try {
-      const response = await fetch(
-        logUrl || `${API_URL}/api/tasks/logs?task_id=${taskId}`,
-      );
+      const url = new URL(logUrl || `${API_URL}/api/tasks/logs`);
+      if (!logUrl && taskId) {
+        url.searchParams.set("task_id", taskId);
+      }
+      url.searchParams.set("chunk_bytes", String(LOG_CHUNK_BYTES));
+      if (beforeOffset !== undefined) {
+        url.searchParams.set("before_offset", String(beforeOffset));
+      }
+
+      const response = await fetch(url.toString());
       const data = await response.json();
 
       if (response.ok) {
-        setLogs(data.content || "");
+        const newContent = data.content || "";
+        if (prepend) {
+          setLogs((prev) => `${newContent}${prev}`);
+        } else {
+          setLogs(newContent);
+        }
         setLogPath(data.path || "");
+        setStartOffset(
+          typeof data.start_offset === "number" ? data.start_offset : null,
+        );
+        setFileSize(typeof data.file_size === "number" ? data.file_size : null);
+        setHasMoreBefore(Boolean(data.has_more_before));
+        setShouldScrollToBottom(scrollToBottom);
       } else {
         setError(data.error || "Failed to load logs");
         setLogs("");
@@ -168,7 +205,11 @@ export function TaskLogsDialog({
       setError("Failed to fetch logs");
       console.error("Error fetching logs:", err);
     } finally {
-      setLoading(false);
+      if (prepend) {
+        setLoadingOlder(false);
+      } else {
+        setLoading(false);
+      }
     }
   };
 
@@ -179,17 +220,25 @@ export function TaskLogsDialog({
   }, [open, taskId, logUrl]);
 
   useEffect(() => {
-    if (logs && !loading) {
+    if (logs && !loading && !loadingOlder && shouldScrollToBottom) {
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           bottomRef.current?.scrollIntoView({
             behavior: "instant",
             block: "end",
           });
+          setShouldScrollToBottom(false);
         });
       });
     }
-  }, [logs, loading, open]);
+  }, [logs, loading, loadingOlder, open, shouldScrollToBottom]);
+
+  const handleLoadOlder = () => {
+    if (startOffset === null || startOffset <= 0 || !hasMoreBefore) {
+      return;
+    }
+    fetchLogs({ beforeOffset: startOffset, prepend: true, scrollToBottom: false });
+  };
 
   const handleCopy = () => {
     navigator.clipboard.writeText(logs);
@@ -230,7 +279,7 @@ export function TaskLogsDialog({
           <Button
             variant="outline"
             size="sm"
-            onClick={fetchLogs}
+            onClick={() => fetchLogs()}
             disabled={loading}
           >
             <RefreshCw
@@ -241,8 +290,16 @@ export function TaskLogsDialog({
           <Button
             variant="outline"
             size="sm"
+            onClick={handleLoadOlder}
+            disabled={loading || loadingOlder || !hasMoreBefore}
+          >
+            {loadingOlder ? "Loading..." : "Load Older"}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={handleCopy}
-            disabled={!logs || loading}
+            disabled={!logs || loading || loadingOlder}
           >
             <Copy className="h-4 w-4 mr-2" />
             Copy
@@ -251,11 +308,16 @@ export function TaskLogsDialog({
             variant="outline"
             size="sm"
             onClick={handleDownload}
-            disabled={!logs || loading}
+            disabled={!logs || loading || loadingOlder}
           >
             <Download className="h-4 w-4 mr-2" />
             Download
           </Button>
+          {fileSize !== null && (
+            <div className="ml-auto text-xs text-muted-foreground font-mono self-center">
+              loaded from byte {startOffset ?? 0} / {fileSize}
+            </div>
+          )}
         </div>
 
         <div className="flex-1 min-h-0">

@@ -3,6 +3,7 @@ import re
 import subprocess
 import sys
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from firmrebugger.bug_analyzer_utils.common import (
     periodic_printer,
@@ -75,8 +76,7 @@ def multifuzzer_analyzer(
         for seed in sorted(os.listdir(working_folder))
         if "README" not in seed
     ]
-    num_cores = os.cpu_count()
-    num_workers = max(1, int(num_cores) - 1)
+    num_workers = max(1, min(len(seeds), os.cpu_count() or 1))
     config_path = f"{output_path}/../config.yml"
 
     progress = {
@@ -163,25 +163,50 @@ def multifuzzer_analyzer(
     failure_exc = None
     failure_tb = None
     try:
-        for seed_path in seeds:
-            result = run_multifuzz_command(seed_path, get_time_input(seed_path), Crash)
-            if result is None:
-                continue
+        with ThreadPoolExecutor(max_workers=num_workers) as executor:
+            futures = [
+                executor.submit(
+                    run_multifuzz_command,
+                    seed_path,
+                    get_time_input(seed_path),
+                    Crash,
+                )
+                for seed_path in seeds
+            ]
 
-            seed_path, bugs_triggered, bugs_reached, time_val, elapsed, errors = result
-            execution_times.append(elapsed)
+            for future in as_completed(futures):
+                try:
+                    result = future.result()
+                except Exception as exc:
+                    for pending in futures:
+                        pending.cancel()
+                    raise exc
 
-            run_data = update_bug_data(
-                run_data,
-                time_val,
-                seed_path,
-                bugs_triggered=bugs_triggered,
-                bugs_reached=bugs_reached,
-                Crash=Crash,
-            )
+                if result is None:
+                    progress["completed"] += 1
+                    continue
 
-            progress["completed"] += 1
-            progress["ungrouped_crashes"] = len(run_data[0]["ungrouped_crashes"])
+                (
+                    seed_path,
+                    bugs_triggered,
+                    bugs_reached,
+                    time_val,
+                    elapsed,
+                    errors,
+                ) = result
+                execution_times.append(elapsed)
+
+                run_data = update_bug_data(
+                    run_data,
+                    time_val,
+                    seed_path,
+                    bugs_triggered=bugs_triggered,
+                    bugs_reached=bugs_reached,
+                    Crash=Crash,
+                )
+
+                progress["completed"] += 1
+                progress["ungrouped_crashes"] = len(run_data[0]["ungrouped_crashes"])
     except Exception as exc:
         progress["failed"] = True
         progress["failure_message"] = str(exc)

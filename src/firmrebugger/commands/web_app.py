@@ -56,6 +56,54 @@ jobs_snapshot_lock = threading.Lock()
 # instead of waiting for the next 1-second tick.
 _jobs_dirty = threading.Event()
 
+DEFAULT_LOG_CHUNK_BYTES = 256 * 1024
+MAX_LOG_CHUNK_BYTES = 2 * 1024 * 1024
+
+
+def _parse_int_query_arg(name, default=None, minimum=None, maximum=None):
+    raw = request.args.get(name, None)
+    if raw is None or raw == "":
+        return default
+
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name} must be an integer")
+
+    if minimum is not None and value < minimum:
+        raise ValueError(f"{name} must be >= {minimum}")
+    if maximum is not None and value > maximum:
+        raise ValueError(f"{name} must be <= {maximum}")
+
+    return value
+
+
+def _read_log_chunk(log_path, before_offset=None, chunk_bytes=None):
+    file_size = os.path.getsize(log_path)
+
+    if chunk_bytes is None:
+        chunk_bytes = DEFAULT_LOG_CHUNK_BYTES
+    chunk_bytes = max(1, min(chunk_bytes, MAX_LOG_CHUNK_BYTES))
+
+    if before_offset is None:
+        end_offset = file_size
+    else:
+        end_offset = max(0, min(before_offset, file_size))
+
+    start_offset = max(0, end_offset - chunk_bytes)
+
+    with open(log_path, "rb") as f:
+        f.seek(start_offset)
+        raw = f.read(end_offset - start_offset)
+
+    return {
+        "content": raw.decode("utf-8", errors="replace"),
+        "file_size": file_size,
+        "start_offset": start_offset,
+        "end_offset": end_offset,
+        "has_more_before": start_offset > 0,
+    }
+
 
 def serialize_jobs(jobs_list):
     jobs_data = []
@@ -626,16 +674,34 @@ def get_task_logs():
             ), 404
 
         try:
-            with open(log_path, "r") as f:
-                log_content = f.read()
+            chunk_bytes = _parse_int_query_arg(
+                "chunk_bytes",
+                default=DEFAULT_LOG_CHUNK_BYTES,
+                minimum=1,
+                maximum=MAX_LOG_CHUNK_BYTES,
+            )
+            before_offset = _parse_int_query_arg(
+                "before_offset",
+                default=None,
+                minimum=0,
+            )
+            chunk = _read_log_chunk(
+                log_path,
+                before_offset=before_offset,
+                chunk_bytes=chunk_bytes,
+            )
 
             return jsonify(
                 {
-                    "content": log_content,
+                    "content": chunk["content"],
                     "path": log_path,
                     "exists": True,
                     "task_id": task_id,
                     "run_number": task_found.run_number,
+                    "file_size": chunk["file_size"],
+                    "start_offset": chunk["start_offset"],
+                    "end_offset": chunk["end_offset"],
+                    "has_more_before": chunk["has_more_before"],
                 }
             )
 
@@ -703,18 +769,36 @@ def get_triage_log_by_job():
                 }
             ), 404
 
-        with open(log_path, "r") as f:
-            log_content = f.read()
+        chunk_bytes = _parse_int_query_arg(
+            "chunk_bytes",
+            default=DEFAULT_LOG_CHUNK_BYTES,
+            minimum=1,
+            maximum=MAX_LOG_CHUNK_BYTES,
+        )
+        before_offset = _parse_int_query_arg(
+            "before_offset",
+            default=None,
+            minimum=0,
+        )
+        chunk = _read_log_chunk(
+            log_path,
+            before_offset=before_offset,
+            chunk_bytes=chunk_bytes,
+        )
 
         return jsonify(
             {
-                "content": log_content,
+                "content": chunk["content"],
                 "path": log_path,
                 "exists": True,
                 "benchmark": benchmark,
                 "binary": binary,
                 "fuzzer": fuzzer,
                 "output_dir": normalized_output_dir,
+                "file_size": chunk["file_size"],
+                "start_offset": chunk["start_offset"],
+                "end_offset": chunk["end_offset"],
+                "has_more_before": chunk["has_more_before"],
             }
         )
 

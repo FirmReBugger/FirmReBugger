@@ -117,8 +117,7 @@ def hoedur_analyzer(
         working_folder = get_seeds(corpus_path)[1]
     else:
         working_folder = get_seeds(corpus_path)[0]
-    num_cores = os.cpu_count()
-    num_workers = max(1, int(num_cores) - 1)
+    num_workers = max(1, min(len(working_folder), os.cpu_count() or 1))
 
     progress = {
         "completed": 0,
