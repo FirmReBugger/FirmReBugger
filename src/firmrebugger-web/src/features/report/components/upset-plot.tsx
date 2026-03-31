@@ -1,14 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { UpSetJS } from "@upsetjs/react";
 import { generateCombinations } from "@upsetjs/model";
-import { ChevronLeft, ChevronRight, Download } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { ChevronLeft, ChevronRight, Download, X } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -17,7 +10,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { ScrollArea as _ScrollArea } from "@/components/ui/scroll-area"; // kept for potential future use
 import { toast } from "sonner";
 
 interface UpSetPlotProps {
@@ -43,8 +36,10 @@ export function UpSetPlot({
   >("detected");
   const [selection, setSelection] = useState<any>(null);
   const [dimensions, setDimensions] = useState({ width: 1200, height: 600 });
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
+  const [selectionNameTooltip, setSelectionNameTooltip] = useState<{
+    x: number; y: number; text: string;
+  } | null>(null);
 
   const [selectedIntersectionBugs, setSelectedIntersectionBugs] = useState<{
     tp: string[];
@@ -58,11 +53,6 @@ export function UpSetPlot({
     "triggered",
     "detected",
   ];
-  const metricVerb: Record<"reached" | "triggered" | "detected", string> = {
-    reached: "reached",
-    triggered: "triggered",
-    detected: "detected",
-  };
 
   const truncateSetName = (name: string, maxLength: number = 12): string => {
     if (name.length <= maxLength) return name;
@@ -110,24 +100,16 @@ export function UpSetPlot({
   }, []);
 
   useEffect(() => {
-    const onDocMouseDown = (evt: MouseEvent) => {
-      if (!containerRef.current) return;
-      if (!containerRef.current.contains(evt.target as Node)) {
-        setSelection(null);
-      }
+    const onDocClick = (e: MouseEvent) => {
+      if (containerRef.current && containerRef.current.contains(e.target as Node)) return;
+      setSelection(null);
     };
 
-    document.addEventListener("mousedown", onDocMouseDown);
+    document.addEventListener("click", onDocClick);
     return () => {
-      document.removeEventListener("mousedown", onDocMouseDown);
+      document.removeEventListener("click", onDocClick);
     };
   }, []);
-
-  useEffect(() => {
-    if (!selection) {
-      setDetailsOpen(false);
-    }
-  }, [selection]);
 
   const convertTableToUpset = (
     tableData: any[],
@@ -339,21 +321,41 @@ export function UpSetPlot({
   }, [processedMap, currentMetric, tpFpBySet]);
 
   const classifySelectionBugs = (activeSelection: any) => {
-    const elems = processedMap[currentMetric]?.elems || [];
-    const selectedElems: string[] = activeSelection?.elems || [];
+    const allItems = processedMap[currentMetric]?.elems || [];
+    const currentSets = processedMap[currentMetric]?.sets || [];
+
+    // First: try to match to one of our fuzzer sets by displayName/name.
+    // This is the reliable path for set-bar clicks regardless of what UpSetJS
+    // puts in selection.type or selection.elems.
+    const selName = String(activeSelection?.displayName ?? activeSelection?.name ?? "");
+    const matchedSet = currentSets.find((s: any) =>
+      String(s.displayName ?? s.name ?? "") === selName
+    );
+
+    let selectedElemNames: string[];
+    if (matchedSet) {
+      // Use our own stored elems array — guaranteed to contain "binary:bugId" strings
+      selectedElemNames = Array.isArray(matchedSet.elems) ? [...matchedSet.elems] : [];
+    } else {
+      // Intersection click: UpSetJS passes elems as the intersection members
+      const rawElems = activeSelection?.elems;
+      selectedElemNames = rawElems
+        ? Array.isArray(rawElems) ? [...rawElems] : Array.from(rawElems as Iterable<string>)
+        : [];
+    }
 
     const tp: string[] = [];
     const fp: string[] = [];
 
-    selectedElems.forEach((elemName) => {
-      const elem = elems.find((e: any) => e.name === elemName);
-      if (!elem) return;
+    selectedElemNames.forEach((elemName: string) => {
+      const item = allItems.find((e: any) => e.name === elemName);
+      if (!item) return;
       const bugName =
-        String(elem.name || "")
+        String(item.name || "")
           .split(":")
           .slice(1)
-          .join(":") || String(elem.name || "");
-      if (elem.isFP) {
+          .join(":") || String(item.name || "");
+      if (item.isFP) {
         fp.push(bugName);
       } else {
         tp.push(bugName);
@@ -366,21 +368,38 @@ export function UpSetPlot({
     };
   };
 
-  const openSelectionDetails = (selectionOverride?: any) => {
-    const activeSelection =
-      selectionOverride !== undefined ? selectionOverride : selection;
-    if (!activeSelection) return;
-    if (
-      activeSelection?.type !== "intersection" &&
-      activeSelection?.type !== "distinctIntersection" &&
-      activeSelection?.type !== "composite"
-    ) {
-      return;
-    }
+  const panelData = useMemo(() => {
+    if (!selection) return null;
+    // No type guard — handle set bar clicks and intersection clicks uniformly
+    return classifySelectionBugs(selection);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selection, processedMap, currentMetric]);
 
-    setSelectedIntersectionBugs(classifySelectionBugs(activeSelection));
-    setDetailsOpen(true);
-  };
+  useEffect(() => {
+    if (panelData) {
+      setSelectedIntersectionBugs(panelData);
+    }
+  }, [panelData]);
+
+  const fullSelectionName = useMemo(() => {
+    if (!selection) return "";
+    // Check if this matches a known fuzzer set by displayName/name — fuzzer bar clicks
+    const currentSets = processedMap[currentMetric]?.sets || [];
+    const selDispName = String(selection?.displayName ?? selection?.name ?? "");
+    const isKnownFuzzer = currentSets.some((s: any) =>
+      String(s.displayName ?? s.name ?? "") === selDispName
+    );
+    if (selection?.type === "set" || isKnownFuzzer) {
+      return selDispName;
+    }
+    // Intersection: selection.sets is a JS Set of ISet objects (not strings)
+    const rawSets = selection?.sets;
+    const setsArray: any[] = rawSets
+      ? Array.isArray(rawSets) ? rawSets : Array.from(rawSets as Set<any>)
+      : [];
+    if (setsArray.length === 0) return String(selection?.name ?? "Selection");
+    return setsArray.map((s: any) => String(s.displayName ?? s.name ?? "")).join(" ∩ ");
+  }, [selection, processedMap, currentMetric]);
 
   const handleExportUpSet = async () => {
     setExportLoading(true);
@@ -458,7 +477,7 @@ export function UpSetPlot({
           <div>
             <CardTitle>Bug UpSet Plot</CardTitle>
            <CardDescription>
-              Right click on the intersection to view details about the bugs {metricVerb[currentMetric]} by the selected fuzzers. Left click to highlight the intersection.
+              Interactive Upset plot showing the distribution of bugs across fuzzers for {benchmark}, based on the current bug table data.
             </CardDescription>
           </div>
           <Button
@@ -468,7 +487,7 @@ export function UpSetPlot({
             disabled={exportLoading}
           >
             <Download className="h-4 w-4 mr-2" />
-            {exportLoading ? "Exporting..." : "Export Current View"}
+            {exportLoading ? "Exporting..." : "Export"}
           </Button>
         </div>
       </CardHeader>
@@ -505,14 +524,12 @@ export function UpSetPlot({
                   selectionColor={selectionHighlightColor}
                   selection={selection}
                   onClick={(nextSelection: any, evt: any) => {
+                    evt?.stopPropagation?.();
                     if (evt?.button === 2) return;
                     if (!nextSelection) return;
-                    openSelectionDetails(nextSelection);
-                  }}
-                  onContextMenu={(nextSelection: any, evt: any) => {
-                    evt?.preventDefault?.();
                     setSelection(nextSelection);
                   }}
+
                   setChildrenFactory={(set: any) => {
                     const id = patternIdForSet(set);
                     const key = String(set?.displayName ?? set?.name ?? "");
@@ -583,7 +600,163 @@ export function UpSetPlot({
             </div>
           )}
         </div>
-        <div className="mt-3 flex items-center justify-center">
+        {/* Info area */}
+        <div className="mt-4" onClick={(e) => e.stopPropagation()}>
+          {/* Header: title + counts + optional dismiss */}
+          <div className="flex items-center justify-between mb-2 gap-2">
+            <div className="min-w-0 flex items-baseline gap-1.5 flex-wrap">
+              <span
+                className="text-xs font-semibold text-muted-foreground uppercase tracking-wide cursor-default"
+                onMouseEnter={(e) => {
+                  if (panelData && fullSelectionName.length > 50) {
+                    setSelectionNameTooltip({ x: e.clientX, y: e.clientY, text: fullSelectionName });
+                  }
+                }}
+                onMouseMove={(e) => {
+                  if (selectionNameTooltip) {
+                    setSelectionNameTooltip((prev) => prev ? { ...prev, x: e.clientX, y: e.clientY } : null);
+                  }
+                }}
+                onMouseLeave={() => setSelectionNameTooltip(null)}
+              >
+                {panelData ? (fullSelectionName || "Selection") : "All bugs"}
+              </span>
+              <span className="text-[10px] text-muted-foreground capitalize">{currentMetric}</span>
+              {panelData && (
+                <span className="text-[10px] text-muted-foreground">
+                  &middot;&nbsp;{selectedIntersectionBugs.tp.length + selectedIntersectionBugs.fp.length} total
+                  &nbsp;&middot;&nbsp;<span className="text-green-600 dark:text-green-400">{selectedIntersectionBugs.tp.length} TP</span>
+                  &nbsp;&middot;&nbsp;<span className="text-red-500">{selectedIntersectionBugs.fp.length} FP</span>
+                </span>
+              )}
+            </div>
+            {panelData && (
+              <button
+                className="text-muted-foreground hover:text-foreground shrink-0"
+                onClick={(e) => { e.stopPropagation(); setSelection(null); }}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            )}
+          </div>
+
+          {/*
+            Body: the overview is always rendered (drives the container height).
+            When a selection is active it becomes invisible but still occupies space,
+            and the detail view is absolutely overlaid on top — zero layout shift.
+          */}
+          <div className="relative">
+            {/* Overview — always in DOM; invisible (but still laid out) when detail active */}
+            <div className={panelData ? "invisible pointer-events-none" : ""} aria-hidden={panelData ? "true" : undefined}>
+              {(() => {
+                const currentSets = processedMap[currentMetric]?.sets || [];
+                if (currentSets.length === 0) {
+                  return <div className="text-xs text-muted-foreground py-1">No data loaded yet.</div>;
+                }
+                return (
+                  <table className="w-full border-collapse">
+                    <thead>
+                      <tr className="border-b border-border">
+                        <th className="text-left text-[10px] font-semibold text-muted-foreground uppercase tracking-wide pb-1.5 pr-3 w-[130px]">Fuzzer</th>
+                        <th className="text-left text-[10px] font-semibold text-green-600 dark:text-green-400 uppercase tracking-wide pb-1.5 pr-2">True Positives</th>
+                        <th className="text-left text-[10px] font-semibold text-red-500 uppercase tracking-wide pb-1.5">False Positives</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {currentSets.map((set: any) => {
+                        const fuzzerName = String(set?.displayName ?? set?.name ?? "");
+                        const tpBugs: string[] = [];
+                        const fpBugs: string[] = [];
+                        (set.elems || []).forEach((elemName: string) => {
+                          const info = bugByName.get(String(elemName));
+                          const display = String(elemName).split(":").slice(1).join(":") || String(elemName);
+                          if (info?.isFP) fpBugs.push(display);
+                          else tpBugs.push(display);
+                        });
+                        return (
+                          <tr key={fuzzerName} className="border-b border-border/40">
+                            <td className="py-1.5 pr-3 align-middle">
+                              <span className="text-[11px] font-medium text-foreground" title={fuzzerName}>{fuzzerName}</span>
+                            </td>
+                            <td className="py-1.5 pr-2 align-middle">
+                              <div className="flex flex-wrap gap-0.5">
+                                {tpBugs.length > 0
+                                  ? tpBugs.map((b) => (
+                                      <span key={b} className="font-mono text-[10px] px-1 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">{b}</span>
+                                    ))
+                                  : <span className="text-[11px] text-muted-foreground">—</span>
+                                }
+                              </div>
+                            </td>
+                            <td className="py-1.5 align-middle">
+                              <div className="flex flex-wrap gap-0.5">
+                                {fpBugs.length > 0
+                                  ? fpBugs.map((b) => (
+                                      <span key={b} className="font-mono text-[10px] px-1 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400">{b}</span>
+                                    ))
+                                  : <span className="text-[11px] text-muted-foreground">—</span>
+                                }
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                );
+              })()}
+            </div>
+
+            {/* Detail — absolutely overlaid; scrollable if it exceeds the overview height */}
+            {panelData && (
+              <div className="absolute inset-0 overflow-auto bg-background">
+                <table className="w-full border-collapse">
+                  <thead>
+                    <tr className="border-b border-border">
+                      <th className="text-left text-[10px] font-semibold text-green-600 dark:text-green-400 uppercase tracking-wide pb-1.5 pr-2">
+                        True Positives ({selectedIntersectionBugs.tp.length})
+                      </th>
+                      <th className="text-left text-[10px] font-semibold text-red-500 uppercase tracking-wide pb-1.5">
+                        False Positives ({selectedIntersectionBugs.fp.length})
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td className="py-1.5 pr-2 align-middle">
+                        {selectedIntersectionBugs.tp.length > 0 ? (
+                          <div className="flex flex-wrap gap-0.5">
+                            {selectedIntersectionBugs.tp.map((b) => (
+                              <span key={`tp-${b}`} className="font-mono text-[10px] px-1 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">{b}</span>
+                            ))}
+                          </div>
+                        ) : <span className="text-[11px] text-muted-foreground">—</span>}
+                      </td>
+                      <td className="py-1.5 align-middle">
+                        {selectedIntersectionBugs.fp.length > 0 ? (
+                          <div className="flex flex-wrap gap-0.5">
+                            {selectedIntersectionBugs.fp.map((b) => (
+                              <span key={`fp-${b}`} className="font-mono text-[10px] px-1 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400">{b}</span>
+                            ))}
+                          </div>
+                        ) : <span className="text-[11px] text-muted-foreground">—</span>}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Footer hint */}
+          <div className="mt-2 text-[10px] text-muted-foreground">
+            {panelData
+              ? "Click outside to dismiss · or click another intersection or fuzzer bar."
+              : "Click an intersection for specifics · click a fuzzer bar to filter by fuzzer."}
+          </div>
+        </div>
+
+        <div className="mt-4 flex items-center justify-center">
           <div className="flex items-center gap-2">
             <button
               className="px-2 py-1 rounded-md border hover:bg-muted"
@@ -615,69 +788,23 @@ export function UpSetPlot({
           </div>
         </div>
       </CardContent>
-
-      <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
-        <DialogContent className="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
-          <DialogHeader>
-            <DialogTitle>
-              {currentMetric.charAt(0).toUpperCase() + currentMetric.slice(1)}{" "}
-              bugs in selection
-            </DialogTitle>
-            <DialogDescription>
-              {selectedIntersectionBugs.tp.length +
-                selectedIntersectionBugs.fp.length}{" "}
-              total · {selectedIntersectionBugs.tp.length} true positive ·{" "}
-              {selectedIntersectionBugs.fp.length} false positive
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1 min-h-0">
-            <div className="rounded-md border p-3 min-h-0 flex flex-col">
-              <div className="text-sm font-semibold text-green-600 dark:text-green-400 mb-2">
-                True Positive Bugs ({selectedIntersectionBugs.tp.length})
-              </div>
-              <ScrollArea className="flex-1 min-h-0 pr-2">
-                {selectedIntersectionBugs.tp.length > 0 ? (
-                  <div className="space-y-1">
-                    {selectedIntersectionBugs.tp.map((bugId) => (
-                      <div
-                        key={`tp-${bugId}`}
-                        className="font-mono text-xs rounded bg-muted/50 px-2 py-1"
-                      >
-                        {bugId}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-sm text-muted-foreground">None</div>
-                )}
-              </ScrollArea>
-            </div>
-
-            <div className="rounded-md border p-3 min-h-0 flex flex-col">
-              <div className="text-sm font-semibold text-red-600 dark:text-red-400 mb-2">
-                False Positive Bugs ({selectedIntersectionBugs.fp.length})
-              </div>
-              <ScrollArea className="flex-1 min-h-0 pr-2">
-                {selectedIntersectionBugs.fp.length > 0 ? (
-                  <div className="space-y-1">
-                    {selectedIntersectionBugs.fp.map((bugId) => (
-                      <div
-                        key={`fp-${bugId}`}
-                        className="font-mono text-xs rounded bg-muted/50 px-2 py-1"
-                      >
-                        {bugId}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-sm text-muted-foreground">None</div>
-                )}
-              </ScrollArea>
-            </div>
+      {selectionNameTooltip && (
+        <div
+          className="fixed z-50 bg-popover text-popover-foreground border rounded-lg shadow-lg pointer-events-none"
+          style={{
+            left: `${selectionNameTooltip.x}px`,
+            top: `${selectionNameTooltip.y}px`,
+            transform: "translate(-50%, -100%)",
+            maxWidth: "340px",
+            marginBottom: "6px",
+          }}
+        >
+          <div className="px-3 pt-2 pb-2.5">
+            <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">Full name</div>
+            <div className="text-xs leading-relaxed break-words">{selectionNameTooltip.text}</div>
           </div>
-        </DialogContent>
-      </Dialog>
+        </div>
+      )}
     </Card>
   );
 }

@@ -102,7 +102,7 @@ export function Report() {
             <div className="pointer-events-auto max-w-md rounded-xl border bg-background/95 p-5 text-center shadow-lg backdrop-blur">
               <p className="text-base font-semibold">No report data yet</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                Queue and run jobs first, then come back to view Bug Table and UpSet Plot results.
+                Queue and run jobs first, then come back to view the results.
               </p>
               <div className="mt-4">
                 <Link

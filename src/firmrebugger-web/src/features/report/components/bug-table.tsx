@@ -105,6 +105,16 @@ export function BugTable({
     content: [],
     metric: "",
   });
+  const [consistencyTooltip, setConsistencyTooltip] = useState<{
+    visible: boolean;
+    x: number;
+    y: number;
+    fuzzer: string;
+    B: number;
+    T: number;
+    sumC: number;
+    pct: number;
+  } | null>(null);
   const [fuzzers, setFuzzers] = useState<string[]>([]);
   const [tableFormSelections, setTableFormSelections] =
     useState<TableForm | null>(() => {
@@ -475,56 +485,6 @@ export function BugTable({
     );
   };
 
-  const calculateFuzzerStats = (binaryGroup: BinaryGroup) => {
-    const fuzzerStats: Record<
-      string,
-      {
-        reached: string;
-        triggered: string;
-        detected: string;
-        tooltips: Record<string, string>;
-      }
-    > = {};
-
-    fuzzers.forEach((fuzzer) => {
-      let reachedBugs = 0;
-      let triggeredBugs = 0;
-      let detectedBugs = 0;
-      const totalBugs = binaryGroup.bugs.length;
-
-      binaryGroup.bugs.forEach((bug) => {
-        const stats = bug.fuzzerStats[fuzzer];
-        if (stats) {
-          if (stats.runs.some((run) => run.reached !== null)) reachedBugs++;
-          if (stats.runs.some((run) => run.triggered !== null)) triggeredBugs++;
-          if (stats.runs.some((run) => run.detected !== null)) detectedBugs++;
-        }
-      });
-
-      fuzzerStats[fuzzer] = {
-        reached:
-          totalBugs > 0
-            ? `${((reachedBugs / totalBugs) * 100).toFixed(1)}%`
-            : "0.0%",
-        triggered:
-          totalBugs > 0
-            ? `${((triggeredBugs / totalBugs) * 100).toFixed(1)}%`
-            : "0.0%",
-        detected:
-          totalBugs > 0
-            ? `${((detectedBugs / totalBugs) * 100).toFixed(1)}%`
-            : "0.0%",
-        tooltips: {
-          reached: `${reachedBugs}/${totalBugs} bugs`,
-          triggered: `${triggeredBugs}/${totalBugs} bugs`,
-          detected: `${detectedBugs}/${totalBugs} bugs`,
-        },
-      };
-    });
-
-    return fuzzerStats;
-  };
-
   return (
     <>
       <Card>
@@ -533,8 +493,7 @@ export function BugTable({
             <div>
               <CardTitle>Bug Table</CardTitle>
               <CardDescription>
-                You can click on a bug ID to see bug survival
-                curves, or hover over the times to see details for each run.
+                Interactive table to show reached, triggered and detected metrics for each bug and fuzzer combination.
               </CardDescription>
             </div>
             <Button
@@ -614,20 +573,60 @@ export function BugTable({
                               </div>
                             </td>
                             {fuzzers.map((fuzzer) => {
-                              const stats =
-                                calculateFuzzerStats(binaryGroup)[fuzzer];
+                              const bugs = binaryGroup.bugs;
+                              const B = bugs.length;
+                              let sum = 0;
+                              bugs.forEach((bug) => {
+                                const stats = bug.fuzzerStats[fuzzer];
+                                if (!stats || stats.runs.length === 0) return;
+                                const T = stats.runs.length;
+                                const c = stats.runs.filter((r) => r.detected !== null).length;
+                                sum += c / T;
+                              });
+                              const consistency = B > 0 ? sum / B : null;
+                              const pct = consistency !== null ? consistency * 100 : null;
+                              // pre-compute per-bug T for tooltip (use first bug's run count as representative)
+                              const repT = bugs.find((bug) => bug.fuzzerStats[fuzzer]?.runs?.length)?.fuzzerStats[fuzzer]?.runs?.length ?? 0;
+                              const sumC = bugs.reduce((acc, bug) => {
+                                const s = bug.fuzzerStats[fuzzer];
+                                if (!s || s.runs.length === 0) return acc;
+                                return acc + s.runs.filter((r) => r.detected !== null).length;
+                              }, 0);
                               return (
-                                <Fragment key={fuzzer}>
-                                  <td className="text-center text-muted-foreground">
-                                    {stats.reached}
-                                  </td>
-                                  <td className="text-center text-muted-foreground">
-                                    {stats.triggered}
-                                  </td>
-                                  <td className="text-center text-muted-foreground">
-                                    {stats.detected}
-                                  </td>
-                                </Fragment>
+                                <td
+                                  key={fuzzer}
+                                  colSpan={3}
+                                  className="border-l px-2 py-2 text-center cursor-default"
+                                  onMouseEnter={(e) => {
+                                    if (pct === null || !tooltipEnabled) return;
+                                    const rect = e.currentTarget.getBoundingClientRect();
+                                    setConsistencyTooltip({
+                                      visible: true,
+                                      x: rect.left + rect.width / 2,
+                                      y: rect.top - 10,
+                                      fuzzer,
+                                      B,
+                                      T: repT,
+                                      sumC,
+                                      pct,
+                                    });
+                                  }}
+                                  onMouseLeave={() => setConsistencyTooltip(null)}
+                                >
+                                  <span
+                                    className={`inline-block text-[11px] font-mono tabular-nums px-1.5 py-0.5 rounded-md border ${
+                                      pct === null
+                                        ? "border-border text-muted-foreground bg-muted/30"
+                                        : pct >= 70
+                                        ? "border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400 font-semibold"
+                                        : pct >= 30
+                                        ? "border-yellow-300 dark:border-yellow-700 bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-400"
+                                        : "border-border text-muted-foreground bg-muted/30"
+                                    }`}
+                                  >
+                                    {pct !== null ? `${pct.toFixed(1)}%` : "—"}
+                                  </span>
+                                </td>
                               );
                             })}
                           </tr>
@@ -818,6 +817,57 @@ export function BugTable({
               </table>
             </div>
 
+            {consistencyTooltip?.visible && (
+              <div
+                className="fixed z-50 bg-popover text-popover-foreground border rounded-lg shadow-lg pointer-events-none"
+                style={{
+                  left: `${consistencyTooltip.x}px`,
+                  top: `${consistencyTooltip.y}px`,
+                  transform: "translate(-50%, -100%)",
+                  minWidth: "200px",
+                  marginBottom: "6px",
+                }}
+              >
+                <div className="px-3 pt-2.5 pb-1 border-b">
+                  <span className="text-xs font-semibold tracking-wide">
+                    Consistency (hover for formula)
+                  </span>
+                </div>
+                <div className="px-3 py-2.5 flex flex-col items-center gap-2">
+                  {/* visual fraction */}
+                  <div className="flex items-center gap-1.5 text-xs">
+                    <span className="text-muted-foreground text-[11px]">C =</span>
+                    <div className="inline-flex flex-col items-center leading-none">
+                      <span className="pb-0.5 font-mono">
+                        Σ c<sub>f,b</sub>
+                      </span>
+                      <span className="w-full border-t border-foreground/60" />
+                      <span className="pt-0.5 font-mono">|B| × T</span>
+                    </div>
+                  </div>
+                  {/* computed values */}
+                  <div className="w-full rounded-md bg-muted/50 px-2.5 py-1.5 space-y-0.5 text-[11px] font-mono">
+                    <div className="flex justify-between gap-3">
+                      <span className="text-muted-foreground">Σ c<sub>f,b</sub></span>
+                      <span>{consistencyTooltip.sumC}</span>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <span className="text-muted-foreground">|B|</span>
+                      <span>{consistencyTooltip.B} bug{consistencyTooltip.B !== 1 ? "s" : ""}</span>
+                    </div>
+                    <div className="flex justify-between gap-3">
+                      <span className="text-muted-foreground">T</span>
+                      <span>{consistencyTooltip.T} trial{consistencyTooltip.T !== 1 ? "s" : ""}</span>
+                    </div>
+                    <div className="flex justify-between gap-3 border-t border-border pt-0.5 mt-0.5">
+                      <span className="text-muted-foreground">= </span>
+                      <span className="font-semibold">{consistencyTooltip.pct.toFixed(1)}%</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {tooltip.visible && tooltip.content.length > 0 && (
               <div
                 className="fixed z-50 px-3 py-2 text-sm bg-popover text-popover-foreground border rounded-md shadow-md pointer-events-none"
@@ -848,8 +898,8 @@ export function BugTable({
             )}
           </div>
 
-          <div className="mt-4 flex items-center text-xs text-muted-foreground">
-            <div className="flex items-center gap-4">
+          <div className="mt-4 flex flex-col gap-1.5 text-xs text-muted-foreground">
+            <div className="flex items-center gap-4 flex-wrap">
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded"></div>
                 <span>Best time for bug</span>
@@ -870,16 +920,20 @@ export function BugTable({
                 <span className="font-semibold">D</span> = Detected
               </div>
               <div className="flex items-center gap-2">
+                <span className="inline-block text-[11px] font-mono px-1.5 py-0.5 rounded-md border border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400">75%</span>
+                <span>= consistency (hover for formula)</span>
+              </div>
+              <div className="flex items-center gap-2">
                 <MousePointerClick className="h-3.5 w-3.5" />
                 <span>Click a bug ID for survival graph</span>
               </div>
+              <button
+                className={`ml-auto text-xs underline ${tooltipEnabled ? "text-primary" : "text-muted-foreground"}`}
+                onClick={() => setTooltipEnabled(!tooltipEnabled)}
+              >
+                {tooltipEnabled ? "Disable Hover" : "Enable Hover"}
+              </button>
             </div>
-            <button
-              className={`ml-auto text-xs underline ${tooltipEnabled ? "text-primary" : "text-muted-foreground"}`}
-              onClick={() => setTooltipEnabled(!tooltipEnabled)}
-            >
-              {tooltipEnabled ? "Disable Hover" : "Enable Hover"}
-            </button>
           </div>
         </CardContent>
       </Card>
