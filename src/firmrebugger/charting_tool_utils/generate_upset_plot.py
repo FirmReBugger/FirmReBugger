@@ -32,10 +32,17 @@ def prep_data_for_upset_plot(all_bugs_triggered, bugs_triggered):
     return df_upset
 
 
-def list_all_triggered_bugs(dfs):
+def list_all_metric_bugs(dfs, metric="triggered"):
     bugs_triggered = defaultdict(list)
     all_bugs_triggered = set()
     all_fuzzers = set()
+
+    metric_to_column = {
+        "reached": "ReachedCount",
+        "triggered": "TriggeredCount",
+        "detected": "DetectedCount",
+    }
+    metric_col = metric_to_column.get(str(metric).lower(), "TriggeredCount")
 
     for df in dfs:
         df = df.rename(columns={c: c.strip() for c in df.columns})
@@ -48,10 +55,10 @@ def list_all_triggered_bugs(dfs):
                 continue
             all_bugs_triggered.add(bugid)
             try:
-                triggered_count = float(row["TriggeredCount"])
+                metric_count = float(row[metric_col])
             except Exception:
-                triggered_count = 0
-            if triggered_count > 0:
+                metric_count = 0
+            if metric_count > 0:
                 fuzzer = str(row["Fuzzer"])
                 bugs_triggered[fuzzer].append(bugid)
     # print(all_bugs_triggered)
@@ -62,8 +69,8 @@ def list_all_triggered_bugs(dfs):
     return prep_data_for_upset_plot(all_bugs_triggered, bugs_triggered)
 
 
-def upset_plot(df):
-    upset_df = list_all_triggered_bugs([df])
+def upset_plot(df, metric="triggered"):
+    upset_df = list_all_metric_bugs([df], metric=metric)
     pastel_colors = cm.Pastel1.colors
     color_map = {"TP": pastel_colors[1], "FP": pastel_colors[0]}
 

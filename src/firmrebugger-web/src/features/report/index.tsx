@@ -17,6 +17,9 @@ export function Report() {
   const [firmBenchData, setFirmBenchData] = useState<any>(null);
   const [firmBenchXData, setFirmBenchXData] = useState<any>(null);
   const [firmBenchDMAData, setFirmBenchDMAData] = useState<any>(null);
+  const [firmBenchReportPaths, setFirmBenchReportPaths] = useState<string[]>([]);
+  const [firmBenchXReportPaths, setFirmBenchXReportPaths] = useState<string[]>([]);
+  const [firmBenchDMAReportPaths, setFirmBenchDMAReportPaths] = useState<string[]>([]);
 
   const tabToBenchmark = (tabValue: string) => {
     switch (tabValue) {
@@ -83,8 +86,13 @@ export function Report() {
               }
               onOpenChange={(v) => setDrawerOpen(v)}
               onDataUpdate={setFirmBenchData}
+              onReportPathsUpdate={setFirmBenchReportPaths}
             />
-            <UpSetPlot benchmark="FirmBench" tableData={firmBenchData} />
+            <UpSetPlot
+              benchmark="FirmBench"
+              tableData={firmBenchData}
+              reportPaths={firmBenchReportPaths}
+            />
           </TabsContent>
 
           <TabsContent value="firmbenchx" className="space-y-4">
@@ -95,8 +103,13 @@ export function Report() {
               }
               onOpenChange={(v) => setDrawerOpen(v)}
               onDataUpdate={setFirmBenchXData}
+              onReportPathsUpdate={setFirmBenchXReportPaths}
             />
-            <UpSetPlot benchmark="FirmBenchX" tableData={firmBenchXData} />
+            <UpSetPlot
+              benchmark="FirmBenchX"
+              tableData={firmBenchXData}
+              reportPaths={firmBenchXReportPaths}
+            />
           </TabsContent>
 
           <TabsContent value="firmbenchdma" className="space-y-4">
@@ -108,8 +121,13 @@ export function Report() {
               }
               onOpenChange={(v) => setDrawerOpen(v)}
               onDataUpdate={setFirmBenchDMAData}
+              onReportPathsUpdate={setFirmBenchDMAReportPaths}
             />
-            <UpSetPlot benchmark="FirmBenchDMA" tableData={firmBenchDMAData} />
+            <UpSetPlot
+              benchmark="FirmBenchDMA"
+              tableData={firmBenchDMAData}
+              reportPaths={firmBenchDMAReportPaths}
+            />
           </TabsContent>
         </Tabs>
       </Main>

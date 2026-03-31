@@ -1,5 +1,6 @@
 import { useState, Fragment, useEffect, useRef } from "react";
 import { KaplanMeier } from "./kaplan-meier";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -7,15 +8,24 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, Download } from "lucide-react";
 import { TableMutateDrawer, TableForm } from "./table-mutate-drawer";
 import { useApiUrl, useApiUrlLoading } from "@/context/api-url-context";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { toast } from "sonner";
 
 interface BugTableProps {
   benchmark: string;
   openDrawer?: boolean;
   onOpenChange?: (open: boolean) => void;
   onDataUpdate?: (data: BinaryGroup[] | null) => void;
+  onReportPathsUpdate?: (paths: string[]) => void;
 }
 
 interface BugEntry {
@@ -67,6 +77,7 @@ export function BugTable({
   openDrawer,
   onOpenChange,
   onDataUpdate,
+  onReportPathsUpdate,
 }: BugTableProps) {
   const API_URL = useApiUrl();
   const apiUrlLoading = useApiUrlLoading();
@@ -106,6 +117,13 @@ export function BugTable({
     });
   const initialSelectionsRef = useRef(tableFormSelections);
   const [tooltipEnabled, setTooltipEnabled] = useState(true);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [exportPdfBase64, setExportPdfBase64] = useState("");
+  const [exportLatexCode, setExportLatexCode] = useState("");
+  const [exportPdfError, setExportPdfError] = useState<string | null>(null);
+  const [showTexPreview, setShowTexPreview] = useState(false);
+  const [exportFilename, setExportFilename] = useState("summary_table.pdf");
 
   const [kmOpen, setKmOpen] = useState(false);
   const [kmBugId, setKmBugId] = useState<string | null>(null);
@@ -123,6 +141,24 @@ export function BugTable({
   const [kmMetric, setKmMetric] = useState<
     "reached" | "triggered" | "detected"
   >("reached");
+
+  const getSelectedReportPaths = (form: TableForm | null): string[] => {
+    if (!form) return [];
+    const selectedReportPaths: string[] = [];
+    Object.values(form.selectedReports || {}).forEach((fuzzerReports) => {
+      Object.values(fuzzerReports || {}).forEach((reportPath) => {
+        if (reportPath) {
+          selectedReportPaths.push(reportPath);
+        }
+      });
+    });
+    return selectedReportPaths;
+  };
+
+  useEffect(() => {
+    if (!onReportPathsUpdate) return;
+    onReportPathsUpdate(getSelectedReportPaths(tableFormSelections));
+  }, [tableFormSelections, onReportPathsUpdate]);
 
   useEffect(() => {
     if (apiUrlLoading) return;
@@ -226,6 +262,68 @@ export function BugTable({
         // ignore
       }
     }
+  };
+
+  const handleExportTable = async () => {
+    const reportPaths = getSelectedReportPaths(tableFormSelections);
+    if (reportPaths.length === 0) {
+      toast.error("Configure the table first to select report paths");
+      return;
+    }
+
+    setExportLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/api/report/export-latex`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          benchmark,
+          report_paths: reportPaths,
+        }),
+      });
+
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || "Failed to export LaTeX table");
+      }
+
+      const pdfPreview = result.preview_pdf_base64 || result.pdf_base64 || "";
+      setExportPdfBase64(pdfPreview);
+      setExportLatexCode(result.latex_code || "");
+      setExportPdfError(result.pdf_error || null);
+      setShowTexPreview(!pdfPreview && Boolean(result.latex_code));
+      setExportFilename(
+        result.filename || `${benchmark.toLowerCase()}_summary_table.pdf`,
+      );
+      setExportDialogOpen(true);
+
+      if (!pdfPreview && result.pdf_error) {
+        toast.error("PDF preview unavailable. Showing TeX output instead.");
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to export LaTeX table");
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
+  const handleDownloadExport = () => {
+    if (!exportPdfBase64) return;
+    const bytes = atob(exportPdfBase64);
+    const buffer = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) {
+      buffer[i] = bytes.charCodeAt(i);
+    }
+    const blob = new Blob([buffer], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = exportFilename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast.success("Table PDF downloaded");
   };
 
   const toggleBinary = (binary: string) => {
@@ -350,10 +448,6 @@ export function BugTable({
     return runs.some((run) => run[metric] !== null);
   };
 
-  const totalBugs = Array.isArray(data)
-    ? data.reduce((sum, bg) => sum + bg.bugs.length, 0)
-    : 0;
-
   const getBestValues = (bug: BugRow) => {
     const reached: number[] = [];
     const triggered: number[] = [];
@@ -439,13 +533,18 @@ export function BugTable({
             <div>
               <CardTitle>Bug Table</CardTitle>
               <CardDescription>
-                Showing {totalBugs} unique bug{totalBugs !== 1 ? "s" : ""}{" "}
-                across {data.length} binar{data.length !== 1 ? "ies" : "y"} and{" "}
-                {fuzzers.length} fuzzer{fuzzers.length !== 1 ? "s" : ""} for{" "}
-                {benchmark}. You can click on a bug ID to see bug survival
+                You can click on a bug ID to see bug survival
                 curves, or hover over the times to see details for each run.
               </CardDescription>
             </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleExportTable}
+              disabled={exportLoading}
+            >
+              {exportLoading ? "Preparing..." : "Export"}
+            </Button>
           </div>
         </CardHeader>
         <CardContent>
@@ -748,8 +847,14 @@ export function BugTable({
             )}
           </div>
 
-          <div className="mt-4 flex items-center justify-between text-xs text-muted-foreground">
+          <div className="mt-4 flex items-center text-xs text-muted-foreground">
             <div className="flex items-center gap-4">
+              <button
+                className={`text-xs underline ${tooltipEnabled ? "text-primary" : "text-muted-foreground"}`}
+                onClick={() => setTooltipEnabled(!tooltipEnabled)}
+              >
+                {tooltipEnabled ? "Disable Hover" : "Enable Hover"}
+              </button>
               <div className="flex items-center gap-2">
                 <div className="w-3 h-3 bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded"></div>
                 <span>Best time for bug</span>
@@ -769,18 +874,67 @@ export function BugTable({
               <div className="flex items-center gap-2">
                 <span className="font-semibold">D</span> = Detected
               </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <button
-                className={`text-xs underline ${tooltipEnabled ? "text-primary" : "text-muted-foreground"}`}
-                onClick={() => setTooltipEnabled(!tooltipEnabled)}
-              >
-                {tooltipEnabled ? "Disable Hover" : "Enable Hover"}
-              </button>
+              <div className="flex items-center gap-2">
+                <span>Click a bug ID for survival graph</span>
+              </div>
             </div>
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
+        <DialogContent className="!w-[96vw] !max-w-[1700px] h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>Table Export Preview</DialogTitle>
+            <DialogDescription>
+              Generated from selected reports for {benchmark}. You can preview
+              the PDF or inspect the generated TeX.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center justify-end gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowTexPreview((v) => !v)}
+              disabled={!exportLatexCode}
+            >
+              {showTexPreview ? "Show PDF" : "Show TeX"}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDownloadExport}
+              disabled={!exportPdfBase64}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Download PDF
+            </Button>
+          </div>
+          <div className="flex-1 min-h-0 rounded-md border bg-muted/30">
+            {showTexPreview ? (
+              <pre className="h-full w-full overflow-auto p-4 text-xs leading-relaxed whitespace-pre-wrap">
+                {exportLatexCode || "No TeX generated."}
+              </pre>
+            ) : exportPdfBase64 ? (
+              <iframe
+                title="Table PDF preview"
+                src={`data:application/pdf;base64,${exportPdfBase64}`}
+                className="w-full h-full"
+              />
+            ) : (
+              <div className="text-sm text-muted-foreground p-4 space-y-2">
+                <div>No PDF preview generated.</div>
+                {exportPdfError && (
+                  <div className="text-xs whitespace-pre-wrap">{exportPdfError}</div>
+                )}
+                {exportLatexCode && (
+                  <div>Use "Show TeX" to inspect the generated table source.</div>
+                )}
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <TableMutateDrawer
         open={showDrawer}

@@ -595,9 +595,9 @@ class JobManager:
                         if candidate_job_id in self.jobs:
                             candidate_job = self.jobs[candidate_job_id]
                             if candidate_job.mode == "Triaging":
-                                candidate_cores_needed = min(
-                                    candidate_job.runs, available_cores
-                                )
+                                # Triaging must reserve its full requested CPU set.
+                                # If not enough cores are currently available, keep it queued.
+                                candidate_cores_needed = max(1, candidate_job.runs)
                                 candidate_tasks_to_start = candidate_job_tasks[:1]
                             else:
                                 candidate_cores_needed = len(candidate_job_tasks)

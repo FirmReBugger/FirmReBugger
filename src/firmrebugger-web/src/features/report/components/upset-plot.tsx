@@ -1,6 +1,7 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { UpSetJS } from "@upsetjs/react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { generateCombinations } from "@upsetjs/model";
+import { ChevronLeft, ChevronRight, Download } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -8,6 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -15,13 +17,21 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { useApiUrl } from "@/context/api-url-context";
+import { toast } from "sonner";
 
 interface UpSetPlotProps {
   benchmark: string;
   tableData?: any;
+  reportPaths?: string[];
 }
 
-export function UpSetPlot({ benchmark, tableData }: UpSetPlotProps) {
+export function UpSetPlot({
+  benchmark,
+  tableData,
+  reportPaths = [],
+}: UpSetPlotProps) {
   const [processedMap, setProcessedMap] = useState<Record<string, any>>({
     reached: null,
     triggered: null,
@@ -46,12 +56,18 @@ export function UpSetPlot({ benchmark, tableData }: UpSetPlotProps) {
   } | null>(null);
   const [dimensions, setDimensions] = useState({ width: 1200, height: 600 });
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [previewPngBase64, setPreviewPngBase64] = useState("");
+  const [exportPdfBase64, setExportPdfBase64] = useState("");
+  const [exportFilename, setExportFilename] = useState("upset_plot.pdf");
 
   const [selectedIntersectionBugs, setSelectedIntersectionBugs] = useState<{
     tp: string[];
     fp: string[];
   }>({ tp: [], fp: [] });
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const API_URL = useApiUrl();
 
   const UpSetComponent: any = UpSetJS;
   const metrics: Array<"reached" | "triggered" | "detected"> = [
@@ -120,7 +136,8 @@ export function UpSetPlot({ benchmark, tableData }: UpSetPlotProps) {
             const runs = stats?.runs || [];
             const hasMetric = runs.some((r: any) => r[metric] != null);
 
-            if (hasMetric) {
+                // Standard UpSet membership: dot present means this fuzzer hit the bug.
+                if (hasMetric) {
               memberSets.push(fuzzer);
             }
           },
@@ -131,6 +148,11 @@ export function UpSetPlot({ benchmark, tableData }: UpSetPlotProps) {
 
         if (memberSets.length === 0) {
           missedBugs++;
+          items.push({
+            name: bugName,
+            sets: [],
+            isFP,
+          });
           return;
         }
 
@@ -147,7 +169,11 @@ export function UpSetPlot({ benchmark, tableData }: UpSetPlotProps) {
     });
 
     const sets = Array.from(setsMap.entries())
-      .sort((a, b) => a[0].localeCompare(b[0]))
+      .sort((a, b) => {
+        const bySize = b[1].size - a[1].size;
+        if (bySize !== 0) return bySize;
+        return a[0].localeCompare(b[0]);
+      })
       .map(([name, elemsSet]) => ({
         name,
         cardinality: elemsSet.size,
@@ -196,6 +222,29 @@ export function UpSetPlot({ benchmark, tableData }: UpSetPlotProps) {
     }
   }, [tableData]);
 
+  const visibleCombinations = useMemo(() => {
+    const current = processedMap[currentMetric];
+    if (!current?.sets || !Array.isArray(current.sets)) {
+      return [];
+    }
+
+    const universe = (current.elems || []).map((e: any) => e.name);
+
+    const generated = generateCombinations(current.sets as any, {
+      type: "distinctIntersection",
+      min: 0,
+      empty: true,
+      elems: universe,
+      toElemKey: (v: string) => v,
+      order: ["degree:asc", "cardinality:desc", "name:asc"],
+    } as any);
+
+    // Keep all intersections with bugs plus exactly one empty intersection.
+    return (generated || []).filter(
+      (c: any) => c.cardinality > 0 || c.degree === 0,
+    );
+  }, [processedMap, currentMetric]);
+
   const openSelectionDetails = () => {
     if (!selection) return;
     if (
@@ -233,6 +282,58 @@ export function UpSetPlot({ benchmark, tableData }: UpSetPlotProps) {
     setDetailsOpen(true);
   };
 
+  const handleExportUpSet = async () => {
+    if (!reportPaths || reportPaths.length === 0) {
+      toast.error("Configure the bug table first to select report paths");
+      return;
+    }
+
+    setExportLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/api/report/export-upset`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          benchmark,
+          metric: currentMetric,
+          report_paths: reportPaths,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        throw new Error(result.error || "Failed to export UpSet plot");
+      }
+
+      setPreviewPngBase64(result.preview_png_base64 || "");
+      setExportPdfBase64(result.pdf_base64 || "");
+      setExportFilename(result.filename || `${benchmark.toLowerCase()}_upset_plot.pdf`);
+      setExportDialogOpen(true);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to export UpSet plot");
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
+  const handleDownloadUpSetPdf = () => {
+    if (!exportPdfBase64) return;
+    const bytes = atob(exportPdfBase64);
+    const buffer = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) {
+      buffer[i] = bytes.charCodeAt(i);
+    }
+    const blob = new Blob([buffer], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = exportFilename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    toast.success("UpSet PDF downloaded");
+  };
+
   return (
     <Card>
       <CardHeader>
@@ -240,47 +341,24 @@ export function UpSetPlot({ benchmark, tableData }: UpSetPlotProps) {
           <div>
             <CardTitle>Bug UpSet Plot - {benchmark}</CardTitle>
             <CardDescription>
-              Interactive UpSet plot for bugs ({currentMetric} metric). You can
-              click on the plot to view details about the bugs in the selected
-              intersection.
+              Click on the plot to view details about the bugs in the selected intersection.
               {processedMap[currentMetric]?.stats && (
                 <span className="block mt-1">
-                  {processedMap[currentMetric].stats.hitBugs} of{" "}
-                  {processedMap[currentMetric].stats.totalBugs} bugs{" "}
-                  {currentMetric}
+                  {processedMap[currentMetric].stats.totalBugs} total bugs;{" "}
+                  {processedMap[currentMetric].stats.missedBugs} bugs with 0
+                  hits (no selected fuzzer hit)
                 </span>
               )}
             </CardDescription>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              className="px-2 py-1 rounded-md border hover:bg-muted"
-              onClick={() =>
-                setCurrentMetric((prev) => {
-                  const idx = metrics.indexOf(prev);
-                  const prevIdx = (idx - 1 + metrics.length) % metrics.length;
-                  return metrics[prevIdx];
-                })
-              }
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-            <div className="text-sm font-medium capitalize">
-              {currentMetric}
-            </div>
-            <button
-              className="px-2 py-1 rounded-md border hover:bg-muted"
-              onClick={() =>
-                setCurrentMetric((prev) => {
-                  const idx = metrics.indexOf(prev);
-                  const nextIdx = (idx + 1) % metrics.length;
-                  return metrics[nextIdx];
-                })
-              }
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExportUpSet}
+            disabled={exportLoading}
+          >
+            {exportLoading ? "Preparing..." : "Export"}
+          </Button>
         </div>
       </CardHeader>
       <CardContent>
@@ -366,10 +444,7 @@ export function UpSetPlot({ benchmark, tableData }: UpSetPlotProps) {
               >
                 <UpSetComponent
                   {...(processedMap[currentMetric] as any)}
-                  combinations={{
-                    type: "distinctIntersection",
-                    order: ["cardinality:desc", "name:asc"],
-                  }}
+                  combinations={visibleCombinations as any}
                   width={dimensions.width}
                   height={dimensions.height}
                   selection={selection}
@@ -420,12 +495,81 @@ export function UpSetPlot({ benchmark, tableData }: UpSetPlotProps) {
           ) : (
             <div className="text-sm text-muted-foreground p-6 text-center">
               {tableData
-                ? `No bugs with ${currentMetric} data available. This means no fuzzer ${currentMetric === "reached" ? "reached" : currentMetric === "triggered" ? "triggered" : "detected"} any bugs for this metric.`
+                ? `No bugs available for hit combinations in ${currentMetric} metric.`
                 : "Configure the bug table above to generate an upset plot."}
             </div>
           )}
         </div>
+        <div className="mt-3 flex items-center justify-end">
+          <div className="flex items-center gap-2">
+            <button
+              className="px-2 py-1 rounded-md border hover:bg-muted"
+              onClick={() =>
+                setCurrentMetric((prev) => {
+                  const idx = metrics.indexOf(prev);
+                  const prevIdx = (idx - 1 + metrics.length) % metrics.length;
+                  return metrics[prevIdx];
+                })
+              }
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <div className="text-sm font-medium capitalize">
+              {currentMetric}
+            </div>
+            <button
+              className="px-2 py-1 rounded-md border hover:bg-muted"
+              onClick={() =>
+                setCurrentMetric((prev) => {
+                  const idx = metrics.indexOf(prev);
+                  const nextIdx = (idx + 1) % metrics.length;
+                  return metrics[nextIdx];
+                })
+              }
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
       </CardContent>
+
+      <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
+        <DialogContent className="!w-[96vw] !max-w-[1700px] h-[90vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle>UpSet Plot Preview</DialogTitle>
+            <DialogDescription>
+              Generated from selected reports for {benchmark}. Download the PDF
+              if this looks correct.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center justify-end">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleDownloadUpSetPdf}
+              disabled={!exportPdfBase64}
+            >
+              <Download className="h-4 w-4 mr-2" />
+              Download PDF
+            </Button>
+          </div>
+          <ScrollArea className="flex-1 min-h-0 rounded-md border bg-muted/30 p-2">
+            {previewPngBase64 ? (
+              <div className="w-full h-full overflow-auto flex items-start justify-center p-2">
+                <img
+                  src={`data:image/png;base64,${previewPngBase64}`}
+                  alt="UpSet preview"
+                  className="max-w-full w-auto h-auto"
+                />
+              </div>
+            ) : (
+              <div className="text-sm text-muted-foreground p-4">
+                No preview generated.
+              </div>
+            )}
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={detailsOpen} onOpenChange={setDetailsOpen}>
         <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">

@@ -26,6 +26,7 @@ def summarize_data(json_file):
     MAX_TRIAL_TIME = json_data.get("Trial-Time")
 
     trigger_runs = {}
+    reached_runs = {}
     detected_runs = {}
 
     if "Campaign" not in json_data:
@@ -57,6 +58,9 @@ def summarize_data(json_file):
             if trial.get("reached") is not None:
                 reached_duration = trial["reached"]
                 reached_event_observed = 1
+                if bug_id not in reached_runs:
+                    reached_runs[bug_id] = set()
+                reached_runs[bug_id].add(run)
             else:
                 reached_duration = MAX_TRIAL_TIME
                 reached_event_observed = 0
@@ -94,6 +98,7 @@ def summarize_data(json_file):
                 "Fuzzer",
                 "BugID",
                 "MedianDetectedTime",
+                "ReachedCount",
                 "DetectedCount",
                 "MedianReachedTime",
                 "MedianTriggeredTime",
@@ -130,6 +135,10 @@ def summarize_data(json_file):
             "MedianReachedTime": reached_medians.values,
             "MedianDetectedTime": detected_medians.values,
             "MedianTriggeredTime": triggered_medians.values,
+            "ReachedCount": [
+                len(reached_runs.get(bug_id, set()))
+                for bug_id in reached_medians.index.get_level_values("BugID")
+            ],
             "TriggeredCount": [
                 len(trigger_runs.get(bug_id, set()))
                 for bug_id in triggered_medians.index.get_level_values("BugID")

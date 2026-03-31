@@ -1,10 +1,16 @@
 import json
+import base64
+import io
 import os
 import signal
+import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
+
+import pandas as pd
 
 from flask import (
     Flask,
@@ -26,6 +32,12 @@ from firmrebugger.app_utils import (
     get_reports,
     get_table_json,
 )
+from firmrebugger.charting_tool_utils.generate_latex_tables import (
+    escape_latex,
+    reshape_and_convert_to_latex,
+)
+from firmrebugger.charting_tool_utils.generate_upset_plot import upset_plot
+from firmrebugger.charting_tool_utils.summarize_data import summarize_data
 from firmrebugger.common import get_frb_base_dir
 from firmrebugger.manager import Job, JobManager, list_finished_jobs, start_manager
 
@@ -193,6 +205,68 @@ def jobs_snapshot_worker():
             print(f"[Snapshot] Error refreshing jobs snapshot: {e}")
 
 
+def _load_combined_reports_dataframe(report_paths):
+    report_dfs = []
+    for report_path in report_paths:
+        report_dfs.append(summarize_data(report_path))
+
+    if not report_dfs:
+        return None
+
+    return report_dfs[0] if len(report_dfs) == 1 else pd.concat(report_dfs, ignore_index=True)
+
+
+def _collect_unique_fuzzers(combined_df):
+    return list(combined_df["Fuzzer"].drop_duplicates())
+
+
+def _render_latex_table_to_pdf_bytes(table_code):
+    latex_code = rf"""
+\documentclass{{article}}
+\usepackage{{graphicx}}
+\usepackage[table,xcdraw]{{xcolor}}
+\usepackage[a4paper,margin=0.5in,landscape]{{geometry}}
+\pagestyle{{empty}}
+\usepackage{{pdflscape}}
+\newcommand{{\missing}}{{\makebox[2em][c]{{--}}}}
+\begin{{document}}
+    {table_code}
+\end{{document}}
+"""
+
+    with tempfile.TemporaryDirectory(prefix="frb-latex-") as tmpdir:
+        tex_path = os.path.join(tmpdir, "table.tex")
+        pdf_path = os.path.join(tmpdir, "table.pdf")
+
+        with open(tex_path, "w") as f:
+            f.write(latex_code)
+
+        result = subprocess.run(
+            [
+                "pdflatex",
+                "-interaction=nonstopmode",
+                "-halt-on-error",
+                "-output-directory",
+                tmpdir,
+                tex_path,
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        if result.returncode != 0 or not os.path.exists(pdf_path):
+            output_tail = "\n".join((result.stdout or "").splitlines()[-30:])
+            err_tail = "\n".join((result.stderr or "").splitlines()[-30:])
+            raise RuntimeError(
+                "Failed to render LaTeX table to PDF. "
+                f"stdout:\n{output_tail}\n\nstderr:\n{err_tail}"
+            )
+
+        with open(pdf_path, "rb") as f:
+            return f.read()
+
+
 def task_to_dict(task):
     cpu_percent = None
     core_idx_value = getattr(task, "core_idx", None)
@@ -293,6 +367,99 @@ def generate_table():
 
     except Exception as e:
         print(f"Error in generate_table: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/report/export-latex", methods=["POST"])
+def export_latex_table():
+    try:
+        data = request.json or {}
+        benchmark = data.get("benchmark", "Report")
+        report_paths = data.get("report_paths", [])
+
+        if not report_paths:
+            return jsonify({"error": "No report paths provided"}), 400
+
+        combined_df = _load_combined_reports_dataframe(report_paths)
+        if combined_df is None or combined_df.empty:
+            return jsonify({"error": "No bug data to export"}), 400
+
+        combined_df = combined_df.applymap(
+            lambda x: escape_latex(str(x)) if isinstance(x, str) else x
+        )
+        fuzzers = _collect_unique_fuzzers(combined_df)
+        latex_code = reshape_and_convert_to_latex(combined_df, fuzzers)
+
+        pdf_b64 = ""
+        pdf_error = None
+        try:
+            pdf_bytes = _render_latex_table_to_pdf_bytes(latex_code)
+            pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")
+        except Exception as render_err:
+            pdf_error = str(render_err)
+
+        return jsonify(
+            {
+                "benchmark": benchmark,
+                "preview_pdf_base64": pdf_b64,
+                "pdf_base64": pdf_b64,
+                "pdf_error": pdf_error,
+                "latex_code": latex_code,
+                "filename": f"{benchmark.lower()}_summary_table.pdf",
+                "report_count": len(report_paths),
+            }
+        )
+    except Exception as e:
+        print(f"Error in export_latex_table: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/report/export-upset", methods=["POST"])
+def export_upset_preview():
+    try:
+        data = request.json or {}
+        benchmark = data.get("benchmark", "Report")
+        metric = str(data.get("metric", "triggered")).lower()
+        if metric not in {"reached", "triggered", "detected"}:
+            metric = "triggered"
+        report_paths = data.get("report_paths", [])
+
+        if not report_paths:
+            return jsonify({"error": "No report paths provided"}), 400
+
+        combined_df = _load_combined_reports_dataframe(report_paths)
+        if combined_df is None or combined_df.empty:
+            return jsonify({"error": "No bug data to export"}), 400
+
+        figure = upset_plot(combined_df.sort_values(by="Fuzzer"), metric=metric)
+
+        png_buffer = io.BytesIO()
+        pdf_buffer = io.BytesIO()
+        figure.savefig(png_buffer, format="png", dpi=180, bbox_inches="tight")
+        figure.savefig(pdf_buffer, format="pdf", bbox_inches="tight")
+
+        png_b64 = base64.b64encode(png_buffer.getvalue()).decode("ascii")
+        pdf_b64 = base64.b64encode(pdf_buffer.getvalue()).decode("ascii")
+
+        try:
+            import matplotlib.pyplot as plt
+
+            plt.close(figure)
+        except Exception:
+            pass
+
+        return jsonify(
+            {
+                "benchmark": benchmark,
+                "metric": metric,
+                "preview_png_base64": png_b64,
+                "pdf_base64": pdf_b64,
+                "filename": f"{benchmark.lower()}_{metric}_upset_plot.pdf",
+                "report_count": len(report_paths),
+            }
+        )
+    except Exception as e:
+        print(f"Error in export_upset_preview: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 
