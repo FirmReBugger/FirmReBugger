@@ -1,12 +1,14 @@
-import os
 import glob
-import psutil
 import json
+import os
 from collections import defaultdict
-from firmrebugger.common import get_frb_base_dir
-from lifelines.utils import restricted_mean_survival_time as rmst
-from lifelines import KaplanMeierFitter
+
 import numpy as np
+import psutil
+from lifelines import KaplanMeierFitter
+from lifelines.utils import restricted_mean_survival_time as rmst
+
+from firmrebugger.common import get_frb_base_dir
 
 
 def convert_numpy_types(obj):
@@ -103,24 +105,31 @@ def get_reports(benchmark, fuzzers_selected):
     valid_reports = []
     fuzzer_dirs = glob.glob(f"{benchmark_dir}/*/fuzzers")
 
-    for fuzzer_dir in fuzzer_dirs:
-        all_fuzzers_reports = []
-        all_fuzzers_have_reports = True
-
-        # Check each selected fuzzer for reports
-        for selected_fuzzer in fuzzers_selected:
+    if not fuzzers_selected:
+        for fuzzer_dir in fuzzer_dirs:
             report_path = os.path.join(
-                fuzzer_dir, selected_fuzzer, "fuzzing_out", "*", "frb_report.json"
+                fuzzer_dir, "*", "fuzzing_out", "*", "frb_report.json"
             )
-            matching_reports = glob.glob(report_path)
-            if matching_reports:
-                all_fuzzers_reports.extend(matching_reports)
-            else:
-                all_fuzzers_have_reports = False
-                break
+            valid_reports.extend(glob.glob(report_path))
+    else:
+        for fuzzer_dir in fuzzer_dirs:
+            all_fuzzers_reports = []
+            all_fuzzers_have_reports = True
 
-        if all_fuzzers_have_reports:
-            valid_reports.extend(all_fuzzers_reports)
+            # Check each selected fuzzer for reports
+            for selected_fuzzer in fuzzers_selected:
+                report_path = os.path.join(
+                    fuzzer_dir, selected_fuzzer, "fuzzing_out", "*", "frb_report.json"
+                )
+                matching_reports = glob.glob(report_path)
+                if matching_reports:
+                    all_fuzzers_reports.extend(matching_reports)
+                else:
+                    all_fuzzers_have_reports = False
+                    break
+
+            if all_fuzzers_have_reports:
+                valid_reports.extend(all_fuzzers_reports)
 
     print(f"Valid reports found: {valid_reports}")
     return valid_reports

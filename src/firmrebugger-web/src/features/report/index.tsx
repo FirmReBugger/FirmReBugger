@@ -4,6 +4,7 @@ import { SlidersHorizontal } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UpSetPlot } from "./components/upset-plot";
 import { BugTable } from "./components/bug-table";
+import { useApiUrl } from "@/context/api-url-context";
 
 type BinaryGroup = {
   binary: string;
@@ -12,23 +13,47 @@ type BinaryGroup = {
 
 const hasReportData = (data: BinaryGroup[] | null): boolean => {
   if (!Array.isArray(data) || data.length === 0) return false;
-  return data.some((group) => Array.isArray(group.bugs) && group.bugs.length > 0);
+  return data.some(
+    (group) => Array.isArray(group.bugs) && group.bugs.length > 0,
+  );
 };
 
 export function Report() {
-  const [drawerSelectedBenchmark, setDrawerSelectedBenchmark] = useState<string | null>(null);
+  const API_URL = useApiUrl();
+  const [drawerSelectedBenchmark, setDrawerSelectedBenchmark] = useState<
+    string | null
+  >(null);
   const [selectedTab, setSelectedTab] = useState(
-    () => localStorage.getItem("report-selected-tab") || "firmbench"
+    () => localStorage.getItem("report-selected-tab") || "firmbench",
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  const [firmBenchData, setFirmBenchData] = useState<BinaryGroup[] | null>(null);
-  const [firmBenchXData, setFirmBenchXData] = useState<BinaryGroup[] | null>(null);
-  const [firmBenchDMAData, setFirmBenchDMAData] = useState<BinaryGroup[] | null>(null);
-  const [firmBenchReportPaths, setFirmBenchReportPaths] = useState<string[]>([]);
-  const [firmBenchXReportPaths, setFirmBenchXReportPaths] = useState<string[]>([]);
-  const [firmBenchDMAReportPaths, setFirmBenchDMAReportPaths] = useState<string[]>([]);
+  const [firmBenchData, setFirmBenchData] = useState<BinaryGroup[] | null>(
+    null,
+  );
+  const [firmBenchXData, setFirmBenchXData] = useState<BinaryGroup[] | null>(
+    null,
+  );
+  const [firmBenchDMAData, setFirmBenchDMAData] = useState<
+    BinaryGroup[] | null
+  >(null);
+  const [firmBenchReportPaths, setFirmBenchReportPaths] = useState<string[]>(
+    [],
+  );
+  const [firmBenchXReportPaths, setFirmBenchXReportPaths] = useState<string[]>(
+    [],
+  );
+  const [firmBenchDMAReportPaths, setFirmBenchDMAReportPaths] = useState<
+    string[]
+  >([]);
   const [showEmptyHint, setShowEmptyHint] = useState(false);
+  const [reportAvailability, setReportAvailability] = useState<
+    Record<string, boolean | null>
+  >({
+    FirmBench: null,
+    FirmBenchX: null,
+    FirmBenchDMA: null,
+  });
 
   const tabToBenchmark = (tabValue: string) => {
     switch (tabValue) {
@@ -42,6 +67,43 @@ export function Report() {
         return tabValue;
     }
   };
+
+  const fetchReportAvailability = async (
+    benchmark: "FirmBench" | "FirmBenchX" | "FirmBenchDMA",
+  ) => {
+    try {
+      const response = await fetch(`${API_URL}/api/get_reports`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          benchmark,
+          fuzzers: [],
+        }),
+      });
+      if (!response.ok) {
+        setReportAvailability((prev) => ({ ...prev, [benchmark]: false }));
+        return;
+      }
+      const data = await response.json();
+      const hasReports =
+        Array.isArray(data?.valid_reports) && data.valid_reports.length > 0;
+      setReportAvailability((prev) => ({ ...prev, [benchmark]: hasReports }));
+    } catch {
+      setReportAvailability((prev) => ({ ...prev, [benchmark]: false }));
+    }
+  };
+
+  useEffect(() => {
+    if (!API_URL) return;
+    const benchmarks: Array<"FirmBench" | "FirmBenchX" | "FirmBenchDMA"> = [
+      "FirmBench",
+      "FirmBenchX",
+      "FirmBenchDMA",
+    ];
+    benchmarks.forEach((benchmark) => {
+      fetchReportAvailability(benchmark);
+    });
+  }, [API_URL]);
 
   useEffect(() => {
     if (drawerOpen) {
@@ -76,7 +138,14 @@ export function Report() {
   ) => {
     const empty = !hasReportData(data);
     const isActiveTab = tabToBenchmark(selectedTab) === benchmark;
-    const showOverlay = empty && isActiveTab && showEmptyHint;
+    const hasAnyReports = reportAvailability[benchmark] === true;
+    const reportsUnknown = reportAvailability[benchmark] == null;
+    const showOverlay =
+      empty &&
+      isActiveTab &&
+      showEmptyHint &&
+      !hasAnyReports &&
+      !reportsUnknown;
 
     return (
       <div className="relative">
@@ -89,12 +158,18 @@ export function Report() {
         >
           <BugTable
             benchmark={benchmark}
-            openDrawer={drawerOpen === true && drawerSelectedBenchmark === benchmark}
+            openDrawer={
+              drawerOpen === true && drawerSelectedBenchmark === benchmark
+            }
             onOpenChange={(v) => setDrawerOpen(v)}
             onDataUpdate={setData}
             onReportPathsUpdate={setPaths}
           />
-          <UpSetPlot benchmark={benchmark} tableData={data} reportPaths={reportPaths} />
+          <UpSetPlot
+            benchmark={benchmark}
+            tableData={data}
+            reportPaths={reportPaths}
+          />
         </div>
 
         {showOverlay ? (
@@ -122,7 +197,9 @@ export function Report() {
   return (
     <section>
       <div className="mb-2 flex items-center justify-between space-y-2">
-        <h1 className="text-2xl font-bold tracking-tight">FirmReBugger Report</h1>
+        <h1 className="text-2xl font-bold tracking-tight">
+          FirmReBugger Report
+        </h1>
       </div>
 
       <Tabs
