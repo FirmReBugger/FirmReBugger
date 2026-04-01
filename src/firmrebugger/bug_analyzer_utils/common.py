@@ -2,6 +2,7 @@ import io
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -306,11 +307,24 @@ def get_bench_info(result_dir):
 # Run seed to get time and reached/triggered info
 def run_command(command, seed_path, time_val, Crash, timeout=None):
     start = time.time()
+    proc = subprocess.Popen(
+        command,
+        shell=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
     try:
-        result = subprocess.run(
-            command, shell=True, text=True, capture_output=True, timeout=timeout
-        )
+        stdout, stderr = proc.communicate(timeout=timeout)
+        returncode = proc.returncode
     except subprocess.TimeoutExpired:
+        # Kill the entire process group so the child
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        proc.communicate()
         elapsed = time.time() - start
         print(
             f"[run_command] Timeout ({timeout}s) exceeded for seed: {seed_path} — skipping."
@@ -324,9 +338,9 @@ def run_command(command, seed_path, time_val, Crash, timeout=None):
     errors = []
     triggered_found = False
 
-    # output = result.stdout + "\n" + result.stderr
+    # output = stdout + "\n" + stderr
     # print(output)
-    for line in result.stdout.splitlines():
+    for line in stdout.splitlines():
         if not triggered_found and "REACHED:" in line:
             bug_id = line.split(":", 1)[1].strip()
             if bug_id not in bugs_reached:
@@ -339,11 +353,11 @@ def run_command(command, seed_path, time_val, Crash, timeout=None):
         if Crash:
             if "SYSCTL_AIRCR" in line:
                 errors.append(seed_path)
-            if "input file not read until end" in result.stderr:
+            if "input file not read until end" in stderr:
                 # print(f"Warning: {seed_path} was not read until the end.")
                 errors.append(seed_path)
 
-    combined_output = f"{result.stdout or ''}\n{result.stderr or ''}"
+    combined_output = f"{stdout or ''}\n{stderr or ''}"
     combined_lower = combined_output.lower()
     has_frb_config_init = "firmrebugger config" in combined_lower
     has_c_parse_error = (
@@ -367,7 +381,7 @@ def run_command(command, seed_path, time_val, Crash, timeout=None):
         output_tail = "\n".join(combined_output.splitlines()[-30:])
         raise RuntimeError(
             "Triaging replay failed "
-            f"(seed: {seed_path}, exit code: {result.returncode}).\n"
+            f"(seed: {seed_path}, exit code: {returncode}).\n"
             f"output (tail):\n{output_tail}"
         )
 
