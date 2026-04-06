@@ -51,10 +51,10 @@ def count_heatmap_cell(count, max_count, time_str, bold=False):
     """Continuously interpolates RGB across Greens_3 (lighter max) based on count/max_count ratio.
     All tones pass WCAG AA with black text."""
     stops = [
-        (255, 255, 255),  # white       (0 hits)
-        (220, 240, 216),  # #dcf0d8    off-white tinted green
-        (161, 217, 155),  # #a1d99b    white-green
-        (116, 196, 118),  # #74c476    green (max)
+        (255, 255, 255),  # #ffffff    white             (0 hits)
+        (255, 255, 178),  # #ffffb2    pale yellow
+        (217, 240, 163),  # #d9f0a3    light yellow-green
+        (120, 198, 121),  # #78c679    light-medium green (max)
     ]
     ratio = (count / max_count) if max_count > 0 and count > 0 else 0.0
     t = ratio * (len(stops) - 1)
@@ -310,15 +310,15 @@ def reshape_and_convert_to_latex(
 
     gradient_boxes = (
         r"{\setlength{\fboxsep}{4pt}"
-        + r"\colorbox[HTML]{FFFFFF}{\phantom{M}}"
-        + r"\colorbox[HTML]{F2F9F0}{\phantom{M}}"
-        + r"\colorbox[HTML]{E5F4E2}{\phantom{M}}"
-        + r"\colorbox[HTML]{D5EDD0}{\phantom{M}}"
-        + r"\colorbox[HTML]{BFE5BA}{\phantom{M}}"
-        + r"\colorbox[HTML]{A8DCA3}{\phantom{M}}"
-        + r"\colorbox[HTML]{96D492}{\phantom{M}}"
-        + r"\colorbox[HTML]{85CC84}{\phantom{M}}"
-        + r"\colorbox[HTML]{74C476}{\phantom{M}}"
+        + r"\colorbox[HTML]{FFFFE5}{\phantom{M}}"
+        + r"\colorbox[HTML]{FFFFCC}{\phantom{M}}"
+        + r"\colorbox[HTML]{FFFFB2}{\phantom{M}}"
+        + r"\colorbox[HTML]{F0F7C2}{\phantom{M}}"
+        + r"\colorbox[HTML]{E4F4B3}{\phantom{M}}"
+        + r"\colorbox[HTML]{D9F0A3}{\phantom{M}}"
+        + r"\colorbox[HTML]{BEEAA0}{\phantom{M}}"
+        + r"\colorbox[HTML]{9FE09E}{\phantom{M}}"
+        + r"\colorbox[HTML]{78C679}{\phantom{M}}"
         + "}"
     )
     heatmap_legend = (

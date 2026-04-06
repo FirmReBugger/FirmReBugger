@@ -468,12 +468,12 @@ export function BugTable({
     );
   };
 
-  // Green heatmap: white → off-white-green → white-green → green (#74c476 max)
+  // YlGn heatmap: white → pale yellow → light yellow-green → light green (all readable with black text)
   const greenStops: [number, number, number][] = [
-    [255, 255, 255], // white        (0 hits)
-    [220, 240, 216], // #dcf0d8  off-white tinted green
-    [161, 217, 155], // #a1d99b  white-green
-    [116, 196, 118], // #74c476  green (max)
+    [255, 255, 255], // #ffffff  white        (0 hits)
+    [255, 255, 178], // #ffffb2  pale yellow
+    [217, 240, 163], // #d9f0a3  light yellow-green
+    [120, 198, 121], // #78c679  light-medium green (all runs)
   ];
 
   const heatmapStyle = (count: number, maxCount: number): React.CSSProperties => {
@@ -747,7 +747,7 @@ export function BugTable({
                 <span className="text-[10px] text-muted-foreground/70 mr-1">0</span>
                 <div
                   className="h-4 w-32 ring-1 ring-inset ring-black/10 flex-shrink-0 rounded-sm"
-                  style={{ background: "linear-gradient(to right, #ffffff, #dcf0d8, #a1d99b, #74c476)" }}
+                  style={{ background: "linear-gradient(to right, #ffffff, #ffffb2, #d9f0a3, #78c679)" }}
                 />
                 <span className="text-[10px] text-muted-foreground/70 ml-1">all runs</span>
               </div>
