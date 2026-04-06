@@ -285,7 +285,7 @@ export function KaplanMeier({
               disabled={exporting || selectedSeries.length === 0}
             >
               <Download className="h-4 w-4 mr-2" />
-              {exporting ? 'Exporting...' : 'Export'}
+              {exporting ? 'Exporting...' : 'Export View'}
             </Button>
           </div>
 

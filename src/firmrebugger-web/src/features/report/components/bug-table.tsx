@@ -423,10 +423,9 @@ export function BugTable({
     );
   }
 
-  const formatValue = (val: number | null, hasSuccess: boolean = false) => {
+  const formatValue = (val: number | null) => {
     if (val === null) return "✗";
-    if (!isFinite(val)) return "infinite";
-    console.log("Has Success:", hasSuccess);
+    if (!isFinite(val)) return "✗";
 
     const totalSeconds = Math.floor(val);
     const hours = Math.floor(totalSeconds / 3600);
@@ -440,13 +439,6 @@ export function BugTable({
     } else {
       return `${seconds}s`;
     }
-  };
-
-  const hasAnySuccess = (
-    runs: BugEntry[],
-    metric: "reached" | "triggered" | "detected",
-  ) => {
-    return runs.some((run) => run[metric] !== null);
   };
 
   const getBestValues = (bug: BugRow) => {
@@ -476,6 +468,25 @@ export function BugTable({
     );
   };
 
+  // Green heatmap: white → off-white-green → white-green → green (#74c476 max)
+  const greenStops: [number, number, number][] = [
+    [255, 255, 255], // white        (0 hits)
+    [220, 240, 216], // #dcf0d8  off-white tinted green
+    [161, 217, 155], // #a1d99b  white-green
+    [116, 196, 118], // #74c476  green (max)
+  ];
+
+  const heatmapStyle = (count: number, maxCount: number): React.CSSProperties => {
+    const ratio = maxCount > 0 && count > 0 ? count / maxCount : 0;
+    const t = ratio * (greenStops.length - 1);
+    const lo = Math.min(Math.floor(t), greenStops.length - 2);
+    const f = t - lo;
+    const r = Math.round(greenStops[lo][0] + f * (greenStops[lo + 1][0] - greenStops[lo][0]));
+    const g = Math.round(greenStops[lo][1] + f * (greenStops[lo + 1][1] - greenStops[lo][1]));
+    const b = Math.round(greenStops[lo][2] + f * (greenStops[lo + 1][2] - greenStops[lo][2]));
+    return { backgroundColor: `rgb(${r},${g},${b})`, color: "#111827" };
+  };
+
   return (
     <>
       <Card>
@@ -494,7 +505,7 @@ export function BugTable({
               disabled={exportLoading}
             >
               <Download className="h-4 w-4 mr-2" />
-              {exportLoading ? "Preparing..." : "Export"}
+              {exportLoading ? "Exporting..." : "Export TeX"}
             </Button>
           </div>
         </CardHeader>
@@ -536,7 +547,7 @@ export function BugTable({
                           {isExpanded && (
                             <>
                               <tr className="border-b bg-muted/50">
-                                <th className="h-10 px-3 text-left align-middle font-bold text-muted-foreground w-24">
+                                <th className="h-10 px-3 text-left align-middle font-bold text-muted-foreground w-24" rowSpan={2}>
                                   Bug ID
                                 </th>
                                 {fuzzers.map((fuzzer) => (
@@ -550,7 +561,6 @@ export function BugTable({
                                 ))}
                               </tr>
                               <tr className="border-b bg-muted/50">
-                                <th className="h-8 px-3" />
                                 {fuzzers.map((fuzzer) => (
                                   <Fragment key={fuzzer}>
                                     <th className="h-8 px-1.5 text-center align-middle text-xs font-semibold text-muted-foreground border-l w-16">R</th>
@@ -562,7 +572,9 @@ export function BugTable({
                             </>
                           )}
                           {isExpanded &&
-                            binaryGroup.bugs.map((bug) => {
+                            [...binaryGroup.bugs]
+                              .sort((a, b) => a.bugId.localeCompare(b.bugId))
+                              .map((bug) => {
                               const bestValues = getBestValues(bug);
 
                               return (
@@ -570,9 +582,10 @@ export function BugTable({
                                   key={`${binaryGroup.binary}-${bug.bugId}`}
                                   className="border-b transition-colors hover:bg-muted/30"
                                 >
-                                  <td className="px-3 py-2 align-middle text-muted-foreground text-sm pl-6">
+                                  <td className="px-3 py-2 align-middle text-sm pl-6">
                                     <button
-                                      className="text-left underline underline-offset-1 text-sm hover:text-primary"
+                                      className="text-left underline underline-offset-1 text-sm font-medium hover:opacity-75"
+                                      style={{ color: bug.bugId.startsWith("FP_") ? "#c46464" : "#4e79a7" }}
                                       onClick={(e) => {
                                         e.stopPropagation();
                                         const runsByFuzzer: Record<
@@ -620,110 +633,59 @@ export function BugTable({
                                         bestValues.bestDetected,
                                       );
 
-                                    const hasReached =
-                                      stats &&
-                                      hasAnySuccess(stats.runs, "reached");
-                                    const hasTriggered =
-                                      stats &&
-                                      hasAnySuccess(stats.runs, "triggered");
-                                    const hasDetected =
-                                      stats &&
-                                      hasAnySuccess(stats.runs, "detected");
+                                    const rCount = stats ? stats.runs.filter((ru) => ru.reached !== null).length : 0;
+                                    const tCount = stats ? stats.runs.filter((ru) => ru.triggered !== null).length : 0;
+                                    const dCount = stats ? stats.runs.filter((ru) => ru.detected !== null).length : 0;
 
                                     return (
                                       <Fragment key={fuzzer}>
                                         <td
-                                          className={`px-1.5 py-2 text-center align-middle border-l text-xs cursor-pointer transition-colors ${
-                                            isReachedBest
-                                              ? "bg-green-100 dark:bg-green-900/30 font-semibold text-green-900 dark:text-green-300"
-                                              : "hover:bg-muted/50"
-                                          } ${stats?.meanReached === null && hasReached ? "text-yellow-600 dark:text-yellow-400 font-semibold" : ""}`}
+                                          className={`px-1.5 py-2 text-center align-middle border-l text-xs cursor-pointer transition-opacity hover:opacity-80 ${isReachedBest ? "font-bold" : ""}`}
+                                          style={stats ? heatmapStyle(rCount, stats.runs.length) : undefined}
                                           onMouseEnter={(e) =>
                                             tooltipEnabled &&
                                             stats &&
                                             stats.runs.length > 0 &&
-                                            showTooltip(
-                                              e,
-                                              stats.runs,
-                                              "reached",
-                                            )
+                                            showTooltip(e, stats.runs, "reached")
                                           }
                                           onMouseLeave={() =>
                                             tooltipEnabled &&
-                                            setTooltip((prev) => ({
-                                              ...prev,
-                                              visible: false,
-                                            }))
+                                            setTooltip((prev) => ({ ...prev, visible: false }))
                                           }
                                         >
-                                          {stats
-                                            ? formatValue(
-                                                stats.meanReached,
-                                                hasReached,
-                                              )
-                                            : "✗"}
+                                          {stats ? (stats.meanReached !== null ? formatValue(stats.meanReached) : "✗") : "✗"}
                                         </td>
                                         <td
-                                          className={`px-1.5 py-2 text-center align-middle text-xs cursor-pointer transition-colors ${
-                                            isTriggeredBest
-                                              ? "bg-green-100 dark:bg-green-900/30 font-semibold text-green-900 dark:text-green-300"
-                                              : "hover:bg-muted/50"
-                                          } ${stats?.meanTriggered === null && hasTriggered ? "text-yellow-600 dark:text-yellow-400 font-semibold" : ""}`}
+                                          className={`px-1.5 py-2 text-center align-middle text-xs cursor-pointer transition-opacity hover:opacity-80 ${isTriggeredBest ? "font-bold" : ""}`}
+                                          style={stats ? heatmapStyle(tCount, stats.runs.length) : undefined}
                                           onMouseEnter={(e) =>
                                             tooltipEnabled &&
                                             stats &&
                                             stats.runs.length > 0 &&
-                                            showTooltip(
-                                              e,
-                                              stats.runs,
-                                              "triggered",
-                                            )
+                                            showTooltip(e, stats.runs, "triggered")
                                           }
                                           onMouseLeave={() =>
                                             tooltipEnabled &&
-                                            setTooltip((prev) => ({
-                                              ...prev,
-                                              visible: false,
-                                            }))
+                                            setTooltip((prev) => ({ ...prev, visible: false }))
                                           }
                                         >
-                                          {stats
-                                            ? formatValue(
-                                                stats.meanTriggered,
-                                                hasTriggered,
-                                              )
-                                            : "✗"}
+                                          {stats ? (stats.meanTriggered !== null ? formatValue(stats.meanTriggered) : "✗") : "✗"}
                                         </td>
                                         <td
-                                          className={`px-1.5 py-2 text-center align-middle text-xs cursor-pointer transition-colors ${
-                                            isDetectedBest
-                                              ? "bg-green-100 dark:bg-green-900/30 font-semibold text-green-900 dark:text-green-300"
-                                              : "hover:bg-muted/50"
-                                          } ${stats?.meanDetected === null && hasDetected ? "text-yellow-600 dark:text-yellow-400 font-semibold" : ""}`}
+                                          className={`px-1.5 py-2 text-center align-middle text-xs cursor-pointer transition-opacity hover:opacity-80 ${isDetectedBest ? "font-bold" : ""}`}
+                                          style={stats ? heatmapStyle(dCount, stats.runs.length) : undefined}
                                           onMouseEnter={(e) =>
                                             tooltipEnabled &&
                                             stats &&
                                             stats.runs.length > 0 &&
-                                            showTooltip(
-                                              e,
-                                              stats.runs,
-                                              "detected",
-                                            )
+                                            showTooltip(e, stats.runs, "detected")
                                           }
                                           onMouseLeave={() =>
                                             tooltipEnabled &&
-                                            setTooltip((prev) => ({
-                                              ...prev,
-                                              visible: false,
-                                            }))
+                                            setTooltip((prev) => ({ ...prev, visible: false }))
                                           }
                                         >
-                                          {stats
-                                            ? formatValue(
-                                                stats.meanDetected,
-                                                hasDetected,
-                                              )
-                                            : "✗"}
+                                          {stats ? (stats.meanDetected !== null ? formatValue(stats.meanDetected) : "✗") : "✗"}
                                         </td>
                                       </Fragment>
                                     );
@@ -780,15 +742,18 @@ export function BugTable({
 
           <div className="mt-4 flex flex-col gap-1.5 text-xs text-muted-foreground">
             <div className="flex items-center gap-4 flex-wrap">
-              <div className="flex items-center gap-2">
-                <div className="w-3 h-3 bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700 rounded"></div>
-                <span>Best time for bug</span>
+              <div className="flex items-center gap-1">
+                <span className="text-[10px] font-medium mr-1">Cell colour:</span>
+                <span className="text-[10px] text-muted-foreground/70 mr-1">0</span>
+                <div
+                  className="h-4 w-32 ring-1 ring-inset ring-black/10 flex-shrink-0 rounded-sm"
+                  style={{ background: "linear-gradient(to right, #ffffff, #dcf0d8, #a1d99b, #74c476)" }}
+                />
+                <span className="text-[10px] text-muted-foreground/70 ml-1">all runs</span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="font-semibold text-yellow-600 dark:text-yellow-400">
-                  ✗
-                </span>
-                <span>Success in at least 1 run</span>
+                <span className="font-bold text-foreground">bold</span>
+                <span>Best time for bug</span>
               </div>
               <div className="flex items-center gap-2">
                 <span className="font-semibold">R</span> = Reached

@@ -24,6 +24,7 @@ def summarize_data(json_file):
     data = []
     total_ungrouped_crashes = []
     MAX_TRIAL_TIME = json_data.get("Trial-Time")
+    num_runs = json_data.get("Number-Trials", len(json_data["Campaign"]))
 
     trigger_runs = {}
     reached_runs = {}
@@ -80,6 +81,7 @@ def summarize_data(json_file):
                     "Binary": json_data["Target"],
                     "Fuzzer": json_data["Fuzzer"],
                     "BugID": bug_id,
+                    "NumRuns": num_runs,
                     "triggered_duration": triggered_duration,
                     "triggered_event_observed": triggered_event_observed,
                     "reached_duration": reached_duration,
@@ -97,6 +99,7 @@ def summarize_data(json_file):
                 "Binary",
                 "Fuzzer",
                 "BugID",
+                "NumRuns",
                 "MedianDetectedTime",
                 "ReachedCount",
                 "DetectedCount",
@@ -132,6 +135,10 @@ def summarize_data(json_file):
             "Binary": triggered_medians.index.get_level_values("Binary"),
             "Fuzzer": triggered_medians.index.get_level_values("Fuzzer"),
             "BugID": triggered_medians.index.get_level_values("BugID"),
+            "NumRuns": [
+                df.loc[df["BugID"] == bug_id, "NumRuns"].iloc[0]
+                for bug_id in triggered_medians.index.get_level_values("BugID")
+            ],
             "MedianReachedTime": reached_medians.values,
             "MedianDetectedTime": detected_medians.values,
             "MedianTriggeredTime": triggered_medians.values,

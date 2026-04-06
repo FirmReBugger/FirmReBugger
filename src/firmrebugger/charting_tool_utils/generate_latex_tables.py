@@ -35,14 +35,52 @@ def value_to_color(value, min_value=0, max_value=10):
     )
 
 
+def _safe_float(val):
+    """Return float or None if val is NaN/inf/missing."""
+    import math
+    if val is None:
+        return None
+    try:
+        f = float(val)
+    except (TypeError, ValueError):
+        return None
+    return None if (math.isnan(f) or math.isinf(f)) else f
+
+
+def count_heatmap_cell(count, max_count, time_str, bold=False):
+    """Continuously interpolates RGB across Greens_3 (lighter max) based on count/max_count ratio.
+    All tones pass WCAG AA with black text."""
+    stops = [
+        (255, 255, 255),  # white       (0 hits)
+        (220, 240, 216),  # #dcf0d8    off-white tinted green
+        (161, 217, 155),  # #a1d99b    white-green
+        (116, 196, 118),  # #74c476    green (max)
+    ]
+    ratio = (count / max_count) if max_count > 0 and count > 0 else 0.0
+    t = ratio * (len(stops) - 1)
+    lo = min(int(t), len(stops) - 2)
+    f = t - lo
+    r = int(round(stops[lo][0] + f * (stops[lo + 1][0] - stops[lo][0])))
+    g = int(round(stops[lo][1] + f * (stops[lo + 1][1] - stops[lo][1])))
+    b = int(round(stops[lo][2] + f * (stops[lo + 1][2] - stops[lo][2])))
+    hex_color = f"{r:02X}{g:02X}{b:02X}"
+    if bold:
+        time_str = r"\textbf{" + time_str + "}"
+    return r"\cellcolor[HTML]{" + hex_color + "}" + time_str
+
+
 def minutes_to_hm(minutes):
-    if minutes == "-" or minutes == float("inf"):
-        return r"\missing"
-    if isinstance(minutes, (int, float)):
-        hours, remainder = divmod(int(minutes), 60)
-        minutes = remainder
-        return f"{hours:02}:{minutes:02}"
-    return str(minutes)
+    import math
+    if minutes is None:
+        return None
+    try:
+        f = float(minutes)
+    except (TypeError, ValueError):
+        return None
+    if math.isnan(f) or math.isinf(f):
+        return None
+    h, m = divmod(int(f), 60)
+    return f"{h:02}:{m:02}"
 
 
 def generate_table_pdf(output_report, table_code, table):
@@ -171,11 +209,11 @@ def reshape_and_convert_to_latex(
         ]
     )
 
-    # Second row: Single "Median R | Median T | Hit" under each fuzzer
+    # Second row: R   T   D aligned to individual columns under each fuzzer
+    rtd_group_mid   = r"R & T & D"                        # last fuzzer (no trailing |)
+    rtd_group_sep   = r"R & T & \multicolumn{1}{c|}{D}"   # all other fuzzers (| after D)
     sub_headers = " & ".join(
-        [r"\multicolumn{3}{c|}{{Med. R \textbar{} Med. T \textbar{} Hit}}"]
-        * (len(fuzzers) - 1)
-        + [r"\multicolumn{3}{c}{{Med. R \textbar{} Med. T \textbar{} Hit}}"]
+        [rtd_group_sep] * (len(fuzzers) - 1) + [rtd_group_mid]
     )
 
     column_structure = "l|l" + "|ccc" * len(fuzzers)
@@ -195,63 +233,62 @@ def reshape_and_convert_to_latex(
                 continue
             row_data = []
 
-            valid_reached = bug_group[bug_group["MedianReachedTime"] != "-"][
-                "MedianReachedTime"
-            ]
-            valid_triggered = bug_group[bug_group["MedianTriggeredTime"] != "-"][
-                "MedianTriggeredTime"
-            ]
+            def fmt_metric(time_val, count):
+                """Return HH:MM when median is finite, -- otherwise.
+                Colour is driven separately by count regardless."""
+                hm = minutes_to_hm(time_val)
+                return hm if hm is not None else r"\missing"
 
-            min_reached = float("inf")
-            min_triggered = float("inf")
+            valid_reached   = [_safe_float(v) for v in bug_group["MedianReachedTime"]   if _safe_float(v) is not None]
+            valid_triggered = [_safe_float(v) for v in bug_group["MedianTriggeredTime"] if _safe_float(v) is not None]
+            valid_detected  = [_safe_float(v) for v in bug_group["MedianDetectedTime"]  if _safe_float(v) is not None]
 
-            if not valid_reached.empty:
-                min_reached = float(valid_reached.min())
-            if not valid_triggered.empty:
-                min_triggered = float(valid_triggered.min())
+            min_reached   = min(valid_reached)   if valid_reached   else None
+            min_triggered = min(valid_triggered) if valid_triggered else None
+            min_detected  = min(valid_detected)  if valid_detected  else None
+
+            def safe_int_col(series):
+                cleaned = series.dropna()
+                return int(cleaned.max()) if not cleaned.empty else 0
+
+            max_r_count = safe_int_col(bug_group["ReachedCount"])
+            max_t_count = safe_int_col(bug_group["TriggeredCount"])
+            max_d_count = safe_int_col(bug_group["DetectedCount"])
 
             for fuzzer in fuzzers:
                 fuzzer_row = bug_group[bug_group["Fuzzer"] == fuzzer]
                 if not fuzzer_row.empty:
-                    reached, triggered, count = fuzzer_row.iloc[0][
-                        ["MedianReachedTime", "MedianTriggeredTime", "TriggeredCount"]
-                    ]
+                    row0 = fuzzer_row.iloc[0]
+                    r_t = _safe_float(row0["MedianReachedTime"])
+                    t_t = _safe_float(row0["MedianTriggeredTime"])
+                    d_t = _safe_float(row0["MedianDetectedTime"])
+                    r_count = int(row0["ReachedCount"])   if _safe_float(row0["ReachedCount"])   is not None else 0
+                    t_count = int(row0["TriggeredCount"]) if _safe_float(row0["TriggeredCount"]) is not None else 0
+                    d_count = int(row0["DetectedCount"])  if _safe_float(row0["DetectedCount"])  is not None else 0
+                    num_runs = int(row0["NumRuns"]) if _safe_float(row0["NumRuns"]) is not None else max_r_count
 
-                    reached_hm = (
-                        minutes_to_hm(float(reached)) if reached != "-" else r"\missing"
-                    )
-                    triggered_hm = (
-                        minutes_to_hm(float(triggered))
-                        if triggered != "-"
-                        else r"\missing"
-                    )
+                    reached_str   = fmt_metric(r_t, r_count)
+                    triggered_str = fmt_metric(t_t, t_count)
+                    detected_str  = fmt_metric(d_t, d_count)
 
-                    if (
-                        reached != "-"
-                        and float(reached) == min_reached
-                        and min_reached != float("inf")
-                    ):
-                        reached_hm = r"\textbf{" + reached_hm + "}"
-                    if (
-                        triggered != "-"
-                        and float(triggered) == min_triggered
-                        and min_triggered != float("inf")
-                    ):
-                        triggered_hm = r"\textbf{" + triggered_hm + "}"
+                    # Bold best (lowest) time across fuzzers for this bug
+                    if r_t is not None and min_reached is not None and r_t == min_reached:
+                        reached_str   = r"\textbf{" + reached_str   + "}"
+                    if t_t is not None and min_triggered is not None and t_t == min_triggered:
+                        triggered_str = r"\textbf{" + triggered_str + "}"
+                    if d_t is not None and min_detected is not None and d_t == min_detected:
+                        detected_str  = r"\textbf{" + detected_str  + "}"
 
-                    if reached_hm == str(float("inf")):
-                        reached_hm = r"\missing"
-                    if triggered_hm == str(float("inf")):
-                        triggered_hm = r"\missing"
-
-                    hit_color = value_to_color(count)
-                    count = hit_color
+                    reached_cell   = count_heatmap_cell(r_count, num_runs, reached_str)
+                    triggered_cell = count_heatmap_cell(t_count, num_runs, triggered_str)
+                    detected_cell  = count_heatmap_cell(d_count, num_runs, detected_str)
 
                 else:
-                    reached_hm, triggered_hm = r"\missing", r"\missing"
-                    count = r"\cellcolor[HTML]{F5F5F5}N/A"
+                    reached_cell   = r"\cellcolor[HTML]{F5F5F5}" + r"\missing"
+                    triggered_cell = r"\cellcolor[HTML]{F5F5F5}" + r"\missing"
+                    detected_cell  = r"\cellcolor[HTML]{F5F5F5}" + r"\missing"
 
-                row_data.extend([str(reached_hm), str(triggered_hm), str(count)])
+                row_data.extend([str(reached_cell), str(triggered_cell), str(detected_cell)])
 
             bug_id_cell = (
                 r"\cellcolor{gray!20} " + str(bug_id)
@@ -271,11 +308,37 @@ def reshape_and_convert_to_latex(
 
         first_row = True
 
+    gradient_boxes = (
+        r"{\setlength{\fboxsep}{4pt}"
+        + r"\colorbox[HTML]{FFFFFF}{\phantom{M}}"
+        + r"\colorbox[HTML]{F2F9F0}{\phantom{M}}"
+        + r"\colorbox[HTML]{E5F4E2}{\phantom{M}}"
+        + r"\colorbox[HTML]{D5EDD0}{\phantom{M}}"
+        + r"\colorbox[HTML]{BFE5BA}{\phantom{M}}"
+        + r"\colorbox[HTML]{A8DCA3}{\phantom{M}}"
+        + r"\colorbox[HTML]{96D492}{\phantom{M}}"
+        + r"\colorbox[HTML]{85CC84}{\phantom{M}}"
+        + r"\colorbox[HTML]{74C476}{\phantom{M}}"
+        + "}"
+    )
+    heatmap_legend = (
+        r"\begin{center}"
+        + r"{\scriptsize\textbf{Cell colour (R\,/\,T\,/\,D):}\quad{}0 hits~"
+        + gradient_boxes
+        + r"~all runs hit.\qquad{}"
+        + r"\textbf{R}\,=\,Reached\enspace{}"
+        + r"\textbf{T}\,=\,Triggered\enspace{}"
+        + r"\textbf{D}\,=\,Detected}"
+        + r"\end{center}"
+    )
+
     latex_table += (
         "\n"
         + r"\end{tabular}"
         + "\n"
         + r"}"
+        + "\n"
+        + heatmap_legend
         + "\n"
         + rf"\caption{{{caption_text}}}"
         + "\n"

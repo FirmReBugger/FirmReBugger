@@ -606,12 +606,24 @@ export function TableMutateDrawer({
               name="fuzzer"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel className="flex items-center gap-2">
-                    Fuzzers
-                    <Badge variant="secondary" className="text-xs">
-                      {field.value?.length || 0} selected
-                    </Badge>
-                  </FormLabel>
+                  <div className="flex items-center justify-between">
+                    <FormLabel className="flex items-center gap-2">
+                      Fuzzers
+                      <Badge variant="secondary" className="text-xs">
+                        {field.value?.length || 0} selected
+                      </Badge>
+                    </FormLabel>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="text-xs h-7 px-2 ml-2"
+                      onClick={() => field.onChange([])}
+                      disabled={!field.value?.length}
+                    >
+                      Clear All
+                    </Button>
+                  </div>
                   <FormDescription className="text-xs">
                     Select one or more fuzzers (click to select multiple)
                   </FormDescription>

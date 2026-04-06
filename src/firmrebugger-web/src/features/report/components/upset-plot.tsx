@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { UpSetJS } from "@upsetjs/react";
 import { generateCombinations } from "@upsetjs/model";
-import { ChevronLeft, ChevronRight, Download, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Download, MousePointerClick, X } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -418,6 +418,43 @@ export function UpSetPlot({
       svgClone.setAttribute("width", String(width));
       svgClone.setAttribute("height", String(height));
 
+      // Inject TP/FP legend into top-left whitespace of the SVG for export
+      const legendW = 96;
+      const legendH = 26;
+      const legendX = 8;
+      const legendY = 8;
+      const ns = "http://www.w3.org/2000/svg";
+      const legendG = document.createElementNS(ns, "g");
+      const bg = document.createElementNS(ns, "rect");
+      bg.setAttribute("x", String(legendX)); bg.setAttribute("y", String(legendY));
+      bg.setAttribute("width", String(legendW)); bg.setAttribute("height", String(legendH));
+      bg.setAttribute("rx", "4"); bg.setAttribute("fill", "white");
+      bg.setAttribute("stroke", "#d1d5db"); bg.setAttribute("stroke-width", "1");
+      legendG.appendChild(bg);
+      const tpSwatch = document.createElementNS(ns, "rect");
+      tpSwatch.setAttribute("x", String(legendX + 6)); tpSwatch.setAttribute("y", String(legendY + 8));
+      tpSwatch.setAttribute("width", "10"); tpSwatch.setAttribute("height", "10");
+      tpSwatch.setAttribute("rx", "2"); tpSwatch.setAttribute("fill", "#4e79a7");
+      legendG.appendChild(tpSwatch);
+      const tpLabel = document.createElementNS(ns, "text");
+      tpLabel.setAttribute("x", String(legendX + 20)); tpLabel.setAttribute("y", String(legendY + 17));
+      tpLabel.setAttribute("font-size", "11"); tpLabel.setAttribute("fill", "#4e79a7");
+      tpLabel.setAttribute("font-family", "sans-serif");
+      tpLabel.textContent = "TP";
+      legendG.appendChild(tpLabel);
+      const fpSwatch = document.createElementNS(ns, "rect");
+      fpSwatch.setAttribute("x", String(legendX + 52)); fpSwatch.setAttribute("y", String(legendY + 8));
+      fpSwatch.setAttribute("width", "10"); fpSwatch.setAttribute("height", "10");
+      fpSwatch.setAttribute("rx", "2"); fpSwatch.setAttribute("fill", "#c46464");
+      legendG.appendChild(fpSwatch);
+      const fpLabel = document.createElementNS(ns, "text");
+      fpLabel.setAttribute("x", String(legendX + 66)); fpLabel.setAttribute("y", String(legendY + 17));
+      fpLabel.setAttribute("font-size", "11"); fpLabel.setAttribute("fill", "#c46464");
+      fpLabel.setAttribute("font-family", "sans-serif");
+      fpLabel.textContent = "FP";
+      legendG.appendChild(fpLabel);
+      svgClone.appendChild(legendG);
+
       const svgData = new XMLSerializer().serializeToString(svgClone);
       const svgBlob = new Blob([svgData], {
         type: "image/svg+xml;charset=utf-8",
@@ -487,7 +524,7 @@ export function UpSetPlot({
             disabled={exportLoading}
           >
             <Download className="h-4 w-4 mr-2" />
-            {exportLoading ? "Exporting..." : "Export"}
+            {exportLoading ? "Exporting..." : "Export View"}
           </Button>
         </div>
       </CardHeader>
@@ -591,6 +628,17 @@ export function UpSetPlot({
                   tooltips={false}
                 />
               </div>
+              {/* TP / FP colour legend — top-left whitespace */}
+              <div className="absolute top-3 left-3 flex items-center gap-3 bg-background/80 backdrop-blur-sm border border-border/50 rounded px-2.5 py-1.5 text-[11px] pointer-events-none select-none">
+                <span className="flex items-center gap-1.5">
+                  <span className="inline-block w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: "#4e79a7" }} />
+                  <span className="text-muted-foreground">TP</span>
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="inline-block w-2.5 h-2.5 rounded-sm shrink-0" style={{ backgroundColor: "#c46464" }} />
+                  <span className="text-muted-foreground">FP</span>
+                </span>
+              </div>
             </div>
           ) : (
             <div className="text-sm text-muted-foreground p-6 text-center">
@@ -626,8 +674,8 @@ export function UpSetPlot({
               {panelData && (
                 <span className="text-[10px] text-muted-foreground">
                   &middot;&nbsp;{selectedIntersectionBugs.tp.length + selectedIntersectionBugs.fp.length} total
-                  &nbsp;&middot;&nbsp;<span className="text-green-600 dark:text-green-400">{selectedIntersectionBugs.tp.length} TP</span>
-                  &nbsp;&middot;&nbsp;<span className="text-red-500">{selectedIntersectionBugs.fp.length} FP</span>
+                  &nbsp;&middot;&nbsp;<span style={{ color: "#4e79a7" }}>{selectedIntersectionBugs.tp.length} TP</span>
+                  &nbsp;&middot;&nbsp;<span style={{ color: "#c46464" }}>{selectedIntersectionBugs.fp.length} FP</span>
                 </span>
               )}
             </div>
@@ -659,8 +707,8 @@ export function UpSetPlot({
                     <thead>
                       <tr className="border-b border-border">
                         <th className="text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide pb-1.5 pr-3 w-[130px]">Fuzzer</th>
-                        <th className="text-left text-xs font-semibold text-green-600 dark:text-green-400 uppercase tracking-wide pb-1.5 pr-2">True Positives</th>
-                        <th className="text-left text-xs font-semibold text-red-500 uppercase tracking-wide pb-1.5">False Positives</th>
+                        <th className="text-left text-xs font-semibold uppercase tracking-wide pb-1.5 pr-2" style={{ color: "#4e79a7" }}>True Positives</th>
+                        <th className="text-left text-xs font-semibold uppercase tracking-wide pb-1.5" style={{ color: "#c46464" }}>False Positives</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -683,7 +731,7 @@ export function UpSetPlot({
                               <div className="flex flex-wrap gap-0.5">
                                 {tpBugs.length > 0
                                   ? tpBugs.map((b) => (
-                                      <span key={b} className="font-mono text-xs px-1 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">{b}</span>
+                                      <span key={b} className="font-mono text-xs px-1 py-0.5 rounded" style={{ backgroundColor: "rgba(78, 121, 167, 0.15)", color: "#4e79a7" }}>{b}</span>
                                     ))
                                   : <span className="text-sm text-muted-foreground">—</span>
                                 }
@@ -693,7 +741,7 @@ export function UpSetPlot({
                               <div className="flex flex-wrap gap-0.5">
                                 {fpBugs.length > 0
                                   ? fpBugs.map((b) => (
-                                      <span key={b} className="font-mono text-xs px-1 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400">{b}</span>
+                                      <span key={b} className="font-mono text-xs px-1 py-0.5 rounded" style={{ backgroundColor: "rgba(196, 100, 100, 0.15)", color: "#c46464" }}>{b}</span>
                                     ))
                                   : <span className="text-sm text-muted-foreground">—</span>
                                 }
@@ -714,10 +762,10 @@ export function UpSetPlot({
                 <table className="w-full border-collapse">
                   <thead>
                     <tr className="border-b border-border">
-                      <th className="text-left text-xs font-semibold text-green-600 dark:text-green-400 uppercase tracking-wide pb-1.5 pr-2">
+                      <th className="text-left text-xs font-semibold uppercase tracking-wide pb-1.5 pr-2" style={{ color: "#4e79a7" }}>
                         True Positives ({selectedIntersectionBugs.tp.length})
                       </th>
-                      <th className="text-left text-xs font-semibold text-red-500 uppercase tracking-wide pb-1.5">
+                      <th className="text-left text-xs font-semibold uppercase tracking-wide pb-1.5" style={{ color: "#c46464" }}>
                         False Positives ({selectedIntersectionBugs.fp.length})
                       </th>
                     </tr>
@@ -728,7 +776,7 @@ export function UpSetPlot({
                         {selectedIntersectionBugs.tp.length > 0 ? (
                           <div className="flex flex-wrap gap-0.5">
                             {selectedIntersectionBugs.tp.map((b) => (
-                              <span key={`tp-${b}`} className="font-mono text-xs px-1 py-0.5 rounded bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400">{b}</span>
+                              <span key={`tp-${b}`} className="font-mono text-xs px-1 py-0.5 rounded" style={{ backgroundColor: "rgba(78, 121, 167, 0.15)", color: "#4e79a7" }}>{b}</span>
                             ))}
                           </div>
                         ) : <span className="text-sm text-muted-foreground">—</span>}
@@ -737,7 +785,7 @@ export function UpSetPlot({
                         {selectedIntersectionBugs.fp.length > 0 ? (
                           <div className="flex flex-wrap gap-0.5">
                             {selectedIntersectionBugs.fp.map((b) => (
-                              <span key={`fp-${b}`} className="font-mono text-xs px-1 py-0.5 rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400">{b}</span>
+                              <span key={`fp-${b}`} className="font-mono text-xs px-1 py-0.5 rounded" style={{ backgroundColor: "rgba(196, 100, 100, 0.15)", color: "#c46464" }}>{b}</span>
                             ))}
                           </div>
                         ) : <span className="text-sm text-muted-foreground">—</span>}
@@ -750,10 +798,13 @@ export function UpSetPlot({
           </div>
 
           {/* Footer hint */}
-          <div className="mt-2 text-[10px] text-muted-foreground">
-            {panelData
-              ? "Click outside to dismiss · or click another intersection or fuzzer bar."
-              : "Click an intersection for specifics · click a fuzzer bar to filter by fuzzer."}
+          <div className="mt-2 text-[10px] text-muted-foreground flex items-center gap-1">
+            <MousePointerClick className="h-3 w-3 shrink-0" />
+            <span>
+              {panelData
+                ? "Click outside to dismiss · or click another intersection or fuzzer bar."
+                : "Click an intersection for specifics · click a fuzzer bar to filter by fuzzer."}
+            </span>
           </div>
         </div>
 
