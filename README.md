@@ -59,7 +59,7 @@ uv run frb build
 # If a fuzzer fails to build, retry building it individually.
 ```
 
-### Workflow Web Application (Recommended)
+### Starting the Web Application (Recommended)
 It is recommneded to run FirmReBugger through the webapp
 ```bash
 # Run the webapp
@@ -84,15 +84,15 @@ npm run build
 
 ![alt text](job_manager.png)
 
-#### Recommended Workflow
+### Recommended Workflow
 
-1. Launch the web application by following the instructions provided above.
+1. Launch the web application by following the instructions provided above. e.g. `uv run frb app`
 
 2. Navigate to the **Job Manager** tab to configure and schedule fuzzing jobs.
 
 3. If auto-triaging is enabled, the backend scheduler will automatically queue triaging jobs once fuzzing completes. Otherwise, you can manually start triaging from the **Finished Jobs** section.
 
-4. Open the **Report** tab to analyze results and visualize the outcomes.
+4. Once triaging jobs are completed, go to the **Report** tab to configure, analyze and visualize the outcomes.
 
 ### Workflow CLI
 
