@@ -10,6 +10,13 @@ import time
 import yaml
 
 
+def get_available_cpu_count():
+    try:
+        return len(os.sched_getaffinity(0))
+    except AttributeError:
+        return os.cpu_count() or 1
+
+
 def extract_bug_ids(file_path):
     pattern = re.compile(r'report_detected_triggered\("([^"]+)"\);')
     bug_ids = set()

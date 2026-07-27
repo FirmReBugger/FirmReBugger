@@ -7,6 +7,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from firmrebugger.bug_analyzer_utils.common import (
+    get_available_cpu_count,
     periodic_printer,
     run_command,
     update_bug_data,
@@ -67,7 +68,7 @@ def gen_fuzzware_stats(RESULT_DIR, fuzzer):
         return
 
     with ThreadPoolExecutor(
-        max_workers=min(len(output_dirs), max(1, os.cpu_count() or 1))
+        max_workers=min(len(output_dirs), get_available_cpu_count())
     ) as executor:
         future_to_output = {
             executor.submit(process_output_dir, output): output
@@ -146,7 +147,7 @@ def fuzzware_analyzer(
     failure_tb = None
     try:
         # Use all visible CPUs, capped by replay items to avoid thread oversubscription.
-        num_workers = max(1, min(len(seed_info), os.cpu_count() or 1))
+        num_workers = max(1, min(len(seed_info), get_available_cpu_count()))
 
         def _process_seed(seed_tuple):
             time_val, seed_path = seed_tuple

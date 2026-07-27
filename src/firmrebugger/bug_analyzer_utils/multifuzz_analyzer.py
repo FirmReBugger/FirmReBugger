@@ -6,6 +6,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from firmrebugger.bug_analyzer_utils.common import (
+    get_available_cpu_count,
     periodic_printer,
     update_bug_data,
 )
@@ -76,7 +77,7 @@ def multifuzzer_analyzer(
         for seed in sorted(os.listdir(working_folder))
         if "README" not in seed
     ]
-    num_workers = max(1, min(len(seeds), os.cpu_count() or 1))
+    num_workers = max(1, min(len(seeds), get_available_cpu_count()))
     config_path = f"{output_path}/../config.yml"
 
     progress = {

@@ -10,6 +10,7 @@ import yaml
 import zstandard
 
 from firmrebugger.bug_analyzer_utils.common import (
+    get_available_cpu_count,
     periodic_printer,
     run_command,
     update_bug_data,
@@ -117,7 +118,7 @@ def hoedur_analyzer(
         working_folder = get_seeds(corpus_path)[1]
     else:
         working_folder = get_seeds(corpus_path)[0]
-    num_workers = max(1, min(len(working_folder), os.cpu_count() or 1))
+    num_workers = max(1, min(len(working_folder), get_available_cpu_count()))
 
     progress = {
         "completed": 0,

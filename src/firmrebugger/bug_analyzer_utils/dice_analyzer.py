@@ -6,6 +6,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from firmrebugger.bug_analyzer_utils.common import (
+    get_available_cpu_count,
     periodic_printer,
     run_command,
     update_bug_data,
@@ -225,7 +226,7 @@ def dice_analyzer(
         for seed in sorted(os.listdir(working_folder))
         if "README" not in seed and os.path.basename(seed).startswith("id")
     ]
-    num_workers = max(1, min(len(seeds), os.cpu_count() or 1))
+    num_workers = max(1, min(len(seeds), get_available_cpu_count()))
 
     progress = {
         "completed": 0,
