@@ -1,6 +1,9 @@
 import curses
+import glob
 import os
 import re
+
+import yaml
 
 
 def parse_fuzzing_time(time_str):
@@ -112,7 +115,83 @@ def menu(title, options):
         )
 
 
-def get_frb_base_dir():
+# Bumped whenever the on-disk folder layout changes in a way old checkouts
+# can't just pick up via `git pull` (i.e. it touches gitignored user data
+# like `outputs/`). Written to `LEGACY_LAYOUT_MARKER` in the base dir once
+# we've confirmed (or migrated) that the layout is current, so we don't
+# re-scan the filesystem on every call.
+CURRENT_LAYOUT_VERSION = "2"
+LEGACY_LAYOUT_MARKER = ".frb_layout_version"
+
+_layout_checked_dirs = set()
+
+
+def detect_legacy_layout(base_dir):
+    """Return pre-restructure paths still present under `base_dir`, if any.
+
+    The old layout nested a binary's ELF under a `binary/` subfolder and its
+    fuzzer configs + fuzzing output under `fuzzers/<fuzzer>/fuzzing_out/`:
+
+        <Benchmark>/<Binary>/binary/<elf>
+        <Benchmark>/<Binary>/fuzzers/<Fuzzer>/fuzzing_out/<run_name>/
+
+    The current layout is flat, with run output living under a top-level
+    `outputs/` tree instead:
+
+        <Benchmark>/<Binary>/<elf>
+        <Benchmark>/<Binary>/<Fuzzer>/
+        outputs/<run_name>/<Benchmark>-<Binary>-<Fuzzer>/
+
+    Used both to gate startup (see `get_frb_base_dir`) and by
+    `frb port-layout`, which migrates whatever this finds.
+    """
+    legacy = []
+    for pattern in ("*/*/binary", "*/*/fuzzers"):
+        for path in glob.glob(os.path.join(base_dir, pattern)):
+            if os.path.isdir(path):
+                legacy.append(os.path.relpath(path, base_dir))
+    return sorted(legacy)
+
+
+def _ensure_layout_is_current(base_dir):
+    if base_dir in _layout_checked_dirs:
+        return
+
+    marker_path = os.path.join(base_dir, LEGACY_LAYOUT_MARKER)
+    try:
+        with open(marker_path) as f:
+            if f.read().strip() == CURRENT_LAYOUT_VERSION:
+                _layout_checked_dirs.add(base_dir)
+                return
+    except OSError:
+        pass
+
+    legacy_paths = detect_legacy_layout(base_dir)
+    if legacy_paths:
+        example = legacy_paths[0]
+        raise RuntimeError(
+            "FirmReBugger's folder layout has changed and this checkout at "
+            f"{base_dir} still has {len(legacy_paths)} folder(s) in the old "
+            f"layout (e.g. '{example}').\n"
+            "Binaries/fuzzer configs are now flat and run output lives "
+            "under a top-level outputs/ tree - see the README's 'Folder "
+            "Structure' section.\n\n"
+            "Run the migration script before starting FirmReBugger again:\n\n"
+            "    uv run frb port-layout\n\n"
+            "(add --dry-run first to preview what it will move)."
+        )
+
+    # Nothing legacy found - fresh checkout, or already migrated by hand.
+    # Stamp the marker so future startups skip the filesystem scan.
+    try:
+        with open(marker_path, "w") as f:
+            f.write(CURRENT_LAYOUT_VERSION)
+    except OSError:
+        pass
+    _layout_checked_dirs.add(base_dir)
+
+
+def get_frb_base_dir(check_layout=True):
     base_dir = os.environ.get("FIRMREBUGGER_BASE_DIR")
     if not base_dir:
         raise EnvironmentError("FIRMREBUGGER_BASE_DIR environment variable is not set.")
@@ -123,7 +202,40 @@ def get_frb_base_dir():
         raise FileNotFoundError(
             f"'firmrebugger' folder not found in {base_dir}. check FIRMREBUGGER_BASE_DIR is set correctly."
         )
+    if check_layout:
+        _ensure_layout_is_current(base_dir)
     return base_dir
+
+
+def get_binary_dir(base_dir, benchmark, binary):
+    """<base_dir>/<benchmark>/<binary>"""
+    return os.path.join(base_dir, benchmark, binary)
+
+
+def get_target_fuzzer_dir(base_dir, benchmark, binary, fuzzer):
+    """<base_dir>/<benchmark>/<binary>/<fuzzer>"""
+    return os.path.join(base_dir, benchmark, binary, fuzzer)
+
+
+def get_run_output_dir(base_dir, run_name, benchmark, binary, fuzzer):
+    """<base_dir>/outputs/<run_name>/<benchmark>-<binary>-<fuzzer>"""
+    return os.path.join(
+        base_dir, "outputs", run_name, f"{benchmark}-{binary}-{fuzzer}"
+    )
+
+
+def get_fuzzer_meta(base_dir, fuzzer):
+    """Load Fuzzers/<fuzzer>/fuzzer.yml, if present.
+
+    Optional per-fuzzer metadata (e.g. `bug_prefix`, `bind_mount`) that lets
+    the rest of FirmReBugger avoid hardcoding fuzzer names. Fuzzers that
+    don't need any of these knobs can simply omit the file.
+    """
+    meta_path = os.path.join(base_dir, "Fuzzers", fuzzer, "fuzzer.yml")
+    if not os.path.isfile(meta_path):
+        return {}
+    with open(meta_path, "r") as f:
+        return yaml.safe_load(f) or {}
 
 
 def get_working_dirs(folder_path):

@@ -19,31 +19,36 @@ static void report_reached(const char* bug_id) {
     frb_report_reached(bug_id);
 }
 
-void modbus1() {
-    report_reached("DI1");
-    uint32_t res = reg_state[2] + reg_state[3];
-    if (reg_state[3] > 0x200045e4) {
-        report_detected_triggered("DI1");
+#define MODBUS_RX_TX_BUFFER_START 0x200041a8u
+#define MODBUS_RX_TX_BUFFER_END   0x200042a8u
+
+void BUG_DI01() {
+    report_reached("DI01");
+    uint32_t destination = reg_state[2] + reg_state[3];
+    if (destination < MODBUS_RX_TX_BUFFER_START ||
+        destination >= MODBUS_RX_TX_BUFFER_END) {
+        report_detected_triggered("DI01");
     }
 }
 
-void modbus2() {
-    report_reached("DI2");
-    if (reg_state[3] >= 0x100) {
-        report_detected_triggered("DI2");
+void BUG_DI02() {
+    report_reached("DI02");
+    if (reg_state[3] >= 0x100u) {
+        report_detected_triggered("DI02");
     }
 }
 
-void modbus3() {
-    report_reached("DI3");
-    uint32_t res = reg_state[3] + reg_state[1];
-    if (res > 0x200045e4) {
-        report_detected_triggered("DI3");
+void BUG_DI03() {
+    report_reached("DI03");
+    uint32_t source = reg_state[1] + reg_state[3];
+    if (source < MODBUS_RX_TX_BUFFER_START ||
+        source >= MODBUS_RX_TX_BUFFER_END) {
+        report_detected_triggered("DI03");
     }
 }
 
 void register_reflection_points() {
-    frb_add_reflection_point(0x0800289c, modbus1);
-    frb_add_reflection_point(0x080028e0, modbus2);
-    frb_add_reflection_point(0x0800297e, modbus3);
+    frb_add_reflection_point(0x080029de, BUG_DI01);
+    frb_add_reflection_point(0x0800290a, BUG_DI02);
+    frb_add_reflection_point(0x0800297e, BUG_DI03);
 }

@@ -1,7 +1,7 @@
 import os
-import re
-import subprocess
+import shutil
 import sys
+import tempfile
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -10,6 +10,7 @@ from firmrebugger.bug_analyzer_utils.common import (
     periodic_printer,
     update_bug_data,
 )
+from firmrebugger.bug_analyzer_utils.replay_worker import PersistentReplayPool
 
 
 def get_multifuzz_env():
@@ -77,8 +78,13 @@ def multifuzzer_analyzer(
         for seed in sorted(os.listdir(working_folder))
         if "README" not in seed
     ]
-    num_workers = max(1, min(len(seeds), get_available_cpu_count()))
+
+    configured_workers = int(
+        os.environ.get("MULTIFUZZ_REPLAY_WORKERS", str(get_available_cpu_count()))
+    )
+    num_workers = max(1, min(len(seeds), configured_workers, get_available_cpu_count()))
     config_path = f"{output_path}/../config.yml"
+    hail_fuzz = os.path.join(multifuzzer_env, "target", "release", "hail-fuzz")
 
     progress = {
         "completed": 0,
@@ -97,31 +103,48 @@ def multifuzzer_analyzer(
     )
     printer_thread.start()
 
-    def run_multifuzz_command(seed_path, time_val, crash_mode):
-        command = (
-            f"ICICLE_DISABLE_JIT=1 REPLAY={seed_path} TARGET_CONFIG={config_path} "
-            f"{multifuzzer_env}/target/release/hail-fuzz"
+    def replay_env(workdir):
+        env = os.environ.copy()
+        env.update(
+            {
+                "ICICLE_DISABLE_JIT": "1",
+                "TARGET_CONFIG": config_path,
+                "WORKDIR": workdir,
+            }
+        )
+        return env
+
+    def check_replay_result(result, context):
+        combined_output = f"{result.stdout or ''}\n{result.stderr or ''}"
+        if result.returncode == 0:
+            return
+
+        output_tail = "\n".join(combined_output.splitlines()[-30:])
+        raise RuntimeError(
+            "MultiFuzz triaging failed during replay "
+            f"({context}, exit code: {result.returncode}).\n"
+            f"output (tail):\n{output_tail}"
         )
 
-        start = os.times()[4]
-        try:
-            result = subprocess.run(
-                command, shell=True, text=True, capture_output=True, timeout=10
-            )
-        except subprocess.TimeoutExpired:
-            elapsed = os.times()[4] - start
-            print(
-                f"[run_multifuzz_command] Timeout (10s) exceeded for seed: {seed_path} — skipping."
-            )
-            return seed_path, [], [], time_val, elapsed, []
-        elapsed = os.times()[4] - start
-
+    def parse_seed_output(
+        seed_path,
+        stdout_lines,
+        stderr_lines,
+        time_val,
+        elapsed,
+        crash_mode,
+        reached_ids=(),
+        triggered_ids=(),
+    ):
+        stdout_lines = list(stdout_lines)
+        stdout_lines.extend(f"REACHED: {bug_id}" for bug_id in reached_ids)
+        stdout_lines.extend(f"TRIGGERED: {bug_id}" for bug_id in triggered_ids)
         bugs_triggered = []
         bugs_reached = []
         errors = []
         triggered_found = False
 
-        for line in result.stdout.splitlines():
+        for line in stdout_lines:
             if not triggered_found and "REACHED:" in line:
                 bug_id = line.split(":", 1)[1].strip()
                 if bug_id not in bugs_reached:
@@ -132,82 +155,109 @@ def multifuzzer_analyzer(
                 if bug_id not in bugs_triggered:
                     bugs_triggered.append(bug_id)
 
-            if crash_mode:
-                if "SYSCTL_AIRCR" in line:
-                    errors.append(seed_path)
-                if "input file not read until end" in result.stderr:
-                    errors.append(seed_path)
-
-        combined_output = f"{result.stdout or ''}\n{result.stderr or ''}"
-        combined_lower = combined_output.lower()
-        has_frb_config_init = "firmrebugger config" in combined_lower
-        has_c_parse_error = (
-            re.search(r":\d+:\s*error:", combined_output, re.IGNORECASE) is not None
-        )
-        has_missing_config_error = (
-            "please set firmrebugger_config path" in combined_lower
-        )
-        descriptor_error = (
-            has_frb_config_init and has_c_parse_error
-        ) or has_missing_config_error
-
-        if result.returncode != 0 or descriptor_error:
-            output_tail = "\n".join(combined_output.splitlines()[-30:])
-            raise RuntimeError(
-                "MultiFuzz triaging failed during replay "
-                f"(seed: {seed_path}, exit code: {result.returncode}).\n"
-                f"output (tail):\n{output_tail}"
-            )
+        if crash_mode:
+            terminal_lines = stdout_lines + stderr_lines
+            if any(
+                "exited with:" in line and ("ReadWatch" in line or "Halt" in line)
+                for line in terminal_lines
+            ):
+                errors.append("NON_REPRODUCING")
+            if any("SYSCTL_AIRCR" in line for line in stdout_lines):
+                errors.append(seed_path)
+            if any("input file not read until end" in line for line in stderr_lines):
+                errors.append(seed_path)
 
         return seed_path, bugs_triggered, bugs_reached, time_val, elapsed, errors
+
+    def run_multifuzz_command(seed_path, time_val, crash_mode):
+        workdir = tempfile.mkdtemp(prefix="hail-fuzz-replay-")
+        env = replay_env(workdir)
+        env["REPLAY"] = seed_path
+
+        try:
+            result = replay_pool.replay(
+                [hail_fuzz],
+                seed_path,
+                10,
+                env=env,
+                mode="crash" if crash_mode else "queue",
+                timing=time_val,
+            )
+            if result.timed_out:
+                elapsed = result.elapsed
+                print(
+                    f"[replay_worker] Timeout (10s) exceeded for seed: {seed_path} — skipping."
+                )
+                errors = ["NON_REPRODUCING"] if crash_mode else []
+                return seed_path, [], [], time_val, elapsed, errors
+        finally:
+            shutil.rmtree(workdir, ignore_errors=True)
+        elapsed = result.elapsed
+
+        check_replay_result(result, f"seed: {seed_path}")
+        return parse_seed_output(
+            seed_path,
+            result.stdout.splitlines(),
+            result.stderr.splitlines(),
+            time_val,
+            elapsed,
+            crash_mode,
+            result.reached_ids,
+            result.triggered_ids,
+        )
 
     failure_exc = None
     failure_tb = None
     try:
-        with ThreadPoolExecutor(max_workers=num_workers) as executor:
-            futures = [
-                executor.submit(
-                    run_multifuzz_command,
-                    seed_path,
-                    get_time_input(seed_path),
-                    Crash,
-                )
-                for seed_path in seeds
-            ]
+        with PersistentReplayPool(
+            num_workers, descriptor_path=descriptor_path
+        ) as replay_pool:
+            with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                futures = [
+                    executor.submit(
+                        run_multifuzz_command,
+                        seed_path,
+                        get_time_input(seed_path),
+                        Crash,
+                    )
+                    for seed_path in seeds
+                ]
 
-            for future in as_completed(futures):
-                try:
-                    result = future.result()
-                except Exception as exc:
-                    for pending in futures:
-                        pending.cancel()
-                    raise exc
+                for future in as_completed(futures):
+                    try:
+                        replay_result = future.result()
+                    except Exception as exc:
+                        for pending in futures:
+                            pending.cancel()
+                        raise exc
 
-                if result is None:
+                    (
+                        seed_path,
+                        bugs_triggered,
+                        bugs_reached,
+                        time_val,
+                        elapsed,
+                        errors,
+                    ) = replay_result
+                    execution_times.append(elapsed)
+
+                    if "NON_REPRODUCING" in errors:
+                        progress["completed"] += 1
+                        continue
+
+                    run_data = update_bug_data(
+                        run_data,
+                        time_val,
+                        seed_path,
+                        bugs_triggered=bugs_triggered,
+                        bugs_reached=bugs_reached,
+                        Crash=Crash,
+                    )
+
                     progress["completed"] += 1
-                    continue
-
-                (
-                    seed_path,
-                    bugs_triggered,
-                    bugs_reached,
-                    time_val,
-                    elapsed,
-                    errors,
-                ) = result
-                execution_times.append(elapsed)
-
-                run_data = update_bug_data(
-                    run_data,
-                    time_val,
-                    seed_path,
-                    bugs_triggered=bugs_triggered,
-                    bugs_reached=bugs_reached,
-                    Crash=Crash,
-                )
-
-                progress["completed"] += 1
-                progress["ungrouped_crashes"] = len(run_data[0]["ungrouped_crashes"])
+                    progress["ungrouped_crashes"] = len(
+                        run_data[0]["ungrouped_crashes"]
+                    )
     except Exception as exc:
         progress["failed"] = True
         progress["failure_message"] = str(exc)

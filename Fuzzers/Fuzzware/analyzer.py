@@ -1,0 +1,1 @@
+from firmrebugger.bug_analyzer_utils.fuzzware_analyzer import fuzzware_analyzer as analyze

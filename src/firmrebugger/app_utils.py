@@ -1,6 +1,7 @@
 import glob
 import json
 import os
+import re
 from collections import defaultdict
 
 import numpy as np
@@ -8,7 +9,52 @@ import psutil
 from lifelines import KaplanMeierFitter
 from lifelines.utils import restricted_mean_survival_time as rmst
 
-from firmrebugger.common import get_frb_base_dir
+from firmrebugger.common import get_frb_base_dir, get_run_output_dir
+
+
+_BUG_ID_LITERAL_RE = re.compile(
+    r'report_(?:detected_triggered|reached)\(\s*"((?:FP_)?[A-Z]+\d+)"\s*\)'
+)
+
+
+def get_benchmark_binaries(benchmark):
+    """Return every binary directory in a benchmark, independent of outputs."""
+    if not benchmark or benchmark != os.path.basename(benchmark):
+        return []
+
+    benchmark_dir = os.path.join(get_frb_base_dir(), benchmark)
+    return sorted(
+        os.path.basename(path.rstrip("/"))
+        for path in glob.glob(f"{benchmark_dir}/*/")
+        if os.path.isdir(path)
+    )
+
+
+def get_binary_bug_ids(benchmark, binary):
+    """Read the Raven and return the bug IDs expected for a benchmark binary."""
+    if (
+        not binary
+        or binary != os.path.basename(binary)
+        or binary not in get_benchmark_binaries(benchmark)
+    ):
+        return []
+
+    descriptor_path = os.path.join(
+        get_frb_base_dir(), benchmark, binary, "bug_descriptor.c"
+    )
+    try:
+        with open(descriptor_path, "r", errors="replace") as descriptor:
+            bug_ids = set(_BUG_ID_LITERAL_RE.findall(descriptor.read()))
+    except OSError:
+        return []
+
+    def bug_id_sort_key(bug_id):
+        match = re.match(r"^(FP_)?([A-Z]+)(\d+)$", bug_id)
+        if not match:
+            return (bug_id, 0, "")
+        return (match.group(2), int(match.group(3)), match.group(1) or "")
+
+    return sorted(bug_ids, key=bug_id_sort_key)
 
 
 def convert_numpy_types(obj):
@@ -30,12 +76,12 @@ def check_fuzzers(benchmark):
     base_dir = get_frb_base_dir()
     benchmark_dir = os.path.join(base_dir, benchmark)
     valid_fuzzers = set()
-    fuzzer_dirs = glob.glob(f"{benchmark_dir}/*/fuzzers/")
+    binary_dirs = glob.glob(f"{benchmark_dir}/*/")
 
-    for fuzzer_dir in fuzzer_dirs:
-        if os.path.isdir(fuzzer_dir):
-            for item in os.listdir(fuzzer_dir):
-                item_path = os.path.join(fuzzer_dir, item)
+    for binary_dir in binary_dirs:
+        if os.path.isdir(binary_dir):
+            for item in os.listdir(binary_dir):
+                item_path = os.path.join(binary_dir, item)
                 if os.path.isdir(item_path):
                     valid_fuzzers.add(item)
 
@@ -50,15 +96,14 @@ def check_binaries(benchmark, fuzzers_selected):
     benchmark_dir = os.path.join(base_dir, benchmark)
     valid_binaries = []
 
-    fuzzer_dirs = glob.glob(f"{benchmark_dir}/*/fuzzers")
-    print(f"Fuzzer directories found: {fuzzer_dirs}")
+    binary_dirs = glob.glob(f"{benchmark_dir}/*/")
 
-    for fuzzer_dir in fuzzer_dirs:
-        binary_name = os.path.basename(os.path.dirname(fuzzer_dir))
+    for binary_dir in binary_dirs:
+        binary_name = os.path.basename(binary_dir.rstrip("/"))
 
         has_all_fuzzers = True
         for selected_fuzzer in fuzzers_selected:
-            fuzzer_path = os.path.join(fuzzer_dir, selected_fuzzer)
+            fuzzer_path = os.path.join(binary_dir, selected_fuzzer)
             if not (os.path.exists(fuzzer_path) and os.path.isdir(fuzzer_path)):
                 has_all_fuzzers = False
                 break
@@ -74,15 +119,15 @@ def check_binaries_with_support(benchmark, fuzzers_selected):
     base_dir = get_frb_base_dir()
     benchmark_dir = os.path.join(base_dir, benchmark)
 
-    fuzzer_dirs = glob.glob(f"{benchmark_dir}/*/fuzzers")
+    binary_dirs = glob.glob(f"{benchmark_dir}/*/")
     support_details = []
 
-    for fuzzer_dir in fuzzer_dirs:
-        binary_name = os.path.basename(os.path.dirname(fuzzer_dir))
+    for binary_dir in binary_dirs:
+        binary_name = os.path.basename(binary_dir.rstrip("/"))
 
         missing_fuzzers = []
         for selected_fuzzer in fuzzers_selected:
-            fuzzer_path = os.path.join(fuzzer_dir, selected_fuzzer)
+            fuzzer_path = os.path.join(binary_dir, selected_fuzzer)
             if not (os.path.exists(fuzzer_path) and os.path.isdir(fuzzer_path)):
                 missing_fuzzers.append(selected_fuzzer)
 
@@ -100,49 +145,59 @@ def check_binaries_with_support(benchmark, fuzzers_selected):
 
 def get_reports(benchmark, fuzzers_selected):
     base_dir = get_frb_base_dir()
-    benchmark_dir = os.path.join(base_dir, benchmark)
+    binary_names = get_benchmark_binaries(benchmark)
+    fuzzers_to_check = fuzzers_selected or check_fuzzers(benchmark)
 
     valid_reports = []
-    fuzzer_dirs = glob.glob(f"{benchmark_dir}/*/fuzzers")
 
-    if not fuzzers_selected:
-        for fuzzer_dir in fuzzer_dirs:
-            report_path = os.path.join(
-                fuzzer_dir, "*", "fuzzing_out", "*", "frb_report.json"
+    for binary_name in binary_names:
+        combo_reports = []
+        all_fuzzers_have_reports = True
+
+        for fuzzer in fuzzers_to_check:
+            pattern = os.path.join(
+                base_dir,
+                "outputs",
+                "*",
+                f"{benchmark}-{binary_name}-{fuzzer}",
+                "frb_report.json",
             )
-            valid_reports.extend(glob.glob(report_path))
-    else:
-        for fuzzer_dir in fuzzer_dirs:
-            all_fuzzers_reports = []
-            all_fuzzers_have_reports = True
+            matches = glob.glob(pattern)
+            if matches:
+                for match in matches:
+                    run_name = os.path.basename(os.path.dirname(os.path.dirname(match)))
+                    try:
+                        mtime = os.path.getmtime(match)
+                    except OSError:
+                        mtime = 0
+                    combo_reports.append(
+                        {
+                            "reportPath": match,
+                            "benchmark": benchmark,
+                            "binary": binary_name,
+                            "fuzzer": fuzzer,
+                            "run_name": run_name,
+                            "mtime": mtime,
+                        }
+                    )
+            elif fuzzers_selected:
+                all_fuzzers_have_reports = False
+                break
 
-            # Check each selected fuzzer for reports
-            for selected_fuzzer in fuzzers_selected:
-                report_path = os.path.join(
-                    fuzzer_dir, selected_fuzzer, "fuzzing_out", "*", "frb_report.json"
-                )
-                matching_reports = glob.glob(report_path)
-                if matching_reports:
-                    all_fuzzers_reports.extend(matching_reports)
-                else:
-                    all_fuzzers_have_reports = False
-                    break
+        if not fuzzers_selected or all_fuzzers_have_reports:
+            valid_reports.extend(combo_reports)
 
-            if all_fuzzers_have_reports:
-                valid_reports.extend(all_fuzzers_reports)
-
-    print(f"Valid reports found: {valid_reports}")
+    print(f"Valid reports found: {len(valid_reports)}")
     return valid_reports
 
 
-def check_output_name(benchmark, binary_name, fuzzers_selected, output_name):
-    """Check if the output dir exists"""
+def check_run_name_available(benchmark, binary_name, fuzzers_selected, run_name):
+    """Check whether the given run name is free for this benchmark+binary+fuzzer combo."""
+    base_dir = get_frb_base_dir()
     for fuzzer in fuzzers_selected:
-        base_dir = get_frb_base_dir()
-        fuzzer_path = os.path.join(
-            base_dir, benchmark, binary_name, "fuzzers", fuzzer, "fuzzing_out"
+        output_path = get_run_output_dir(
+            base_dir, run_name, benchmark, binary_name, fuzzer
         )
-        output_path = os.path.join(fuzzer_path, output_name)
         print("Checking path:", output_path)
         if os.path.exists(output_path) and os.path.isdir(output_path):
             return False
@@ -188,9 +243,8 @@ def all_cpu_usage():
 def get_all_frb_reports(benchmark):
     """Get all FirmReBugger reports for a given benchmark."""
     base_dir = get_frb_base_dir()
-    benchmark_dir = os.path.join(base_dir, benchmark)
     report_files = glob.glob(
-        f"{benchmark_dir}/*/fuzzers/*/fuzzing_out/*/frb_report.json"
+        os.path.join(base_dir, "outputs", "*", f"{benchmark}-*-*", "frb_report.json")
     )
 
     valid_reports = []
@@ -432,7 +486,7 @@ class BugDetails:
         }
 
 
-def get_table_json(frb_reports):
+def get_table_json(frb_reports, benchmark=None, selected_binaries=None):
     """
     Transform list of FRB reports into the structure expected by the frontend.
 
@@ -476,10 +530,26 @@ def get_table_json(frb_reports):
                 "runs": bug_stats["runs"],
             }
 
+    selected_binaries = list(dict.fromkeys(selected_binaries or []))
+    if benchmark:
+        valid_binaries = set(get_benchmark_binaries(benchmark))
+        selected_binaries = [
+            binary for binary in selected_binaries if binary in valid_binaries
+        ]
+        for binary in selected_binaries:
+            # Create placeholder rows for binaries with no report, and for
+            # known bugs omitted from an incomplete report.
+            for bug_id in get_binary_bug_ids(benchmark, binary):
+                binary_data[binary][bug_id]
+
     result = []
-    for binary, bugs_dict in binary_data.items():
+    binary_order = selected_binaries + sorted(
+        binary for binary in binary_data if binary not in selected_binaries
+    )
+    for binary in binary_order:
+        bugs_dict = binary_data[binary]
         bugs_list = []
-        for bug_id, fuzzer_stats in bugs_dict.items():
+        for bug_id, fuzzer_stats in sorted(bugs_dict.items()):
             bugs_list.append({"bugId": bug_id, "fuzzerStats": fuzzer_stats})
 
         result.append({"binary": binary, "bugs": bugs_list})

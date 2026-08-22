@@ -1,22 +1,70 @@
 diff --git a/hail-fuzz/Cargo.toml b/hail-fuzz/Cargo.toml
-index 6cced13..8abedd5 100644
+index 6cced13..ce91c95 100644
 --- a/hail-fuzz/Cargo.toml
 +++ b/hail-fuzz/Cargo.toml
-@@ -26,3 +26,4 @@ icicle-cortexm = { path = "../icicle-cortexm" }
+@@ -26,3 +26,5 @@ icicle-cortexm = { path = "../icicle-cortexm" }
  byteorder = "1.5.0"
  tar = "0.4.40"
  flate2 = "1.0.27"
++libc = "0.2"
 +firmrebugger = { path = "../firmrebugger" }
-\ No newline at end of file
 diff --git a/hail-fuzz/src/main.rs b/hail-fuzz/src/main.rs
-index 5d47a1d..4982595 100644
+index 1690416..7f00671 100644
 --- a/hail-fuzz/src/main.rs
 +++ b/hail-fuzz/src/main.rs
-@@ -444,6 +444,7 @@ pub fn setup_vm(
-         }
+@@ -12,5 +12,6 @@ mod monitor;
+ mod mutations;
+ mod p2im_unit_tests;
+ mod queue;
++mod replay_worker;
+ mod trim;
+ mod utils;
+@@ -108,2 +108,6 @@ fn run() -> anyhow::Result<()> {
+     // We allow the fuzzer config to be passed either as an environment variable or from a file.
++    if std::env::var_os("FRB_REPLAY_WORKER").is_some() {
++        return replay_worker::run(fuzzer_config, interrupt_flag);
++    }
++
+     let config_arg = std::env::args().nth(1);
+@@ -466,7 +471,9 @@ pub fn setup_vm(
          vm.add_injector(resizer);
      }
+-
+-    debugging::enable_checks(&mut vm)?;
++
 +    unsafe { firmrebugger::init_config(&mut vm); }
++
++    debugging::enable_checks(&mut vm)?;
+-
++
+     Ok((target, vm))
+ }
+diff --git a/hail-fuzz/src/debugging/replay.rs b/hail-fuzz/src/debugging/replay.rs
+index 3bed998..99c1b2b 100644
+--- a/hail-fuzz/src/debugging/replay.rs
++++ b/hail-fuzz/src/debugging/replay.rs
+@@ -90,4 +90,12 @@ pub fn save_block_coverage(mut config: Config, mode: SaveMode) -> anyhow::Result<()>
+     Ok(())
+ }
  
-     debugging::enable_checks(&mut vm)?;
++pub(crate) fn replay_input(mut target: CortexmMultiStream, mut vm: Vm, path: &str) -> anyhow::Result<()> {
++    let mut input = MultiStream::from_bytes(&InputSource::from_str(path).read()?)
++        .with_context(|| format!("Invalid file format: {path}"))?;
++    modify_input(&mut input);
++    target.get_mmio_handler(&mut vm).unwrap().clone_from(&input);
++    replay_trace(vm, target)
++}
++
+ pub fn replay(mut config: Config, path: &str) -> anyhow::Result<()> {
+diff --git a/hail-fuzz/src/debugging/mod.rs b/hail-fuzz/src/debugging/mod.rs
+index 7a2c7d7..0000000 100644
+--- a/hail-fuzz/src/debugging/mod.rs
++++ b/hail-fuzz/src/debugging/mod.rs
+@@ -1,6 +1,7 @@
+ mod check;
+ mod replay;
+ pub mod stage;
+ pub mod trace;
  
++pub(crate) use replay::replay_input;
+ pub use check::init as enable_checks;

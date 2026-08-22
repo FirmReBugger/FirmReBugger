@@ -20,20 +20,6 @@ static void report_reached(const char* bug_id) {
 }
 
 
-void BUG_FW47() {
-  // CVE-2020-10065
-  report_reached("FW47");
-  uint32_t buf = reg_state[0];
-  uint32_t len = reg_state[2];
-  uint32_t buf_len = frb_mem_read(buf + 4, 2);
-  uint32_t buf_size = frb_mem_read(buf + 6, 2);
-  if (buf_len + len > buf_size) {
-    if (reg_state[14] == 0x08001355) {
-      report_detected_triggered("FW47");
-    }
-  }
-}
-
 void BUG_FW48() {
   // CVE-2020-10066
   report_reached("FW48");
@@ -48,16 +34,10 @@ void arch_system_halt() {
   report_detected_triggered("ERROR-FP_FRB13");
 }
 
-void on_hci_cmd_done() {
-  report_reached("FP_FRB41");
-  if (reg_state[1] == 0) {
-    report_detected_triggered("FP_FRB41");
-  }
-}
-
 void register_reflection_points() {
-    frb_add_reflection_point(0x0800a3d6, BUG_FW47);
-    frb_add_reflection_point(0x08002598, BUG_FW48);
+    // FW47 is absent here: this build clamps both event and ACL lengths to
+    // net_buf_simple_tailroom before appending them.
+    frb_add_reflection_point(0x080025b4, BUG_FW48);
     frb_add_reflection_point(0x0800accc, arch_system_halt);
-    frb_add_reflection_point(0x080025b8, on_hci_cmd_done);
+    // The former FP_FRB41 hook duplicated FW48's NULL-buffer condition.
 }

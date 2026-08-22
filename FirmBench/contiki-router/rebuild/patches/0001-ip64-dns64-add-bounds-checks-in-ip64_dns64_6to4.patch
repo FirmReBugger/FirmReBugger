@@ -1,0 +1,63 @@
+From c92f7119c2a7370a0ebd12c7f54052a02b5a01d9 Mon Sep 17 00:00:00 2001
+From: Tobias Scharnowski <tobias.scharnowski@rub.de>
+Date: Sat, 5 Nov 2022 22:07:20 +0100
+Subject: [PATCH 1/3] ip64-dns64: add bounds checks in ip64_dns64_6to4
+
+---
+ os/services/ip64/ip64-dns64.c | 24 ++++++++++++++++--------
+ 1 file changed, 16 insertions(+), 8 deletions(-)
+
+diff --git a/os/services/ip64/ip64-dns64.c b/os/services/ip64/ip64-dns64.c
+index 64d413dde..7dd0ebb84 100644
+--- a/os/services/ip64/ip64-dns64.c
++++ b/os/services/ip64/ip64-dns64.c
+@@ -94,12 +94,17 @@ void
+ ip64_dns64_6to4(const uint8_t *ipv6data, int ipv6datalen,
+                 uint8_t *ipv4data, int ipv4datalen)
+ {
+-  int i, j;
++  int i;
+   int qlen;
+   uint8_t *qdata;
+   uint8_t *q;
+   struct dns_hdr *hdr;
+ 
++  if(ipv4datalen < sizeof(struct dns_hdr)) {
++    PRINTF("ip64_dns64_6to4: packet ended while parsing header\n");
++    return;
++  }
++
+   hdr = (struct dns_hdr *)ipv4data;
+   PRINTF("ip64_dns64_6to4 id: %02x%02x\n", hdr->id[0], hdr->id[1]);
+   PRINTF("ip64_dns64_6to4 flags1: 0x%02x\n", hdr->flags1);
+@@ -114,17 +119,20 @@ ip64_dns64_6to4(const uint8_t *ipv6data, int ipv6datalen,
+   qdata = ipv4data + sizeof(struct dns_hdr);
+   for(i = 0; i < ((hdr->numquestions[0] << 8) + hdr->numquestions[1]); i++) {
+     do {
++      if(qdata >= ipv4data + ipv4datalen) {
++        PRINTF("ip64_dns64_6to4: packet ended while parsing\n");
++        return;
++      }
+       qlen = *qdata;
+       qdata++;
+-      for(j = 0; j < qlen; j++) {
+-        qdata++;
+-        if(qdata > ipv4data + ipv4datalen) {
+-          PRINTF("ip64_dns64_6to4: packet ended while parsing\n");
+-          return;
+-        }
+-      }
++      qdata += qlen;
+     } while(qlen != 0);
+     q = qdata;
++
++    if(qdata + DNS_QUESTION_SIZE > ipv4data + ipv4datalen) {
++      PRINTF("ip64_dns64_6to4: packet ended while parsing\n");
++      return;
++    }
+     if(q[DNS_QUESTION_CLASS0] == 0 && q[DNS_QUESTION_CLASS1] == DNS_CLASS_IN &&
+        q[DNS_QUESTION_TYPE0] == 0 && q[DNS_QUESTION_TYPE1] == DNS_TYPE_AAAA) {
+       q[DNS_QUESTION_TYPE1] = DNS_TYPE_A;
+-- 
+2.38.0
+

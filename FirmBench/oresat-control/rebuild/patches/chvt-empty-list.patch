@@ -1,0 +1,15 @@
+diff --git a/ext/ChibiOS/os/rt/src/chvt.c b/ext/ChibiOS/os/rt/src/chvt.c
+index d8042844e0..62944dd956 100644
+--- a/ext/ChibiOS/os/rt/src/chvt.c
++++ b/ext/ChibiOS/os/rt/src/chvt.c
+@@ -390,6 +390,10 @@ void chVTDoTickI(void) {
+ 
+   chDbgCheckClassI();
+ 
++  if (is_vtlist_empty(&vtlp->dlist)) {
++    return;
++  }
++
+ #if CH_CFG_ST_TIMEDELTA == 0
+   vtlp->systime++;
+   if (!is_vtlist_empty(&vtlp->dlist)) {

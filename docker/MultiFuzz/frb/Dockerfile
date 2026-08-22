@@ -20,6 +20,7 @@ ENV PATH="${PATH}:/home/user/.cargo/bin"
 ENV FUZZER=/home/user/multifuzz
 WORKDIR $FUZZER/MultiFuzz
 COPY --chown=user docker/MultiFuzz/frb/frb_patches/firmrebugger firmrebugger
+COPY --chown=user docker/MultiFuzz/frb/frb_patches/replay_worker.rs $FUZZER/MultiFuzz/hail-fuzz/src/replay_worker.rs
 COPY --chown=user docker/MultiFuzz/frb/frb_patches/frb_multifuzz.patch .
 RUN git apply frb_multifuzz.patch
 COPY --from=tcc-build /tinycc $FUZZER/tinycc
@@ -40,5 +41,6 @@ ENV GHIDRA_SRC=$FUZZER/MultiFuzz/ghidra
 ENV MULTIFUZZ_DIR=$FUZZER/MultiFuzz
 ENV MULTIFUZZ_BASE_DIR=$FUZZER/MultiFuzz/
 ENV FIRMREBUGGER_BASE_DIR=/home/user/firmrebugger
+ENV FRB_REPLAY_WORKER_COMMAND="$FUZZER/MultiFuzz/target/release/hail-fuzz"
 
 ENTRYPOINT ["uv", "run", "frb", "bug-analyzer", "."]

@@ -361,3 +361,19 @@ int init_hook_addr(void* vm)
     }
     return 0;
 }
+
+/* The Icicle VM owns CPU, memory, translation cache, and hook storage. The
+ * Rust worker calls this after restoring those VM-owned objects and before
+ * the next descriptor is compiled. */
+int firmrebugger_reset_session(void)
+{
+    for (int i = 0; i < reached_bug_count; i++) free(reached_bug_ids[i]);
+    for (int i = 0; i < triggered_bug_count; i++) free(triggered_bug_ids[i]);
+    reached_bug_count = 0;
+    triggered_bug_count = 0;
+    g_pending_reflection_point_count = 0;
+    memset(reg_state, 0, sizeof(reg_state));
+    if (tcc_state) { tcc_delete(tcc_state); tcc_state = NULL; }
+    emu_current_state = NULL;
+    return 0;
+}

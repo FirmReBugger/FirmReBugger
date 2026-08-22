@@ -95,7 +95,7 @@ const formSchema = z.object({
   binary: z.array(z.string()).min(1, "At least one binary is required."),
   runs: z.number().min(1, "Runs must be at least 1."),
   time: z.number().min(1, "Time must be at least 1 second."),
-  output_dir: z.string().min(1, "Output directory is required."),
+  run_name: z.string().min(1, "Run name is required."),
 });
 type TaskForm = z.infer<typeof formSchema>;
 
@@ -173,14 +173,14 @@ export function TasksMutateDrawer({
           binary: [currentRow.binary],
           runs: currentRow.runs,
           time: currentRow.time,
-          output_dir: currentRow.output_dir,
+          run_name: currentRow.run_name,
         }
       : {
           fuzzer: [],
           binary: [],
           runs: 1,
           time: 0,
-          output_dir: "",
+          run_name: "",
         },
   });
 
@@ -217,32 +217,31 @@ export function TasksMutateDrawer({
         : [data.binary];
 
       try {
-        const response = await fetch(`${API_URL}/api/check_output_name`, {
+        const response = await fetch(`${API_URL}/api/check_run_name`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             benchmark: selectedBenchmark,
             binary_name: selectedBinaries[0],
             fuzzers_selected: selectedFuzzers,
-            output_name: data.output_dir,
+            run_name: data.run_name,
           }),
         });
 
         const result = await response.json();
 
         if (!result.is_valid) {
-          form.setError("output_dir", {
+          form.setError("run_name", {
             type: "manual",
-            message:
-              "Output directory name already exists for this configuration",
+            message: "Run name already exists for this configuration",
           });
           return; // Stop submission
         }
       } catch (error) {
-        console.error("Error validating output name:", error);
-        form.setError("output_dir", {
+        console.error("Error validating run name:", error);
+        form.setError("run_name", {
           type: "manual",
-          message: "Failed to validate output directory name",
+          message: "Failed to validate run name",
         });
         return;
       }
@@ -262,7 +261,8 @@ export function TasksMutateDrawer({
             binary: binary,
             runs: data.runs,
             time: data.time,
-            output_dir: data.output_dir,
+            run_name: data.run_name,
+            run_path: data.run_name,
             status: "queued" as const,
             progress: 0,
             elapsedTime: 0,
@@ -281,7 +281,7 @@ export function TasksMutateDrawer({
             binary: binary,
             runs: data.runs,
             mode: "Fuzzing",
-            output_dir: data.output_dir,
+            run_name: data.run_name,
           });
 
           taskIndex++;
@@ -511,13 +511,48 @@ export function TasksMutateDrawer({
             <FormField
               control={form.control}
               name="fuzzer"
-              render={({ field }) => (
+              render={({ field }) => {
+                const selectableFuzzers = fuzzers.filter(
+                  (fuzzer) =>
+                    validFuzzers.length === 0 || validFuzzers.includes(fuzzer),
+                );
+                const allFuzzersSelected =
+                  selectableFuzzers.length > 0 &&
+                  selectableFuzzers.every((fuzzer) =>
+                    field.value?.includes(fuzzer),
+                  );
+                return (
                 <FormItem>
                   <FormLabel className="flex items-center gap-2">
                     Fuzzers
                     <Badge variant="secondary" className="text-xs">
                       {field.value?.length || 0} selected
                     </Badge>
+                    {selectableFuzzers.length > 0 && (
+                      <Button
+                        type="button"
+                        variant="link"
+                        size="sm"
+                        className="h-auto p-0 text-xs ml-auto"
+                        onClick={() => {
+                          const currentValue = field.value || [];
+                          field.onChange(
+                            allFuzzersSelected
+                              ? currentValue.filter(
+                                  (v) => !selectableFuzzers.includes(v),
+                                )
+                              : Array.from(
+                                  new Set([
+                                    ...currentValue,
+                                    ...selectableFuzzers,
+                                  ]),
+                                ),
+                          );
+                        }}
+                      >
+                        {allFuzzersSelected ? "Deselect all" : "Select all"}
+                      </Button>
+                    )}
                   </FormLabel>
                   <FormDescription className="text-xs">
                     Select one or more fuzzers (click to select multiple)
@@ -583,7 +618,8 @@ export function TasksMutateDrawer({
                   </div>
                   <FormMessage />
                 </FormItem>
-              )}
+                );
+              }}
             />
             <FormField
               control={form.control}
@@ -616,6 +652,14 @@ export function TasksMutateDrawer({
                   ...filteredSupported,
                   ...filteredUnsupported,
                 ];
+                const selectableBinaries = filteredSupported.map(
+                  (item) => item.binary,
+                );
+                const allBinariesSelected =
+                  selectableBinaries.length > 0 &&
+                  selectableBinaries.every((binary) =>
+                    field.value?.includes(binary),
+                  );
 
                 return (
                   <FormItem>
@@ -624,6 +668,31 @@ export function TasksMutateDrawer({
                       <Badge variant="secondary" className="text-xs">
                         {field.value?.length || 0} selected
                       </Badge>
+                      {selectableBinaries.length > 0 && (
+                        <Button
+                          type="button"
+                          variant="link"
+                          size="sm"
+                          className="h-auto p-0 text-xs ml-auto"
+                          onClick={() => {
+                            const currentValue = field.value || [];
+                            field.onChange(
+                              allBinariesSelected
+                                ? currentValue.filter(
+                                    (v) => !selectableBinaries.includes(v),
+                                  )
+                                : Array.from(
+                                    new Set([
+                                      ...currentValue,
+                                      ...selectableBinaries,
+                                    ]),
+                                  ),
+                            );
+                          }}
+                        >
+                          {allBinariesSelected ? "Deselect all" : "Select all"}
+                        </Button>
+                      )}
                     </FormLabel>
                     <FormDescription className="text-xs">
                       Select one or more binaries (filtered by benchmark and
@@ -808,14 +877,14 @@ export function TasksMutateDrawer({
             />
             <FormField
               control={form.control}
-              name="output_dir"
+              name="run_name"
               render={({ field }) => (
                 <FormItem>
-                  <FormLabel>Output Directory</FormLabel>
+                  <FormLabel>Run Name</FormLabel>
                   <FormControl>
                     <Input
                       {...field}
-                      placeholder="e.g., my_test_output"
+                      placeholder="e.g., my_test_run"
                       onBlur={async () => {
                         const selectedFuzzers = form.watch("fuzzer");
                         const selectedBinaries = form.watch("binary");
@@ -827,7 +896,7 @@ export function TasksMutateDrawer({
                         ) {
                           try {
                             const response = await fetch(
-                              `${API_URL}/api/check_output_name`,
+                              `${API_URL}/api/check_run_name`,
                               {
                                 method: "POST",
                                 headers: { "Content-Type": "application/json" },
@@ -835,7 +904,7 @@ export function TasksMutateDrawer({
                                   benchmark: selectedBenchmark,
                                   binary_name: selectedBinaries[0],
                                   fuzzers_selected: selectedFuzzers,
-                                  output_name: field.value,
+                                  run_name: field.value,
                                 }),
                               },
                             );
@@ -843,17 +912,17 @@ export function TasksMutateDrawer({
                             const result = await response.json();
 
                             if (!result.is_valid) {
-                              form.setError("output_dir", {
+                              form.setError("run_name", {
                                 type: "manual",
                                 message:
-                                  "Output directory name already exists for this configuration",
+                                  "Run name already exists for this configuration",
                               });
                             } else {
-                              form.clearErrors("output_dir");
+                              form.clearErrors("run_name");
                             }
                           } catch (error) {
                             console.error(
-                              "Error validating output name:",
+                              "Error validating run name:",
                               error,
                             );
                           }
@@ -862,7 +931,7 @@ export function TasksMutateDrawer({
                     />
                   </FormControl>
                   <FormDescription className="text-xs">
-                    Name for the output directory where fuzzing results will be
+                    Name for this run, under which fuzzing results will be
                     saved
                   </FormDescription>
                   <FormMessage />

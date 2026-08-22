@@ -4,7 +4,12 @@ import subprocess
 import threading
 import time
 
-from firmrebugger.common import get_frb_base_dir
+from firmrebugger.common import (
+    get_binary_dir,
+    get_frb_base_dir,
+    get_fuzzer_meta,
+    get_run_output_dir,
+)
 
 
 def get_runtime_docker_env():
@@ -121,7 +126,7 @@ class Task:
         run_number,
         mode,
         benchmark,
-        output_dir,
+        run_name,
         runs,
         core_idx,
         container_name,
@@ -140,7 +145,7 @@ class Task:
         self.created_at = time.time()
         self.started_at = None
         self.completed_at = None
-        self.output_dir = output_dir
+        self.run_name = run_name
         self.runs = runs
         self.core_idx = core_idx
         self.container_name = container_name
@@ -156,10 +161,16 @@ class Task:
                 f"[Task {self.task_id}] Starting fuzzer '{self.fuzzer}' on binary '{self.binary}' (Run {self.run_number}) for {self.duration} seconds (Mode: {self.mode})"
             )
 
-            if self.mode == "Fuzzing":
-                self.fuzz()
-            elif self.mode == "Triaging":
-                self.triage()
+            try:
+                if self.mode == "Fuzzing":
+                    self.fuzz()
+                elif self.mode == "Triaging":
+                    self.triage()
+            except Exception as e:
+                print(f"[Task {self.task_id}] ERROR: unhandled exception: {e}")
+                if self.status != "stopped":
+                    self.status = "error"
+                    self.stop_reason = str(e)
 
             if self.status not in ["error", "stopped"]:
                 self.status = "completed"
@@ -180,14 +191,8 @@ class Task:
 
     def fuzz(self):
         base_dir = get_frb_base_dir()
-        work_dir = os.path.join(
-            base_dir,
-            self.benchmark,
-            self.binary,
-            "fuzzers",
-            self.fuzzer,
-            "fuzzing_out",
-            self.output_dir,
+        work_dir = get_run_output_dir(
+            base_dir, self.run_name, self.benchmark, self.binary, self.fuzzer
         )
         ok, err = _ensure_writable_directory(
             work_dir,
@@ -198,8 +203,31 @@ class Task:
             self.status = "error"
             return
 
+        image_name = f"frb_original:{self.fuzzer}"
+        image_check = subprocess.run(
+            ["docker", "image", "inspect", image_name],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if image_check.returncode != 0:
+            print(
+                f"[Task {self.task_id}] ERROR: Docker image '{image_name}' not found. "
+                f"Run 'uv run frb build' or 'uv run frb build --use-prebuilt' first."
+            )
+            self.status = "error"
+            self.stop_reason = f"Docker image '{image_name}' not found."
+            return
+
         runtime_env = get_runtime_docker_env()
         runtime_ulimits = get_runtime_docker_ulimits()
+
+        # Fuzzers opt into bind-mounting their output dir (instead of the
+        # default docker-cp in/out) via `bind_mount: true` in
+        # Fuzzers/<fuzzer>/fuzzer.yml — e.g. MultiFuzz uses it so output
+        # streams to the host live while the run is in progress, and so
+        # hail-fuzz's baked-in absolute paths (settings.json) resolve
+        # correctly on the host.
+        bind_mount = bool(get_fuzzer_meta(base_dir, self.fuzzer).get("bind_mount"))
 
         run_cmd = [
             "docker",
@@ -215,31 +243,42 @@ class Task:
             run_cmd.extend(["--ulimit", f"{ulimit_name}={ulimit_value}"])
         for env_name, env_value in runtime_env.items():
             run_cmd.extend(["-e", f"{env_name}={env_value}"])
+        if bind_mount:
+            run_cmd.extend(["--mount", f"type=bind,source={work_dir},target={work_dir}"])
         run_cmd.extend([f"frb_original:{self.fuzzer}"])
         subprocess.run(run_cmd, check=True)
 
-        self.docker_cp(work_dir, f"{self.container_name}:/home/user/target")
+        if bind_mount:
+            # Bind mount already makes work_dir's contents visible inside the
+            # container at the same path, host-writable, no copy or chown needed.
+            exec_cwd = work_dir
+            runner_target_dir = f"{work_dir}/output-{self.run_number}"
+        else:
+            self.docker_cp(work_dir, f"{self.container_name}:/home/user/target")
 
-        try:
-            subprocess.run(
-                [
-                    "docker",
-                    "exec",
-                    "--user",
-                    "0:0",
-                    self.container_name,
-                    "sh",
-                    "-lc",
-                    "chown -R user:user /home/user/target && chmod -R u+rwX /home/user/target",
-                ],
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-        except Exception as e:
-            print(
-                f"[Task {self.task_id}] Warning: failed to normalize /home/user/target permissions: {e}"
-            )
+            try:
+                subprocess.run(
+                    [
+                        "docker",
+                        "exec",
+                        "--user",
+                        "0:0",
+                        self.container_name,
+                        "sh",
+                        "-lc",
+                        "chown -R user:user /home/user/target && chmod -R u+rwX /home/user/target",
+                    ],
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except Exception as e:
+                print(
+                    f"[Task {self.task_id}] Warning: failed to normalize /home/user/target permissions: {e}"
+                )
+
+            exec_cwd = "/home/user/target"
+            runner_target_dir = f"/home/user/target/output-{self.run_number}"
 
         os.makedirs(f"{work_dir}/fuzzing_logs", exist_ok=True)
         log_file = f"{work_dir}/fuzzing_logs/log-{self.run_number}.log"
@@ -251,16 +290,16 @@ class Task:
                 "docker",
                 "exec",
                 "-w",
-                "/home/user/target",
+                exec_cwd,
             ]
             for env_name, env_value in runtime_env.items():
                 docker_exec_cmd.extend(["--env", f"{env_name}={env_value}"])
             docker_exec_cmd.extend(
                 [
                     self.container_name,
-                    f"./{self.fuzzer}-run.sh",
+                    "./runner.sh",
                     str(self.duration),
-                    f"/home/user/target/output-{self.run_number}",
+                    runner_target_dir,
                 ]
             )
 
@@ -300,7 +339,8 @@ class Task:
             with open(log_file, "a") as log:
                 log.write(f"\n\nERROR: {error_msg}\n")
 
-        if self.status != "stopped":
+        if self.status != "stopped" and not bind_mount:
+            # MultiFuzz results are already on the host live via the bind mount.
             try:
                 self.docker_cp(
                     f"{self.container_name}:/home/user/target/output-{self.run_number}",
@@ -325,25 +365,24 @@ class Task:
         """Force kill a task and its docker container."""
         print(f"[Manager] Force killing task {self.task_id}...")
 
-        try:
-            base_dir = get_frb_base_dir()
-            work_dir = os.path.join(
-                base_dir,
-                self.benchmark,
-                self.binary,
-                "fuzzers",
-                self.fuzzer,
-                "fuzzing_out",
-                self.output_dir,
-            )
-            self.docker_cp(
-                f"{self.container_name}:/home/user/target/output-{self.run_number}",
-                work_dir,
-            )
-        except Exception as e:
-            print(
-                f"[Manager] Could not copy results from container {self.container_name}: {e}"
-            )
+        base_dir = get_frb_base_dir()
+        bind_mount = bool(get_fuzzer_meta(base_dir, self.fuzzer).get("bind_mount"))
+
+        if not bind_mount:
+            # Bind-mounted fuzzers' results are already on the host live;
+            # there's nothing at that container path to copy.
+            try:
+                work_dir = get_run_output_dir(
+                    base_dir, self.run_name, self.benchmark, self.binary, self.fuzzer
+                )
+                self.docker_cp(
+                    f"{self.container_name}:/home/user/target/output-{self.run_number}",
+                    work_dir,
+                )
+            except Exception as e:
+                print(
+                    f"[Manager] Could not copy results from container {self.container_name}: {e}"
+                )
 
         try:
             subprocess.run(
@@ -401,14 +440,8 @@ class Task:
         """Perform triaging on the fuzzing results."""
         container_name = f"frb_triage_{self.job_id}_{self.task_id}"
         base_dir = get_frb_base_dir()
-        output_dir = os.path.join(
-            base_dir,
-            self.benchmark,
-            self.binary,
-            "fuzzers",
-            self.fuzzer,
-            "fuzzing_out",
-            self.output_dir,
+        output_dir = get_run_output_dir(
+            base_dir, self.run_name, self.benchmark, self.binary, self.fuzzer
         )
         ok, err = _ensure_writable_directory(
             output_dir,
@@ -423,9 +456,36 @@ class Task:
 
         runtime_env = get_runtime_docker_env()
         runtime_ulimits = get_runtime_docker_ulimits()
+        persistent_worker_settings = {
+            "Fuzzware": (
+                "/usr/bin/python3 -m fuzzware_harness.persistent_worker",
+                "FUZZWARE_REPLAY_WORKERS",
+            ),
+            "Fuzzware-Icicle": (
+                "/usr/bin/python3 -m fuzzware_harness.persistent_worker",
+                "FUZZWARE_REPLAY_WORKERS",
+            ),
+            "SplITS": (
+                "/usr/bin/python3 -m fuzzware_harness.persistent_worker",
+                "FUZZWARE_REPLAY_WORKERS",
+            ),
+            "MultiFuzz": (
+                "/home/user/multifuzz/MultiFuzz/target/release/hail-fuzz",
+                "MULTIFUZZ_REPLAY_WORKERS",
+            ),
+            "Hoedur": ("/home/user/.cargo/bin/hoedur-dict-arm", None),
+        }.get(self.fuzzer)
+        if persistent_worker_settings:
+            persistent_worker_command, worker_count_env = persistent_worker_settings
+            worker_count = (
+                len(self.core_idx) if isinstance(self.core_idx, list) else 1
+            )
+            if worker_count_env:
+                runtime_env[worker_count_env] = str(max(1, worker_count))
+            runtime_env["FRB_REPLAY_WORKER_COMMAND"] = persistent_worker_command
 
         bug_descriptor_path = os.path.join(
-            base_dir, self.benchmark, self.binary, "bug_descriptor.c"
+            get_binary_dir(base_dir, self.benchmark, self.binary), "bug_descriptor.c"
         )
         shutil.copy(bug_descriptor_path, output_dir)
 
@@ -457,6 +517,8 @@ class Task:
                 f"type=bind,source={output_dir},target=/home/user/firmrebugger/target",
                 "--mount",
                 f"type=bind,source={os.path.join(base_dir, 'src')},target=/home/user/firmrebugger/src",
+                "--mount",
+                f"type=bind,source={os.path.join(base_dir, 'Fuzzers')},target=/home/user/firmrebugger/Fuzzers",
                 "--cpuset-cpus",
                 core_str,
             ]

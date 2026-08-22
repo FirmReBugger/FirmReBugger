@@ -14,7 +14,7 @@ import {
   getSortedRowModel,
   useReactTable,
 } from "@tanstack/react-table";
-import { Plus } from "lucide-react";
+import { CircleStop, ListChecks, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useTableUrlState } from "@/hooks/use-table-url-state";
 import {
@@ -38,6 +38,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { TaskLogsDialog } from "./task-logs-dialog";
+import { CoverageGraphDialog } from "./coverage-graph-dialog";
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import {
   Dialog,
@@ -81,10 +82,21 @@ export function TasksTable({
   );
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({
     benchmark: false,
-    output_dir: false,
+    run_name: false,
   });
   const [expanded, setExpanded] = useState<ExpandedState>({});
   const [now, setNow] = useState(Date.now());
+  const [coverageByJobId, setCoverageByJobId] = useState<
+    Record<
+      string,
+      {
+        avgBlocks: number | null;
+        totalBlocks: number | null;
+        avgCoveragePct: number | null;
+        runs: Record<string, { blocks: number | null; pct: number | null }>;
+      }
+    >
+  >({});
   const { setTasks, setOpen } = useTasks();
   const [taskDetails, setTaskDetails] = useState<Record<string, any[]>>({});
   const [logsDialogOpen, setLogsDialogOpen] = useState(false);
@@ -97,10 +109,17 @@ export function TasksTable({
     string | null
   >(null);
   const [selectedLogUrl, setSelectedLogUrl] = useState<string | null>(null);
+  const [coverageGraphOpen, setCoverageGraphOpen] = useState(false);
+  const [coverageGraphJobId, setCoverageGraphJobId] = useState<string | null>(
+    null,
+  );
+  const [coverageGraphRuns, setCoverageGraphRuns] = useState<number[]>([]);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [jobToDelete, setJobToDelete] = useState<string | null>(null);
+  const [stopAllDialogOpen, setStopAllDialogOpen] = useState(false);
+  const [stoppingAll, setStoppingAll] = useState(false);
   const [triagingDialogOpen, setTriagingDialogOpen] = useState(false);
-  const [jobToTriage, setJobToTriage] = useState<Task | null>(null);
+  const [jobsToTriage, setJobsToTriage] = useState<Task[]>([]);
   const [loadingTriagingLogForJobId, setLoadingTriagingLogForJobId] = useState<
     string | null
   >(null);
@@ -123,7 +142,7 @@ export function TasksTable({
           benchmark: job.benchmark,
           binary: job.binary,
           fuzzer: job.fuzzer,
-          output_dir: job.output_dir,
+          run_name: job.run_name,
         });
 
         const logUrl = `${API_URL}/api/jobs/triage-log?${query.toString()}`;
@@ -233,8 +252,72 @@ export function TasksTable({
     }
   };
 
+  const activeStoppableTasks = data.filter(
+    (task) => task.status === "running" || task.status === "queued",
+  );
+
+  const confirmStopAll = async () => {
+    if (activeStoppableTasks.length === 0) return;
+
+    const jobsToStop = [...activeStoppableTasks];
+    const previousStatuses = new Map(
+      jobsToStop.map((task) => [task.id, task.status]),
+    );
+    setStoppingAll(true);
+
+    setTasks((prevTasks) =>
+      prevTasks.map((task) =>
+        previousStatuses.has(task.id)
+          ? { ...task, status: "stopping" }
+          : task,
+      ),
+    );
+
+    const outcomes = await Promise.all(
+      jobsToStop.map(async (task) => {
+        try {
+          const response = await fetch(`${API_URL}/api/jobs/stop`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ job_id: task.id }),
+          });
+          return { id: task.id, ok: response.ok };
+        } catch (error) {
+          console.error(`Error stopping job ${task.id}:`, error);
+          return { id: task.id, ok: false };
+        }
+      }),
+    );
+
+    const failedIds = new Set(
+      outcomes.filter((outcome) => !outcome.ok).map((outcome) => outcome.id),
+    );
+    if (failedIds.size > 0) {
+      setTasks((prevTasks) =>
+        prevTasks.map((task) =>
+          failedIds.has(task.id)
+            ? { ...task, status: previousStatuses.get(task.id) ?? task.status }
+            : task,
+        ),
+      );
+    }
+
+    if (failedIds.size === 0) {
+      const jobLabel = jobsToStop.length === 1 ? "job" : "jobs";
+      toast.success(`Stop requested for ${jobsToStop.length} active ${jobLabel}`);
+    } else {
+      const jobLabel = jobsToStop.length === 1 ? "job" : "jobs";
+      toast.error(
+        `Failed to stop ${failedIds.size} of ${jobsToStop.length} active ${jobLabel}`,
+      );
+    }
+
+    setStoppingAll(false);
+    setStopAllDialogOpen(false);
+  };
+
   const confirmTriaging = async () => {
-    if (!jobToTriage) return;
+    if (jobsToTriage.length === 0) return;
 
     if (cpuCount === "" || cpuCount < 1) {
       toast.error("Please enter a valid CPU count");
@@ -249,18 +332,16 @@ export function TasksTable({
 
     try {
       const timestamp = Date.now();
-      const newJobId = `JOB-${timestamp}-TRIAGE`;
-
-      const triagingJobData = {
-        job_id: newJobId,
-        fuzzer: jobToTriage.fuzzer,
-        benchmark: jobToTriage.benchmark,
-        duration: jobToTriage.time,
-        binary: jobToTriage.binary,
+      const triagingJobs = jobsToTriage.map((job, index) => ({
+        job_id: `JOB-${timestamp}-${index}-TRIAGE`,
+        fuzzer: job.fuzzer,
+        benchmark: job.benchmark,
+        duration: job.time,
+        binary: job.binary,
         runs: Number(cpuCount),
         mode: "Triaging",
-        output_dir: jobToTriage.output_dir,
-      };
+        run_name: job.run_name,
+      }));
 
       const response = await fetch(`${API_URL}/api/jobs/add`, {
         method: "POST",
@@ -268,14 +349,16 @@ export function TasksTable({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          jobs: [triagingJobData],
+          jobs: triagingJobs,
         }),
       });
 
       const data = await response.json();
 
       if (response.ok) {
-        toast.success(`Triaging job created with ${cpuCount} CPU(s)`);
+        toast.success(
+          `${triagingJobs.length} triaging job${triagingJobs.length === 1 ? "" : "s"} queued with ${cpuCount} CPU(s) each`,
+        );
       } else {
         toast.error(data.error || "Failed to create triaging job");
       }
@@ -284,7 +367,7 @@ export function TasksTable({
       toast.error("Failed to create triaging job");
     } finally {
       setTriagingDialogOpen(false);
-      setJobToTriage(null);
+      setJobsToTriage([]);
       setCpuCount("");
     }
   };
@@ -348,7 +431,7 @@ export function TasksTable({
       try {
         const job = data.find((task) => task.id === id);
         if (job) {
-          setJobToTriage(job);
+          setJobsToTriage([job]);
           setCpuCount("");
           setTriagingDialogOpen(true);
         }
@@ -404,6 +487,76 @@ export function TasksTable({
     }, 1000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    const multifuzzJobIds = data
+      .filter((job) => job.fuzzer === "MultiFuzz")
+      .map((job) => job.id);
+
+    if (multifuzzJobIds.length === 0) return;
+    let cancelled = false;
+
+    const fetchAll = async () => {
+      const entries = await Promise.all(
+        multifuzzJobIds.map(async (jobId) => {
+          const empty = {
+            avgBlocks: null,
+            totalBlocks: null,
+            avgCoveragePct: null,
+            runs: {},
+          } as const;
+          try {
+            const response = await fetch(
+              `${API_URL}/api/jobs/${jobId}/coverage-summary`,
+            );
+            if (!response.ok) return [jobId, empty] as const;
+            const data = await response.json();
+            const runs: Record<
+              string,
+              { blocks: number | null; pct: number | null }
+            > = {};
+            for (const r of data.runs ?? []) {
+              runs[r.run_number] = {
+                blocks: r.blocks ?? null,
+                pct: r.coverage_pct ?? null,
+              };
+            }
+            return [
+              jobId,
+              {
+                avgBlocks: data.avg_blocks ?? null,
+                totalBlocks: data.total_blocks ?? null,
+                avgCoveragePct: data.avg_coverage_pct ?? null,
+                runs,
+              },
+            ] as const;
+          } catch {
+            return [jobId, empty] as const;
+          }
+        }),
+      );
+      if (!cancelled) {
+        setCoverageByJobId(Object.fromEntries(entries));
+      }
+    };
+
+    fetchAll();
+
+    // Finished jobs' coverage is static (the run is over, stats.csv no
+    // longer grows) — fetch it once instead of polling.
+    if (isFinishedJobs) {
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const interval = setInterval(fetchAll, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFinishedJobs, data.map((j) => j.id).join(","), API_URL]);
 
   const fetchTaskDetails = useCallback(async (jobId: string) => {
     try {
@@ -500,13 +653,27 @@ export function TasksTable({
       value: binary,
     }));
   const outputDirOptions = Array.from(
-    new Set(data.map((task) => task.output_dir).filter(Boolean)),
+    new Set(data.map((task) => task.run_name).filter(Boolean)),
   )
     .sort()
     .map((outputDir) => ({
       label: outputDir,
       value: outputDir,
     }));
+  const statusOptions = isFinishedJobs
+      ? [
+          { label: "Triaged", value: "triaged" },
+          { label: "Not triaged", value: "not-triaged" },
+          { label: "Failed", value: "triage-failed" },
+        { label: "Errored", value: "errored" },
+        { label: "Completed", value: "completed" },
+        { label: "Stopped", value: "stopped" },
+      ]
+    : [
+        { label: "Running", value: "running" },
+        { label: "Queued", value: "queued" },
+        { label: "Stopping", value: "stopping" },
+      ];
 
   const table = useReactTable({
     data,
@@ -521,6 +688,7 @@ export function TasksTable({
     },
     meta: {
       now,
+      coverageByJobId,
     },
     onSortingChange: setSorting,
     onColumnVisibilityChange: setColumnVisibility,
@@ -551,6 +719,47 @@ export function TasksTable({
     onColumnFiltersChange,
   });
 
+  const getVisibleTriageCandidates = () => {
+    const knownTasks = allTasks || data;
+    return table
+      .getFilteredRowModel()
+      .rows.map((row) => row.original)
+      .filter((job) => {
+        if (job.mode === "Triaging") return false;
+
+        const relatedTriagingJobs = knownTasks.filter(
+          (task) =>
+            task.mode === "Triaging" &&
+            task.benchmark === job.benchmark &&
+            task.binary === job.binary &&
+            task.fuzzer === job.fuzzer &&
+            task.run_name === job.run_name,
+        );
+
+        // Do not create duplicate work while an earlier triage request is
+        // queued or running. Errored/stopped triage jobs remain retryable.
+        return !relatedTriagingJobs.some(
+          (task) => task.status === "queued" || task.status === "running",
+        );
+      });
+  };
+
+  const visibleTriageCount = isFinishedJobs
+    ? getVisibleTriageCandidates().length
+    : 0;
+
+  const handleQueueVisibleTriaging = () => {
+    const candidates = getVisibleTriageCandidates();
+    if (candidates.length === 0) {
+      toast.info("There are no eligible fuzzing jobs in the current view");
+      return;
+    }
+
+    setJobsToTriage(candidates);
+    setCpuCount("");
+    setTriagingDialogOpen(true);
+  };
+
   return (
     <div
       className={cn(
@@ -563,6 +772,11 @@ export function TasksTable({
         searchPlaceholder="Filter"
         filters={
           [
+            {
+              columnId: "status",
+              title: "Status",
+              options: statusOptions,
+            },
             benchmarkOptions.length > 0
               ? {
                   columnId: "benchmark",
@@ -586,7 +800,7 @@ export function TasksTable({
               : null,
             outputDirOptions.length > 0
               ? {
-                  columnId: "output_dir",
+                  columnId: "run_name",
                   title: "Output Dir",
                   options: outputDirOptions,
                 }
@@ -598,13 +812,38 @@ export function TasksTable({
           }[]
         }
         createButton={
-          showCreateButton || toolbarExtras ? (
-            <div className="ms-auto hidden items-center gap-2 lg:flex">
-              {toolbarExtras}
+          showCreateButton || isFinishedJobs ? (
+            <div className="ms-auto hidden shrink-0 items-center justify-end gap-3 lg:flex">
+              {!isFinishedJobs ? (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="h-8 shrink-0 whitespace-nowrap"
+                  onClick={() => setStopAllDialogOpen(true)}
+                  disabled={activeStoppableTasks.length === 0 || stoppingAll}
+                  title="Stop all queued and running jobs"
+                >
+                  <CircleStop className="size-4" />
+                  Stop all
+                </Button>
+              ) : null}
+              {isFinishedJobs ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 shrink-0 whitespace-nowrap"
+                  onClick={handleQueueVisibleTriaging}
+                  disabled={visibleTriageCount === 0}
+                  title="Queue triaging for every eligible fuzzing job currently visible"
+                >
+                  <ListChecks className="size-4" />
+                  Triage all ({visibleTriageCount})
+                </Button>
+              ) : null}
               {showCreateButton ? (
                 <Button
                   size="sm"
-                  className="h-8"
+                  className="h-8 shrink-0 whitespace-nowrap"
                   onClick={() => setOpen("create")}
                 >
                   <Plus className="size-4" />
@@ -617,6 +856,11 @@ export function TasksTable({
       />
       <div className="relative">
         <div className="overflow-x-auto overflow-y-visible rounded-md border scroll-smooth">
+          {toolbarExtras ? (
+            <div className="flex items-center justify-end border-b bg-muted/20 px-3 py-2">
+              {toolbarExtras}
+            </div>
+          ) : null}
           <Table className="min-w-xl">
             <TableHeader>
               {table.getHeaderGroups().map((headerGroup) => (
@@ -653,9 +897,10 @@ export function TasksTable({
                   const relatedTriagingJobs = (allTasks || data).filter(
                     (task) =>
                       task.mode === "Triaging" &&
+                      task.benchmark === row.original.benchmark &&
                       task.binary === row.original.binary &&
                       task.fuzzer === row.original.fuzzer &&
-                      task.output_dir === row.original.output_dir,
+                      task.run_name === row.original.run_name,
                   );
                   const hasTriagingError = relatedTriagingJobs.some(
                     (task) => task.status === "errored",
@@ -755,19 +1000,44 @@ export function TasksTable({
                                     </span>
                                   </p>
                                 </div>
+                                {row.original.fuzzer === "MultiFuzz" &&
+                                  row.original.mode !== "Triaging" && (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-8 text-xs"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        const runs: number[] = (
+                                          taskDetails[row.original.id] || []
+                                        )
+                                          .map(
+                                            (task: { run_number: number }) =>
+                                              task.run_number,
+                                          )
+                                          .sort((a: number, b: number) => a - b);
+                                        setCoverageGraphJobId(row.original.id);
+                                        setCoverageGraphRuns(runs);
+                                        setCoverageGraphOpen(true);
+                                      }}
+                                    >
+                                      <Activity className="h-3.5 w-3.5 mr-1.5" />
+                                      Coverage Graph
+                                    </Button>
+                                  )}
                               </div>
 
-                              {/* Output Directory Section */}
-                              {row.original.output_dir && (
+                              {/* Run Path Section */}
+                              {row.original.run_path && (
                                 <>
                                   <div className="space-y-2">
                                     <h4 className="font-semibold text-sm text-muted-foreground uppercase tracking-wide flex items-center gap-2">
                                       <FolderOutput className="h-4 w-4" />
-                                      Output Directory
+                                      Run Path
                                     </h4>
                                     <div className="bg-muted/50 rounded-md p-3 border border-border">
                                       <code className="text-xs font-mono text-foreground break-all">
-                                        {row.original.output_dir}
+                                        {row.original.run_path}
                                       </code>
                                     </div>
                                   </div>
@@ -798,6 +1068,14 @@ export function TasksTable({
                                               CPU Usage
                                             </TableHead>
                                           )}
+                                          {row.original.fuzzer ===
+                                            "MultiFuzz" &&
+                                            row.original.mode !==
+                                              "Triaging" && (
+                                              <TableHead className="w-[110px]">
+                                                Coverage
+                                              </TableHead>
+                                            )}
                                           <TableHead className="w-[180px]">
                                             Container
                                           </TableHead>
@@ -954,6 +1232,39 @@ export function TasksTable({
                                                   )}
                                                 </TableCell>
                                               )}
+                                              {row.original.fuzzer ===
+                                                "MultiFuzz" &&
+                                                row.original.mode !==
+                                                  "Triaging" && (
+                                                  <TableCell className="font-mono text-xs">
+                                                    {(() => {
+                                                      const run =
+                                                        coverageByJobId[
+                                                          row.original.id
+                                                        ]?.runs[
+                                                          task.run_number
+                                                        ];
+                                                      if (run?.blocks == null) {
+                                                        return (
+                                                          <span className="text-muted-foreground">
+                                                            —
+                                                          </span>
+                                                        );
+                                                      }
+                                                      return (
+                                                        <span className="inline-flex items-center gap-1.5">
+                                                          <Activity className="h-3 w-3 text-primary" />
+                                                          {run.blocks.toLocaleString()}
+                                                          {run.pct != null && (
+                                                            <span className="text-muted-foreground">
+                                                              ({run.pct}%)
+                                                            </span>
+                                                          )}
+                                                        </span>
+                                                      );
+                                                    })()}
+                                                  </TableCell>
+                                                )}
                                               <TableCell
                                                 className="font-mono text-xs truncate max-w-[150px]"
                                                 title={task.container_name}
@@ -1065,7 +1376,9 @@ export function TasksTable({
                     colSpan={columns.length}
                     className="h-24 text-center"
                   >
-                    No Active Jobs.
+                    {isFinishedJobs
+                      ? "No finished jobs match these filters."
+                      : "No active jobs match these filters."}
                   </TableCell>
                 </TableRow>
               )}
@@ -1085,6 +1398,14 @@ export function TasksTable({
         logUrl={selectedLogUrl}
       />
 
+      {/* Coverage Graph Dialog */}
+      <CoverageGraphDialog
+        open={coverageGraphOpen}
+        onOpenChange={setCoverageGraphOpen}
+        jobId={coverageGraphJobId}
+        runNumbers={coverageGraphRuns}
+      />
+
       {/* Delete Confirmation Dialog */}
       <ConfirmDialog
         open={deleteDialogOpen}
@@ -1097,14 +1418,28 @@ export function TasksTable({
         handleConfirm={confirmDelete}
       />
 
+      {/* Stop All Confirmation Dialog */}
+      <ConfirmDialog
+        open={stopAllDialogOpen}
+        onOpenChange={setStopAllDialogOpen}
+        title="Stop All Active Jobs"
+        desc={`This will stop ${activeStoppableTasks.length} queued or running ${activeStoppableTasks.length === 1 ? "job" : "jobs"}. Are you sure?`}
+        destructive
+        confirmText="Yes, Stop All"
+        cancelBtnText="No, Cancel"
+        handleConfirm={confirmStopAll}
+        isLoading={stoppingAll}
+      />
+
       {/* Triaging Dialog */}
       <Dialog open={triagingDialogOpen} onOpenChange={setTriagingDialogOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Queue Triaging Job</DialogTitle>
             <DialogDescription>
-              Create a new triaging job based on the selected fuzzing job. How
-              many CPUs do you want to use?
+              Queue triaging for {jobsToTriage.length} visible fuzzing job
+              {jobsToTriage.length === 1 ? "" : "s"}. How many CPUs should each
+              triaging job use?
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-4">
@@ -1140,16 +1475,14 @@ export function TasksTable({
                 </p>
               </div>
             </div>
-            {jobToTriage && (
+            {jobsToTriage.length > 0 && (
               <div className="text-sm text-muted-foreground space-y-1 border-t pt-4">
+                <p><strong>Jobs:</strong> {jobsToTriage.length}</p>
                 <p>
-                  <strong>Binary:</strong> {jobToTriage.binary}
-                </p>
-                <p>
-                  <strong>Fuzzer:</strong> {jobToTriage.fuzzer}
-                </p>
-                <p>
-                  <strong>Benchmark:</strong> {jobToTriage.benchmark}
+                  <strong>Scope:</strong>{" "}
+                  {jobsToTriage.length === 1
+                    ? `${jobsToTriage[0].fuzzer} / ${jobsToTriage[0].benchmark} / ${jobsToTriage[0].binary}`
+                    : "all eligible jobs matching the current filters"}
                 </p>
                 <p>
                   <strong>Mode:</strong> Triaging
@@ -1160,7 +1493,10 @@ export function TasksTable({
           <DialogFooter>
             <Button
               variant="outline"
-              onClick={() => setTriagingDialogOpen(false)}
+              onClick={() => {
+                setTriagingDialogOpen(false);
+                setJobsToTriage([]);
+              }}
             >
               Cancel
             </Button>

@@ -5,7 +5,6 @@ import os
 import shutil
 import signal
 import subprocess
-import sys
 import threading
 import time
 import uuid
@@ -14,8 +13,15 @@ from typing import List
 
 import psutil
 
-from firmrebugger.common import get_frb_base_dir
+from firmrebugger.common import (
+    get_binary_dir,
+    get_frb_base_dir,
+    get_run_output_dir,
+    get_target_fuzzer_dir,
+)
 from firmrebugger.task import Task
+
+TRIAGE_INFO_FILENAME = "triage_info.json"
 
 
 class Job:
@@ -31,7 +37,7 @@ class Job:
         mode,
         benchmark,
         progress,
-        output_dir,
+        run_name,
         auto_queue_triaging=True,
     ):
         self.job_id = job_id
@@ -46,7 +52,7 @@ class Job:
         self.started_at = None
         self.progress = progress
         self.elapsed_time = None
-        self.output_dir = output_dir
+        self.run_name = run_name
         self.auto_queue_triaging = bool(auto_queue_triaging)
         self.manually_stopped = False
 
@@ -61,7 +67,7 @@ class Job:
                     run_number=str(run_num).zfill(2),
                     mode=mode,
                     benchmark=benchmark,
-                    output_dir=output_dir,
+                    run_name=run_name,
                     runs=runs,
                     core_idx=None,
                     container_name=f"{job_id}_run{run_num}_temp",  # Temporary name, will be updated
@@ -80,7 +86,7 @@ class Job:
                 run_number=runs,
                 mode=mode,
                 benchmark=benchmark,
-                output_dir=output_dir,
+                run_name=run_name,
                 runs=runs,
                 core_idx=None,
                 container_name=f"{job_id}_triage_temp",
@@ -193,6 +199,13 @@ class JobManager:
         """Add a new job to the manager and queue all its tasks."""
         self.jobs[job.job_id] = job
 
+        # Triaging jobs share the fuzzing job's output directory, so they
+        # cannot use that job's frb_info.json without overwriting its state.
+        # Persist their own state as soon as they are queued; this also makes
+        # a queued triage job recoverable after a webserver restart.
+        if job.mode == "Triaging":
+            finalize_job(job, force_status=job.status, force_write=True)
+
         queued_count = 0
         with self.queue_lock:
             for task in job.tasks:
@@ -211,14 +224,8 @@ class JobManager:
 
     @staticmethod
     def _get_job_output_folder(job: Job) -> str:
-        return os.path.join(
-            get_frb_base_dir(),
-            job.benchmark,
-            job.binary,
-            "fuzzers",
-            job.fuzzer,
-            "fuzzing_out",
-            job.output_dir,
+        return get_run_output_dir(
+            get_frb_base_dir(), job.run_name, job.benchmark, job.binary, job.fuzzer
         )
 
     def _persist_auto_triaging_flag(self, job: Job):
@@ -260,7 +267,7 @@ class JobManager:
                 and candidate_job.benchmark == triage_job.benchmark
                 and candidate_job.binary == triage_job.binary
                 and candidate_job.fuzzer == triage_job.fuzzer
-                and candidate_job.output_dir == triage_job.output_dir
+                and candidate_job.run_name == triage_job.run_name
             ):
                 if getattr(candidate_job, "auto_queue_triaging", True):
                     candidate_job.auto_queue_triaging = False
@@ -272,13 +279,7 @@ class JobManager:
 
     def _has_triage_report(self, job: Job) -> bool:
         report_path = os.path.join(
-            get_frb_base_dir(),
-            job.benchmark,
-            job.binary,
-            "fuzzers",
-            job.fuzzer,
-            "fuzzing_out",
-            job.output_dir,
+            self._get_job_output_folder(job),
             "frb_report.json",
         )
         return os.path.exists(report_path)
@@ -290,7 +291,7 @@ class JobManager:
                 and candidate_job.benchmark == fuzzing_job.benchmark
                 and candidate_job.binary == fuzzing_job.binary
                 and candidate_job.fuzzer == fuzzing_job.fuzzer
-                and candidate_job.output_dir == fuzzing_job.output_dir
+                and candidate_job.run_name == fuzzing_job.run_name
             ):
                 # If it was manually stopped, block re-queuing permanently
                 if candidate_job.manually_stopped:
@@ -325,7 +326,7 @@ class JobManager:
                 mode="Triaging",
                 benchmark=fuzzing_job.benchmark,
                 progress=0,
-                output_dir=fuzzing_job.output_dir,
+                run_name=fuzzing_job.run_name,
                 auto_queue_triaging=False,
             )
             self.add_job(triage_job)
@@ -424,15 +425,7 @@ class JobManager:
             print(f"[Manager] Job {job_id} not found.")
             return
 
-        full_path = os.path.join(
-            get_frb_base_dir(),
-            self.jobs[job_id].benchmark,
-            self.jobs[job_id].binary,
-            "fuzzers",
-            self.jobs[job_id].fuzzer,
-            "fuzzing_out",
-            self.jobs[job_id].output_dir,
-        )
+        full_path = self._get_job_output_folder(self.jobs[job_id])
         if os.path.exists(full_path):
             try:
                 shutil.rmtree(full_path, onerror=self._rmtree_onerror)
@@ -475,16 +468,7 @@ class JobManager:
 
         for job_id, job in self.jobs.items():
             if job.mode == "Triaging" and job.status == "running":
-                base_dir = get_frb_base_dir()
-                output_folder = os.path.join(
-                    base_dir,
-                    job.benchmark,
-                    job.binary,
-                    "fuzzers",
-                    job.fuzzer,
-                    "fuzzing_out",
-                    job.output_dir,
-                )
+                output_folder = self._get_job_output_folder(job)
                 log_file = os.path.join(output_folder, "fuzzing_logs", "triage.log")
 
                 if os.path.exists(log_file):
@@ -758,11 +742,12 @@ class JobManager:
                     should_force_write = not (
                         job.mode == "Triaging" and os.path.isfile(frb_info_path)
                     )
+                    persisted_status = "error" if job.status == "error" else "stopped"
 
                     finalize_job(
                         job,
                         stopped=True,
-                        force_status="stopped",
+                        force_status=persisted_status,
                         force_write=should_force_write,
                     )
                 except Exception as e:
@@ -816,7 +801,7 @@ class JobManager:
                             and other_job.binary == job.binary
                             and other_job.fuzzer == job.fuzzer
                             and other_job.benchmark == job.benchmark
-                            and other_job.output_dir == job.output_dir
+                            and other_job.run_name == job.run_name
                             and other_id not in jobs_to_remove
                         ):
                             jobs_to_remove.append(other_id)
@@ -935,24 +920,26 @@ def start_manager(manager):
 
 
 def finalize_job(job: Job, stopped=False, force_status=None, force_write=False):
-    """Create/update the frb_info.json file with complete job and task information when job completes."""
+    """Persist a job's state once it reaches a durable lifecycle boundary."""
 
     base_dir = get_frb_base_dir()
-    output_folder = os.path.join(
-        base_dir,
-        job.benchmark,
-        job.binary,
-        "fuzzers",
-        job.fuzzer,
-        "fuzzing_out",
-        job.output_dir,
+    output_folder = get_run_output_dir(
+        base_dir, job.run_name, job.benchmark, job.binary, job.fuzzer
     )
-    json_path = os.path.join(output_folder, "frb_info.json")
+    info_filename = (
+        TRIAGE_INFO_FILENAME if job.mode == "Triaging" else "frb_info.json"
+    )
+    json_path = os.path.join(output_folder, info_filename)
 
-    if os.path.isfile(json_path) and not force_write:
+    # Fuzzing metadata is created by the fuzzing task and must not be
+    # rewritten by later manager snapshots. Triage metadata is intentionally
+    # updated on every status transition because it is the durable record for
+    # the otherwise in-memory triage job.
+    if job.mode != "Triaging" and os.path.isfile(json_path) and not force_write:
         return
 
     try:
+        os.makedirs(output_folder, exist_ok=True)
         if stopped:
             completed_times = [
                 t.completed_at for t in job.tasks if t.completed_at is not None
@@ -961,7 +948,8 @@ def finalize_job(job: Job, stopped=False, force_status=None, force_write=False):
         else:
             end_time = time.time()
 
-        total_time = int(round(end_time - job.started_at))
+        start_time = job.started_at if job.started_at is not None else end_time
+        total_time = int(round(end_time - start_time))
 
         data = {
             "job_id": job.job_id,
@@ -973,7 +961,7 @@ def finalize_job(job: Job, stopped=False, force_status=None, force_write=False):
             "runs": job.runs,
         }
 
-        data["output_dir"] = job.output_dir
+        data["run_name"] = job.run_name
         data["auto_queue_triaging"] = bool(getattr(job, "auto_queue_triaging", True))
         data["status"] = force_status if force_status is not None else job.status
         data["created_at"] = job.created_at
@@ -981,6 +969,7 @@ def finalize_job(job: Job, stopped=False, force_status=None, force_write=False):
         data["ended_at"] = end_time
         data["progress"] = job.progress
         data["completed_runs"] = job.get_completed_runs()
+        data["manually_stopped"] = bool(getattr(job, "manually_stopped", False))
 
         data["tasks"] = []
         for task in job.tasks:
@@ -998,6 +987,7 @@ def finalize_job(job: Job, stopped=False, force_status=None, force_write=False):
                 "core_idx": task.core_idx,
                 "container_name": task.container_name,
                 "duration": task.duration,
+                "stop_reason": getattr(task, "stop_reason", None),
             }
 
             if task.started_at and task.completed_at:
@@ -1019,30 +1009,32 @@ def finalize_job(job: Job, stopped=False, force_status=None, force_write=False):
 
 def prep_target_folder(job: Job):
     base_dir = get_frb_base_dir()
-    ouput_dir_path = f"{base_dir}/{job.benchmark}/{job.binary}/fuzzers/{job.fuzzer}/fuzzing_out/{job.output_dir}/"
+    ouput_dir_path = (
+        get_run_output_dir(base_dir, job.run_name, job.benchmark, job.binary, job.fuzzer)
+        + "/"
+    )
 
     os.makedirs(ouput_dir_path, exist_ok=True)
-    binary_dir_path = os.path.join(base_dir, job.benchmark, job.binary, "binary")
+    binary_dir_path = get_binary_dir(base_dir, job.benchmark, job.binary)
     elf_path = glob.glob(f"{binary_dir_path}/*.elf")[0]
 
-    fuzzer_dir_path = os.path.join(
-        base_dir, job.benchmark, job.binary, "fuzzers", job.fuzzer
+    fuzzer_dir_path = get_target_fuzzer_dir(
+        base_dir, job.benchmark, job.binary, job.fuzzer
     )
 
     for item in os.listdir(fuzzer_dir_path):
         item_path = os.path.join(fuzzer_dir_path, item)
-        if item != "fuzzing_out":
-            try:
-                if os.path.isdir(item_path):
-                    shutil.copytree(
-                        item_path,
-                        os.path.join(ouput_dir_path, item),
-                        dirs_exist_ok=True,
-                    )
-                else:
-                    shutil.copy(item_path, ouput_dir_path)
-            except Exception as e:
-                print(f"Error copying {item} to output folder: {e}")
+        try:
+            if os.path.isdir(item_path):
+                shutil.copytree(
+                    item_path,
+                    os.path.join(ouput_dir_path, item),
+                    dirs_exist_ok=True,
+                )
+            else:
+                shutil.copy(item_path, ouput_dir_path)
+        except Exception as e:
+            print(f"Error copying {item} to output folder: {e}")
 
     try:
         shutil.copy(elf_path, ouput_dir_path)
@@ -1059,9 +1051,9 @@ def prep_target_folder(job: Job):
         print(f"Error copying binary to output folder: {e}")
 
     try:
-        local_fuzzer_runner_path = os.path.join(fuzzer_dir_path, f"{job.fuzzer}-run.sh")
+        local_fuzzer_runner_path = os.path.join(fuzzer_dir_path, "runner.sh")
         default_fuzzer_runner_path = os.path.join(
-            base_dir, "src", "firmrebugger", "fuzzer_runners", f"{job.fuzzer}-run.sh"
+            base_dir, "Fuzzers", job.fuzzer, "runner.sh"
         )
 
         fuzzer_runner_path = (
@@ -1127,15 +1119,53 @@ def list_finished_jobs() -> List[Job]:
     base_dir = get_frb_base_dir()
     finished_jobs = []
 
-    search_pattern = os.path.join(
-        base_dir, "**", "fuzzers", "**", "fuzzing_out", "**", "frb_info.json"
+    search_patterns = [
+        os.path.join(base_dir, "outputs", "*", "*", "frb_info.json"),
+        os.path.join(base_dir, "outputs", "*", "*", TRIAGE_INFO_FILENAME),
+    ]
+    frb_info_files = sorted(
+        {
+            json_file_path
+            for search_pattern in search_patterns
+            for json_file_path in glob.glob(search_pattern)
+        }
     )
-    frb_info_files = glob.glob(search_pattern, recursive=True)
 
     for json_file_path in frb_info_files:
         try:
             with open(json_file_path, "r") as f:
                 data = json.load(f)
+
+            # Successful triage is represented by frb_report.json and does
+            # not need to reappear as a standalone triage job after restart.
+            if (
+                os.path.basename(json_file_path) == TRIAGE_INFO_FILENAME
+                and data.get("status") == "completed"
+            ):
+                continue
+
+            # Older/hand-edited frb_info.json files may be missing run_name.
+            # It's recoverable from the path itself: outputs/<run_name>/<benchmark>-<binary>-<fuzzer>/frb_info.json.
+            run_name = data.get("run_name")
+            if not run_name:
+                run_name = os.path.basename(
+                    os.path.dirname(os.path.dirname(json_file_path))
+                )
+
+            required = {
+                "job_id": data.get("job_id"),
+                "fuzzer": data.get("fuzzer"),
+                "binary": data.get("binary"),
+                "benchmark": data.get("benchmark"),
+                "run_name": run_name,
+            }
+            missing = [k for k, v in required.items() if not v]
+            if missing:
+                print(
+                    f"[list_finished_jobs] Skipping {json_file_path}: "
+                    f"missing required field(s) {missing}"
+                )
+                continue
 
             job = Job(
                 job_id=data.get("job_id"),
@@ -1146,12 +1176,13 @@ def list_finished_jobs() -> List[Job]:
                 mode=data.get("mode"),
                 benchmark=data.get("benchmark"),
                 progress=data.get("progress", 0),
-                output_dir=data.get("output_dir"),
+                run_name=run_name,
                 auto_queue_triaging=data.get("auto_queue_triaging", True),
             )
 
             job.created_at = data.get("created_at")
             job.started_at = data.get("started_at")
+            job.manually_stopped = bool(data.get("manually_stopped", False))
             job.elapsed_time = (
                 data.get("ended_at", 0) - data.get("started_at", 0)
                 if data.get("started_at")
@@ -1172,7 +1203,7 @@ def list_finished_jobs() -> List[Job]:
                         run_number=task_data.get("run_number"),
                         mode=job.mode,
                         benchmark=job.benchmark,
-                        output_dir=job.output_dir,
+                        run_name=job.run_name,
                         runs=job.runs,
                         core_idx=task_data.get("core_idx"),
                         container_name=task_data.get("container_name"),
@@ -1182,6 +1213,7 @@ def list_finished_jobs() -> List[Job]:
                     task.created_at = task_data.get("created_at")
                     task.started_at = task_data.get("started_at")
                     task.completed_at = task_data.get("completed_at")
+                    task.stop_reason = task_data.get("stop_reason")
 
                     job.tasks.append(task)
 

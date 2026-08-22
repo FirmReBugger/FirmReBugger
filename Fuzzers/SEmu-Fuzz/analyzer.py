@@ -1,0 +1,1 @@
+from firmrebugger.bug_analyzer_utils.semu_analyzer import semu_analyzer as analyze

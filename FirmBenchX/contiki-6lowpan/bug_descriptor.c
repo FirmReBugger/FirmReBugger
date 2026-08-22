@@ -20,18 +20,18 @@ static void report_reached(const char* bug_id) {
 }
 
 void on_store_fragment() {
-    report_reached("H02");
+    report_reached("HAL02");
     // CVE_2019_9183
     uint8_t len = frb_mem_read(0x20001c58, 1);
     if (reg_state[2] > 11 ) {
-        report_detected_triggered("H02");
+        report_detected_triggered("HAL02");
     }
 }
 
 void overflow_on_input() {
-    report_reached("FRB14");
+    report_reached("HAL01");
     if (reg_state[0] + reg_state[2] > 0x20000fc2) {
-        report_detected_triggered("FRB14");
+        report_detected_triggered("HAL01");
     }
 }
 

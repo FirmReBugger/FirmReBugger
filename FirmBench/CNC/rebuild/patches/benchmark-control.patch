@@ -1,0 +1,80 @@
+diff --git a/CNC/board/main.c b/CNC/board/main.c
+index ffb9c07..a871d48 100644
+--- a/CNC/board/main.c
++++ b/CNC/board/main.c
+@@ -136,7 +136,7 @@ int main(void)
+ #else
+     usart_init();
+ #endif
+-    startForkserver(0);
++    controlSanitizer(1);
+     grbl_main();
+     return 0;
+ }
+diff --git a/CNC/grbl/grbl-master/afl_call.c b/CNC/grbl/grbl-master/afl_call.c
+index 8e088b9..8e2b5e1 100644
+--- a/CNC/grbl/grbl-master/afl_call.c
++++ b/CNC/grbl/grbl-master/afl_call.c
+@@ -25,3 +25,7 @@ int doneWork(int val) {
+     return aflCall(4, (uint32_t)val, 0);
+ }
+ */
++
++int controlSanitizer(int enable) {
++    return 0;
++}
+diff --git a/CNC/grbl/grbl-master/afl_call.h b/CNC/grbl/grbl-master/afl_call.h
+index c39f256..04fe918 100644
+--- a/CNC/grbl/grbl-master/afl_call.h
++++ b/CNC/grbl/grbl-master/afl_call.h
+@@ -6,6 +6,7 @@ extern "C" {
+ #endif
+ /* afl_call.c/.cpp */
+ int startForkserver(int ticks);
++int controlSanitizer(int enable);
+ int doneWork(int val);
+ #ifdef __cplusplus
+ }
+diff --git a/CNC/grbl/grbl-master/limits.c b/CNC/grbl/grbl-master/limits.c
+--- a/CNC/grbl/grbl-master/limits.c
++++ b/CNC/grbl/grbl-master/limits.c
+@@ -29,14 +29,17 @@
+ #include "protocol.h"
+ #include "limits.h"
+ #include "report.h"
++#include "afl_call.h"
+ 
+ #define MICROSECONDS_PER_ACCELERATION_TICK  (1000000/ACCELERATION_TICKS_PER_SECOND)
+ 
+ void limits_init()
+ {
++  controlSanitizer(0);
+   if (bit_istrue(settings.flags,BITFLAG_HARD_LIMIT_ENABLE)) {
+     limits_enabled = 1; // Enable
+   } else {
+     limits_enabled = 0; // Disable
+   }
++  controlSanitizer(1);
+ }
+diff --git a/CNC/grbl/grbl-master/main.c b/CNC/grbl/grbl-master/main.c
+--- a/CNC/grbl/grbl-master/main.c
++++ b/CNC/grbl/grbl-master/main.c
+@@ -62,7 +62,6 @@ int grbl_main(void)
+     if (sys.abort) {
+       // Reset system.
+-      serial_reset_read_buffer(); // Clear serial read buffer
+       plan_init(); // Clear block buffer and planner variables
+       gc_init(); // Set g-code parser to default state
+       protocol_init(); // Clear incoming line data and execute startup lines
+       spindle_init();
+diff --git a/CNC/board/usart.c b/CNC/board/usart.c
+--- a/CNC/board/usart.c
++++ b/CNC/board/usart.c
+@@ -283,7 +283,6 @@ uint8_t serial_read()
+ // Reset and empty data in read buffer. Used by e-stop and reset.
+ void serial_reset_read_buffer(void)
+ {
+-  return;
+   while (usart_tstc()) {
+     usart_getc();
+   }

@@ -19,19 +19,19 @@ static void report_reached(const char* bug_id) {
     frb_report_reached(bug_id);
 }
 
-void BUG_FW36() {
-    report_reached("FW36");
+void BUG_FP_FW36() {
+    report_reached("FP_FW36");
     //Unchecked error handler in spi_init causing Null Pointer Dereference
     if (reg_state[3] == 0) {
-        report_detected_triggered("FW36");
+        report_detected_triggered("FP_FW36");
     }
 }
 
-void BUG_FW36_2() {
-    report_reached("FW36");
+void BUG_FP_FW36_2() {
+    report_reached("FP_FW36");
     //Unchecked error handler in spi_init causing Null Pointer Dereference
     if (reg_state[3] == 0) {
-        report_detected_triggered("FW36");
+        report_detected_triggered("FP_FW36");
     }
 }
 
@@ -45,10 +45,10 @@ void BUG_FP_E04() {
 
 void BUG_MF17() {
     report_reached("MF17");
-    //Fragment offset is not buonds-checked in sicslowpan::input
-    //Check uncomp_hdr_len + (uint16_t)(frag_offset << 3) > 
-        // UIP_BUFSIZE (size stored in r0 at 0x4806 and UIP_BUFSIZE = 400).
-    if (reg_state[0] > 400) {
+    // Fragment offset plus payload length is not bounds-checked in
+    // sicslowpan::input. At 0x4806 r0 is the byte offset and r2 is the
+    // payload length; each sicslowpan buffer slot is 400 bytes.
+    if (reg_state[0] > 400 || reg_state[2] > 400 - reg_state[0]) {
         report_detected_triggered("MF17");
     }
 }
@@ -62,8 +62,8 @@ void BUG_FP_MF18() {
 }
 
 void register_reflection_points() {
-    frb_add_reflection_point(0x000012f8, BUG_FW36);
-    frb_add_reflection_point(0x00001356, BUG_FW36_2);
+    frb_add_reflection_point(0x000012f8, BUG_FP_FW36);
+    frb_add_reflection_point(0x00001356, BUG_FP_FW36_2);
     frb_add_reflection_point(0x000011e6, BUG_FP_E04);
     frb_add_reflection_point(0x00004806, BUG_MF17);
     frb_add_reflection_point(0x00001c06, BUG_FP_MF18);

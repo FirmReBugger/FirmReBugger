@@ -1,6 +1,7 @@
 import glob
 import io
 import os
+import shutil
 import sys
 import tarfile
 import threading
@@ -12,8 +13,11 @@ import zstandard
 from firmrebugger.bug_analyzer_utils.common import (
     get_available_cpu_count,
     periodic_printer,
-    run_command,
     update_bug_data,
+)
+from firmrebugger.bug_analyzer_utils.replay_worker import (
+    PersistentReplayPool,
+    replay_as_tuple,
 )
 
 
@@ -141,42 +145,52 @@ def hoedur_analyzer(
     failure_tb = None
     try:
         # Begin bug analysis on seeds
-        with ThreadPoolExecutor(max_workers=num_workers) as executor:
-            futures = []
-            get_hoedur_env()
-            for seed, time_val in sorted(working_folder):
-                seed_path = os.path.abspath(seed)
-                if "README" in seed_path:
-                    continue
-                command = (
-                    f"hoedur-dict-arm --import-config {corpus_path} run {seed_path}"
-                )
-                futures.append(
-                    executor.submit(
-                        run_command, command, seed_path, time_val, Crash, 10
+        with PersistentReplayPool(
+            num_workers, descriptor_path=descriptor_path
+        ) as replay_pool:
+            with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                futures = []
+                get_hoedur_env()
+                for seed, time_val in sorted(working_folder):
+                    seed_path = os.path.abspath(seed)
+                    if "README" in seed_path:
+                        continue
+                    command = (
+                        f"hoedur-dict-arm --import-config {corpus_path} run {seed_path}"
                     )
-                )
+                    futures.append(
+                        executor.submit(
+                            replay_as_tuple,
+                            replay_pool,
+                            command,
+                            seed_path,
+                            time_val,
+                            Crash,
+                            10,
+                            metadata={"corpus_path": corpus_path},
+                        )
+                    )
 
-            for future in as_completed(futures):
-                result = future.result()
-                if result is None:
-                    continue
-                seed_path, bugs_triggered, bugs_reached, time_val, elapsed, errors = (
-                    result
-                )
-                execution_times.append(elapsed)
+                for future in as_completed(futures):
+                    result = future.result()
+                    if result is None:
+                        continue
+                    seed_path, bugs_triggered, bugs_reached, time_val, elapsed, errors = (
+                        result
+                    )
+                    execution_times.append(elapsed)
 
-                run_data = update_bug_data(
-                    run_data,
-                    time_val,
-                    seed_path,
-                    bugs_triggered=bugs_triggered,
-                    bugs_reached=bugs_reached,
-                    Crash=Crash,
-                )
+                    run_data = update_bug_data(
+                        run_data,
+                        time_val,
+                        seed_path,
+                        bugs_triggered=bugs_triggered,
+                        bugs_reached=bugs_reached,
+                        Crash=Crash,
+                    )
 
-                progress["completed"] += 1
-                progress["ungrouped_crashes"] = len(run_data[0]["ungrouped_crashes"])
+                    progress["completed"] += 1
+                    progress["ungrouped_crashes"] = len(run_data[0]["ungrouped_crashes"])
     except Exception as exc:
         progress["failed"] = True
         progress["failure_message"] = str(exc)
@@ -185,6 +199,7 @@ def hoedur_analyzer(
     finally:
         stop_event.set()
         printer_thread.join()
+        shutil.rmtree(os.path.join(os.path.dirname(corpus_path), "tmp"), ignore_errors=True)
 
     if failure_exc is not None:
         print(
@@ -194,7 +209,5 @@ def hoedur_analyzer(
             flush=True,
         )
         raise failure_exc.with_traceback(failure_tb)
-
-    # shutil.rmtree(os.path.join(os.path.dirname(corpus_path), "tmp"))
 
     return run_data, execution_times

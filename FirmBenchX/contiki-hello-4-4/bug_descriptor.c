@@ -30,62 +30,65 @@ static uint32_t UIP_BUFSIZE = 1280;
 // BLE_L2CAP_NODE_MTU) and l2cap (missing check) PORTING: memcpy call in
 // function "output" (inlined compress_hdr_iphc) with variable size and related
 // to the "hc06_ptr" variable
-static uint32_t MEMCPY_CALL_LOC_COMPRESS_HDR_IPHC_PACKETBUF_OOB = 0x207AF0;
+static uint32_t MEMCPY_CALL_LOC_COMPRESS_HDR_IPHC_PACKETBUF_OOB = 0x207ccc;
 // PORTING: memcpy call in function "output" (!frag_needed case) with variable
 // size which is followed by function "send_packet"
-static uint32_t MEMCPY_CALL_LOC_OUTPUT_PACKETBUF_OOB = 0x207C92;
+static uint32_t MEMCPY_CALL_LOC_OUTPUT_PACKETBUF_OOB = 0x207e6e;
 // PORTING: memcpy call in function "process_thread_ble_l2cap_tx_process" with
 // variable size which is followed by packetbuf_set_datalen / ... / send
-static uint32_t MEMCPY_CALL_LOC_BLE_L2CAP_TX_PROCESS = 0x205638;
+static uint32_t MEMCPY_CALL_LOC_BLE_L2CAP_TX_PROCESS = 0x205724;
 // PORTING: memcpy call in function "fragment_copy_payload_and_send". These OOBs
 // (always) originate from output->fragment_copy_payload_and_send->memcpy
-static uint32_t MEMCPY_CALL_LOC_fragment_copy_payload_and_send = 0x204bae;
+static uint32_t MEMCPY_CALL_LOC_fragment_copy_payload_and_send = 0x2076ee;
 // PORTING: memcpy call in function "packetbuf_copyfrom". These OOBs (always)
 // originate from
 // output->fragment_copy_payload_and_send->queuebuf_to_packetbuf->packetbuf_copyfrom->memcpy
-static uint32_t MEMCPY_CALL_LOC_packetbuf_copyfrom = 0x207512;
+static uint32_t MEMCPY_CALL_LOC_packetbuf_copyfrom = 0x204c9a;
 // PORTING: memcpy call in function "compress_addr_64" (first call with constant
 // size 2). These OOBs (always) originate from output->compress_addr_64->memcpy
-static uint32_t MEMCPY_CALL_LOC_output_compress_addr_64_1 = 0x20748a;
+static uint32_t MEMCPY_CALL_LOC_output_compress_addr_64_1 = 0x207666;
 // PORTING: memcpy call in function "compress_addr_64" (second call with
 // constant size 8). These OOBs (always) originate from
 // output->compress_addr_64->memcpy
-static uint32_t MEMCPY_CALL_LOC_output_compress_addr_64_2 = 0x20749e;
+static uint32_t MEMCPY_CALL_LOC_output_compress_addr_64_2 = 0x20767a;
 // There are different, fixed/small-sized memcpy calls which may OOB in more
 // niche situations create a catch-all here PORTING: sicslowpan_driver.output
 // (mem.u32(symbols["sicslowpan_driver"]+0xc))
-static uint32_t SICSLOWPAN_DRIVER_OUTPUT_FN = 0x207564;
-static uint32_t SICSLOWPAN_DRIVER_OUTPUT_FN_END = 0x207cb8;
+static uint32_t SICSLOWPAN_DRIVER_OUTPUT_FN = 0x207740;
+static uint32_t SICSLOWPAN_DRIVER_OUTPUT_FN_END = 0x207e94;
 
 // memcpy packetbuf OOB cases
 // PORTING: Hook return from memcpy call in input following packetbuf_dataptr
 // (this matches the return for call hooked for unchecked_sdu_length)
-static uint32_t MEMCPY_CALL_LOC_PACKETBUF_KNOWN_UNCHECKED_SDU = 0x205b7e;
+static uint32_t MEMCPY_CALL_LOC_PACKETBUF_KNOWN_UNCHECKED_SDU = 0x205c6a;
 // PORTING: Hook return matching the first FW58 hook memcpy call in input
-static uint32_t MEMCPY_CALL_LOC_PACKETBUF_KNOWN_FW58_1 = 0x205b28;
+static uint32_t MEMCPY_CALL_LOC_PACKETBUF_KNOWN_FW58_1 = 0x205c14;
 // PORTING: Hook return matching the second FW58 hook memcpy call in input
-static uint32_t MEMCPY_CALL_LOC_PACKETBUF_KNOWN_FW58_2 = 0x205b4a;
+static uint32_t MEMCPY_CALL_LOC_PACKETBUF_KNOWN_FW58_2 = 0x205c36;
 // PORTING: Return from memcpy in input following assignment of
 // packetbuf_payload_len and other OOB against IP packet length Fix:
 // https://github.com/contiki-ng/contiki-ng/commit/c76aa9bc
-static uint32_t MEMCPY_CALL_LOC_SICSLOWPAN_FIRSTFRAG_OR_UNFRAG_OOB = 0x208514;
+static uint32_t MEMCPY_CALL_LOC_SICSLOWPAN_FIRSTFRAG_OR_UNFRAG_OOB = 0x2086f0;
 // PORTING: memcpy call in function "input" with variable size and related to
 // the "hc06_ptr" variable
-static uint32_t MEMCPY_CALL_LOC_UNCOMPRESS_HDR_IPHC = 0x208398;
+static uint32_t MEMCPY_CALL_LOC_UNCOMPRESS_HDR_IPHC = 0x208574;
 
 // Bugs: H07
 // PORTING: Symbol: frag_info
 static uint32_t FRAG_INFO = 0x20000a10;
-// sicslowpan_frag_info frag_info[2]
-static uint32_t FRAG_INFO_SIZE = 2 * 0xb8;
+// sicslowpan_frag_info frag_info[2]. Each 0xb8-byte element contains its
+// 148-byte first_frag buffer at offset 0x22.
+static uint32_t FRAG_INFO_COUNT = 2;
+static uint32_t FRAG_INFO_STRIDE = 0xb8;
+static uint32_t FRAG_INFO_FIRST_FRAG_OFFSET = 0x22;
+static uint32_t FRAG_INFO_FIRST_FRAG_LEN = 148;
 
 void H03() {
   uint32_t packetbuf_dataptr = reg_state[0];
   uint32_t channel = reg_state[5];
   report_reached("H03");
   uint32_t sdu_length = frb_mem_read(channel + 0xa14, 2);
-  // Fix:
-  // https://github.com/contiki-ng/contiki-ng/commit/506f9def7cdff853fa24cf6d88e1f4e5619dc46c
+  // Fix: https://github.com/contiki-ng/contiki-ng/commit/20ae1a06f2fa13acfba43da73adb71dc61fcef84
   if ((packetbuf_dataptr + sdu_length) >
       (PACKETBUF_ALIGNED + PACKETBUF_ALIGNED_LEN)) {
     report_detected_triggered("H03");
@@ -190,15 +193,19 @@ void on_fraginfo_oob_writes() {
   uint32_t dst = reg_state[0];
   report_reached("H07");
   report_reached("H08");
-  // Check for any copies targeting fragment buffers
-  if ((dst >= FRAG_INFO) && (dst < FRAG_INFO + FRAG_INFO_SIZE)) {
-    // Remaining buffer size: buffer len minus buffer cursor offset
-    uint32_t buf_size = FRAG_INFO_SIZE - (dst - FRAG_INFO);
-    uint32_t n = reg_state[2];
+  // Check against the selected element's first_frag subobject, not against
+  // the aggregate frag_info array.
+  for (uint32_t i = 0; i < FRAG_INFO_COUNT; i++) {
+    uint32_t buf_start =
+        FRAG_INFO + i * FRAG_INFO_STRIDE + FRAG_INFO_FIRST_FRAG_OFFSET;
+    uint32_t buf_end = buf_start + FRAG_INFO_FIRST_FRAG_LEN;
+    if ((dst >= buf_start) && (dst < buf_end)) {
+      uint32_t buf_size = buf_end - dst;
+      uint32_t n = reg_state[2];
 
-    if (n > buf_size) {
-      uint32_t lr = reg_state[14];
-      if (lr == (MEMCPY_CALL_LOC_UNCOMPRESS_HDR_IPHC | 1)) {
+      if (n > buf_size) {
+        uint32_t lr = reg_state[14];
+        if (lr == (MEMCPY_CALL_LOC_UNCOMPRESS_HDR_IPHC | 1)) {
         // Fix commits:
         // uncompress_hdr_iphc retval:
         // https://github.com/contiki-ng/contiki-ng/commit/971354a
@@ -206,14 +213,16 @@ void on_fraginfo_oob_writes() {
         // https://github.com/contiki-ng/contiki-ng/commit/b88e5c3 Main checks:
         // https://github.com/contiki-ng/contiki-ng/commit/668f244 Off-by-one
         // fix: https://github.com/contiki-ng/contiki-ng/commit/79cd1d6
-        report_detected_triggered("H07");
-      } else if (lr ==
-                 (MEMCPY_CALL_LOC_SICSLOWPAN_FIRSTFRAG_OR_UNFRAG_OOB | 1)) {
+          report_detected_triggered("H07");
+        } else if (lr ==
+                   (MEMCPY_CALL_LOC_SICSLOWPAN_FIRSTFRAG_OR_UNFRAG_OOB | 1)) {
         // buffer_size tracking:
         // https://github.com/contiki-ng/contiki-ng/commit/b88e5c3 buffer_size
         // oob check: https://github.com/contiki-ng/contiki-ng/commit/c76aa9bc
-        report_detected_triggered("H08");
+          report_detected_triggered("H08");
+        }
       }
+      return;
     }
   }
 }
@@ -265,12 +274,12 @@ void on_rpl_ext_header_srh_update() {
 }
 
 void register_reflection_points() {
-    frb_add_reflection_point(0x00205b6e, H03);
-    frb_add_reflection_point(0x00206972, H04_return);
-    frb_add_reflection_point(0x0020696e, H04_enter);
-    frb_add_reflection_point(0x00205b10, FW58_1);
-    frb_add_reflection_point(0x00205b32, FW58_2);
-    frb_add_reflection_point(0x0020aa58, on_packetbuf_oob_writes);
-    frb_add_reflection_point(0x0020aa58, on_fraginfo_oob_writes);
-    frb_add_reflection_point(0x002097f0, on_rpl_ext_header_srh_update);
+    frb_add_reflection_point(0x00205c5a, H03);
+    frb_add_reflection_point(0x00206b4e, H04_return);
+    frb_add_reflection_point(0x00206b4a, H04_enter);
+    frb_add_reflection_point(0x00205bfc, FW58_1);
+    frb_add_reflection_point(0x00205c1e, FW58_2);
+    frb_add_reflection_point(0x0020ab44, on_packetbuf_oob_writes);
+    frb_add_reflection_point(0x0020ab44, on_fraginfo_oob_writes);
+    frb_add_reflection_point(0x002091fc, on_rpl_ext_header_srh_update);
 }

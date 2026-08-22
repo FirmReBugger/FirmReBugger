@@ -1,0 +1,16 @@
+diff --git a/os/net/linkaddr.c b/os/net/linkaddr.c
+index c63f08135..13dfc600f 100644
+--- a/os/net/linkaddr.c
++++ b/os/net/linkaddr.c
+@@ -68,7 +68,10 @@ linkaddr_copy(linkaddr_t *dest, const linkaddr_t *src)
+ int
+ linkaddr_cmp(const linkaddr_t *addr1, const linkaddr_t *addr2)
+ {
+-	return (memcmp(addr1, addr2, LINKADDR_SIZE) == 0);
++	// return (memcmp(addr1, addr2, LINKADDR_SIZE) == 0);
++	#define FUZZING_ADDR_MASK 0b11
++	// Fuzzing: make address comparison less granular
++	return (addr1->u8[LINKADDR_SIZE-1] & FUZZING_ADDR_MASK) != (addr2->u8[LINKADDR_SIZE-1] & FUZZING_ADDR_MASK);
+ }
+ /*---------------------------------------------------------------------------*/
+ void

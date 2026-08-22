@@ -19,14 +19,14 @@ static void report_reached(const char* bug_id) {
     frb_report_reached(bug_id);
 }
 
-void BUG_H28() {
-    // CVE-2021-3330
-    report_reached("H28");
-    if (reg_state[2] > 0xf0000000  && reg_state[14] == 0x00403c7f) {
-        report_detected_triggered("H28");
+void BUG_FW55() {
+    // CVE-2021-3330: insertion before the list head without updating pkt->buffer.
+    report_reached("FW55");
+    if (reg_state[12] == 0) {
+        report_detected_triggered("FW55");
     }
 }
 
 void register_reflection_points() {
-    frb_add_reflection_point(0x0040cdbc, BUG_H28);
+    frb_add_reflection_point(0x00403c5e, BUG_FW55);
 }

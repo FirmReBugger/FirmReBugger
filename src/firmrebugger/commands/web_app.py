@@ -1,7 +1,9 @@
 import json
 import base64
 import io
+import logging
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -27,8 +29,10 @@ from firmrebugger.app_utils import (
     check_binaries,
     check_binaries_with_support,
     check_fuzzers,
-    check_output_name,
+    check_run_name_available,
     cpu_usage,
+    get_benchmark_binaries,
+    get_binary_bug_ids,
     get_reports,
     get_table_json,
 )
@@ -38,7 +42,12 @@ from firmrebugger.charting_tool_utils.generate_latex_tables import (
 )
 from firmrebugger.charting_tool_utils.generate_upset_plot import upset_plot
 from firmrebugger.charting_tool_utils.summarize_data import summarize_data
-from firmrebugger.common import get_frb_base_dir
+from firmrebugger.commands.bug_registry import (
+    _ID_RE,
+    _parse_detail_file,
+    _scan_bug_descriptor_ids,
+)
+from firmrebugger.common import get_binary_dir, get_frb_base_dir, get_run_output_dir
 from firmrebugger.manager import Job, JobManager, list_finished_jobs, start_manager
 
 STATIC_FOLDER = ""
@@ -52,6 +61,15 @@ CORS(
         }
     },
 )
+
+# The coverage-summary route is hit every few seconds per job and would
+# otherwise flood the werkzeug access log with routine 200s.
+class _SuppressCoveragePollLogs(logging.Filter):
+    def filter(self, record):
+        return "/coverage-summary" not in record.getMessage()
+
+
+logging.getLogger("werkzeug").addFilter(_SuppressCoveragePollLogs())
 
 FIRMREBUGGER_BASE_DIR = ""
 APP_PORT = 5000
@@ -120,14 +138,8 @@ def _read_log_chunk(log_path, before_offset=None, chunk_bytes=None):
 def serialize_jobs(jobs_list):
     jobs_data = []
     for job in jobs_list:
-        full_output_dir = os.path.join(
-            get_frb_base_dir(),
-            job.benchmark,
-            job.binary,
-            "fuzzers",
-            job.fuzzer,
-            "fuzzing_out",
-            job.output_dir,
+        full_output_dir = get_run_output_dir(
+            get_frb_base_dir(), job.run_name, job.benchmark, job.binary, job.fuzzer
         )
 
         report_path = os.path.join(full_output_dir, "frb_report.json")
@@ -148,7 +160,8 @@ def serialize_jobs(jobs_list):
                 "createdAt": job.created_at,
                 "startedAt": job.started_at,
                 "elapsedTime": job.elapsed_time,
-                "output_dir": job.output_dir,
+                "run_name": job.run_name,
+                "run_path": full_output_dir,
                 "autoQueueTriaging": bool(getattr(job, "auto_queue_triaging", True)),
                 "triaged": has_been_triaged,
             }
@@ -217,7 +230,54 @@ def _load_combined_reports_dataframe(report_paths):
 
 
 def _collect_unique_fuzzers(combined_df):
-    return list(combined_df["Fuzzer"].drop_duplicates())
+    return [
+        fuzzer
+        for fuzzer in combined_df["Fuzzer"].drop_duplicates()
+        if isinstance(fuzzer, str) and fuzzer
+    ]
+
+
+def _add_missing_binary_rows(combined_df, benchmark, selected_binaries):
+    """Add bug rows for selected binaries that have no report at all.
+
+    The empty fuzzer value deliberately does not match any expected fuzzer,
+    causing the LaTeX renderer to emit grey N/A cells for the whole binary.
+    """
+    selected_binaries = list(dict.fromkeys(selected_binaries or []))
+    if not selected_binaries:
+        return combined_df
+
+    existing_binaries = set()
+    if combined_df is not None and not combined_df.empty and "Binary" in combined_df:
+        existing_binaries = set(combined_df["Binary"].dropna())
+
+    rows = []
+    for binary in selected_binaries:
+        if binary in existing_binaries:
+            continue
+        for bug_id in get_binary_bug_ids(benchmark, binary):
+            rows.append(
+                {
+                    "Binary": binary,
+                    "Fuzzer": "",
+                    "BugID": bug_id,
+                    "NumRuns": None,
+                    "MedianReachedTime": None,
+                    "MedianTriggeredTime": None,
+                    "MedianDetectedTime": None,
+                    "ReachedCount": None,
+                    "TriggeredCount": None,
+                    "DetectedCount": None,
+                }
+            )
+
+    if not rows:
+        return combined_df
+
+    placeholder_df = pd.DataFrame(rows)
+    if combined_df is None or combined_df.empty:
+        return placeholder_df
+    return pd.concat([combined_df, placeholder_df], ignore_index=True, sort=False)
 
 
 def _render_latex_table_to_pdf_bytes(table_code):
@@ -294,7 +354,7 @@ def task_to_dict(task):
         "created_at": task.created_at,
         "started_at": task.started_at,
         "completed_at": task.completed_at,
-        "output_dir": task.output_dir,
+        "run_name": task.run_name,
         "runs": task.runs,
         "core_idx": core_idx_value,
         "container_name": getattr(task, "container_name", None),
@@ -305,20 +365,20 @@ def task_to_dict(task):
 @app.route("/api/fuzzers/list")
 def list_fuzzers_folder():
     try:
-        docker_path = Path(FIRMREBUGGER_BASE_DIR) / "docker"
+        fuzzers_path = Path(FIRMREBUGGER_BASE_DIR) / "Fuzzers"
 
-        if not docker_path.exists():
+        if not fuzzers_path.exists():
             return jsonify(
-                {"error": "Docker directory not found", "path": str(docker_path)}
+                {"error": "Fuzzers directory not found", "path": str(fuzzers_path)}
             ), 404
 
-        if not docker_path.is_dir():
+        if not fuzzers_path.is_dir():
             return jsonify(
-                {"error": "Path is not a directory", "path": str(docker_path)}
+                {"error": "Path is not a directory", "path": str(fuzzers_path)}
             ), 400
 
         items = []
-        for item in sorted(docker_path.iterdir()):
+        for item in sorted(fuzzers_path.iterdir()):
             items.append(
                 {
                     "name": item.name,
@@ -330,14 +390,14 @@ def list_fuzzers_folder():
         return jsonify(
             {
                 "base_dir": FIRMREBUGGER_BASE_DIR,
-                "path": "docker",
+                "path": "Fuzzers",
                 "items": items,
                 "count": len(items),
             }
         )
 
     except PermissionError:
-        return jsonify({"error": "Permission denied", "path": str(docker_path)}), 403
+        return jsonify({"error": "Permission denied", "path": str(fuzzers_path)}), 403
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
@@ -351,16 +411,24 @@ def generate_table():
             return jsonify({"error": "No data provided"}), 400
 
         report_paths = data.get("report_paths", [])
-        if not report_paths:
-            return jsonify({"error": "No report paths provided"}), 400
+        selected_binaries = data.get("selected_binaries", [])
+        fuzzers = data.get("fuzzers", [])
+        benchmark = data.get("benchmark", "FirmBench")
+        if not selected_binaries:
+            return jsonify({"error": "No binaries selected"}), 400
 
-        table_data = get_table_json(report_paths)
+        table_data = get_table_json(
+            report_paths,
+            benchmark=benchmark,
+            selected_binaries=selected_binaries,
+        )
 
         if not table_data:
             return jsonify({"error": "No bug data to visualize"}), 400
 
         response = {
             "table_data": table_data,
+            "fuzzers": fuzzers,
         }
 
         return jsonify(response), 200
@@ -376,18 +444,23 @@ def export_latex_table():
         data = request.json or {}
         benchmark = data.get("benchmark", "Report")
         report_paths = data.get("report_paths", [])
+        selected_binaries = data.get("selected_binaries", [])
+        expected_fuzzers = data.get("fuzzers", [])
 
-        if not report_paths:
-            return jsonify({"error": "No report paths provided"}), 400
+        if not selected_binaries:
+            return jsonify({"error": "No binaries selected"}), 400
 
         combined_df = _load_combined_reports_dataframe(report_paths)
+        combined_df = _add_missing_binary_rows(
+            combined_df, benchmark, selected_binaries
+        )
         if combined_df is None or combined_df.empty:
             return jsonify({"error": "No bug data to export"}), 400
 
         combined_df = combined_df.applymap(
             lambda x: escape_latex(str(x)) if isinstance(x, str) else x
         )
-        fuzzers = _collect_unique_fuzzers(combined_df)
+        fuzzers = expected_fuzzers or _collect_unique_fuzzers(combined_df)
         latex_code = reshape_and_convert_to_latex(combined_df, fuzzers)
 
         pdf_b64 = ""
@@ -411,6 +484,36 @@ def export_latex_table():
         )
     except Exception as e:
         print(f"Error in export_latex_table: {str(e)}")
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/report/export-csv", methods=["POST"])
+def export_csv_table():
+    try:
+        data = request.json or {}
+        benchmark = str(data.get("benchmark", "Report"))
+        report_paths = data.get("report_paths", [])
+        selected_binaries = data.get("selected_binaries", [])
+
+        if not selected_binaries:
+            return jsonify({"error": "No binaries selected"}), 400
+
+        combined_df = _load_combined_reports_dataframe(report_paths)
+        combined_df = _add_missing_binary_rows(
+            combined_df, benchmark, selected_binaries
+        )
+        if combined_df is None or combined_df.empty:
+            return jsonify({"error": "No bug data to export"}), 400
+
+        safe_benchmark = re.sub(r"[^A-Za-z0-9_-]+", "_", benchmark).strip("_")
+        filename = f"{(safe_benchmark or 'report').lower()}_summary_table.csv"
+        return Response(
+            combined_df.to_csv(index=False),
+            mimetype="text/csv",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except Exception as e:
+        print(f"Error in export_csv_table: {str(e)}")
         return jsonify({"error": str(e)}), 500
 
 
@@ -487,7 +590,7 @@ def add_job():
             binary = job_data["binary"]
             runs = int(job_data["runs"])
             mode = job_data["mode"]
-            output_dir = job_data.get("output_dir", "")
+            run_name = job_data.get("run_name", "")
             auto_queue_triaging = job_data.get("autoQueueTriaging", True)
 
             if runs < 1:
@@ -509,7 +612,7 @@ def add_job():
                     mode=mode,
                     benchmark=benchmark,
                     progress=0,
-                    output_dir=output_dir,
+                    run_name=run_name,
                     auto_queue_triaging=auto_queue_triaging,
                 )
                 job_manager.add_job(job)
@@ -807,26 +910,14 @@ def get_task_logs():
         else:
             log_filename = f"log-{task_found.run_number}.log"
 
-        normalized_output_dir = task_found.output_dir or ""
-        if os.path.isabs(normalized_output_dir):
-            marker = f"{os.sep}fuzzing_out{os.sep}"
-            if marker in normalized_output_dir:
-                normalized_output_dir = normalized_output_dir.split(marker, 1)[1].strip(
-                    os.sep
-                )
-            else:
-                normalized_output_dir = os.path.basename(
-                    normalized_output_dir.rstrip(os.sep)
-                )
-
         log_path = os.path.join(
-            FIRMREBUGGER_BASE_DIR,
-            task_found.benchmark,
-            task_found.binary,
-            "fuzzers",
-            task_found.fuzzer,
-            "fuzzing_out",
-            normalized_output_dir,
+            get_run_output_dir(
+                FIRMREBUGGER_BASE_DIR,
+                task_found.run_name,
+                task_found.benchmark,
+                task_found.binary,
+                task_found.fuzzer,
+            ),
             "fuzzing_logs",
             log_filename,
         )
@@ -893,36 +984,20 @@ def get_triage_log_by_job():
         benchmark = request.args.get("benchmark", None)
         binary = request.args.get("binary", None)
         fuzzer = request.args.get("fuzzer", None)
-        output_dir = request.args.get("output_dir", None)
+        run_name = request.args.get("run_name", None)
 
-        if not benchmark or not binary or not fuzzer or not output_dir:
+        if not benchmark or not binary or not fuzzer or not run_name:
             return jsonify(
                 {
-                    "error": "benchmark, binary, fuzzer, and output_dir are required",
+                    "error": "benchmark, binary, fuzzer, and run_name are required",
                     "content": "",
                 }
             ), 400
 
-        normalized_output_dir = output_dir
-        if os.path.isabs(normalized_output_dir):
-            marker = f"{os.sep}fuzzing_out{os.sep}"
-            if marker in normalized_output_dir:
-                normalized_output_dir = normalized_output_dir.split(marker, 1)[1].strip(
-                    os.sep
-                )
-            else:
-                normalized_output_dir = os.path.basename(
-                    normalized_output_dir.rstrip(os.sep)
-                )
-
         log_path = os.path.join(
-            FIRMREBUGGER_BASE_DIR,
-            benchmark,
-            binary,
-            "fuzzers",
-            fuzzer,
-            "fuzzing_out",
-            normalized_output_dir,
+            get_run_output_dir(
+                FIRMREBUGGER_BASE_DIR, run_name, benchmark, binary, fuzzer
+            ),
             "fuzzing_logs",
             "triage.log",
         )
@@ -961,7 +1036,7 @@ def get_triage_log_by_job():
                 "benchmark": benchmark,
                 "binary": binary,
                 "fuzzer": fuzzer,
-                "output_dir": normalized_output_dir,
+                "run_name": run_name,
                 "file_size": chunk["file_size"],
                 "start_offset": chunk["start_offset"],
                 "end_offset": chunk["end_offset"],
@@ -977,7 +1052,349 @@ def get_triage_log_by_job():
 @app.route("/api/config", methods=["GET"])
 def config():
     """Return runtime configuration for the frontend."""
-    return jsonify({"apiUrl": f"http://localhost:{APP_PORT}"})
+    return jsonify(
+        {
+            "apiUrl": f"http://localhost:{APP_PORT}",
+        }
+    )
+
+
+def _read_latest_coverage_blocks(output_dir):
+    """Read the most recent 'blocks' value (column 8, no header) from a live
+    MultiFuzz run's stats.csv, without loading the whole file — it grows
+    continuously during a run and can reach tens of MB. Reads only the last
+    few KB and finds the last complete row, tolerating a partial trailing
+    line if the writer is mid-append."""
+    stats_path = os.path.join(output_dir, "stats.csv")
+    try:
+        with open(stats_path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            if size == 0:
+                return None
+            chunk_size = min(size, 8192)
+            f.seek(size - chunk_size)
+            tail = f.read(chunk_size)
+    except OSError:
+        return None
+
+    for line in reversed(tail.split(b"\n")):
+        if not line.strip():
+            continue
+        fields = line.decode(errors="ignore").split(",")
+        if len(fields) < 8:
+            continue
+        try:
+            return int(fields[7])
+        except ValueError:
+            continue
+    return None
+
+
+_FUNC_SIG_RE = re.compile(r"^[A-Za-z_][\w \*]*?\b\w+\s*\([^)]*\)\s*\{", re.MULTILINE)
+
+
+def _extract_function_containing(content, offset):
+    """Return the source text of the top-level function containing the given
+    character offset, by walking back to the nearest preceding function
+    signature and forward to its matching closing brace."""
+    sig_match = None
+    for sig in _FUNC_SIG_RE.finditer(content):
+        if sig.start() > offset:
+            break
+        sig_match = sig
+    if sig_match is None:
+        return None
+
+    depth = 0
+    for i in range(sig_match.end() - 1, len(content)):
+        if content[i] == "{":
+            depth += 1
+        elif content[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return content[sig_match.start() : i + 1]
+    return None
+
+
+def _find_ravens_for_bug(base_dir, bug_id):
+    """Find the raven(s) — the bug_descriptor.c function containing the
+    report_reached/report_detected_triggered call — for this bug_id, across
+    every (benchmark, binary) location it actually appears in code. Ground
+    truth is the code scan, not the bug_analysis frontmatter's claimed
+    locations, since those can drift out of sync."""
+    id_match = _ID_RE.match(bug_id)
+    if not id_match:
+        return []
+    prefix, number = id_match.group(1), int(id_match.group(2))
+    locations = _scan_bug_descriptor_ids(base_dir).get((prefix, number), [])
+
+    call_re = re.compile(
+        r'report_(?:detected_triggered|reached)\(\s*"(FP_)?' + re.escape(bug_id) + r'"'
+    )
+
+    ravens = []
+    seen_code = set()
+    for benchmark, binary in sorted(set(locations)):
+        path = os.path.join(base_dir, benchmark, binary, "bug_descriptor.c")
+        try:
+            with open(path, "r", errors="replace") as f:
+                content = f.read()
+        except OSError:
+            continue
+
+        call_match = call_re.search(content)
+        if not call_match:
+            continue
+
+        code = _extract_function_containing(content, call_match.start())
+        if not code or code in seen_code:
+            continue
+        seen_code.add(code)
+
+        ravens.append(
+            {
+                "benchmark": benchmark,
+                "binary": binary,
+                "reported_id": ("FP_" if call_match.group(1) else "") + bug_id,
+                "code": code,
+            }
+        )
+
+    return ravens
+
+
+@app.route("/api/bug_analysis/<bug_id>", methods=["GET"])
+def bug_analysis_detail(bug_id):
+    """Serve a single bug_analysis/bugs/<BUG_ID>.md entry (frontmatter + body,
+    plus its raven(s) from bug_descriptor.c) as JSON, reusing the same parser
+    as the bug-registry CLI tooling."""
+    base_dir = get_frb_base_dir()
+    bugs_dir = os.path.realpath(os.path.join(base_dir, "bug_analysis", "bugs"))
+    path = os.path.realpath(os.path.join(bugs_dir, f"{bug_id}.md"))
+    if not path.startswith(bugs_dir + os.sep) or not os.path.isfile(path):
+        return jsonify({"error": "not_found"}), 404
+
+    entry, error = _parse_detail_file(path)
+    if error:
+        return jsonify({"error": error}), 500
+
+    entry["ravens"] = _find_ravens_for_bug(base_dir, bug_id)
+
+    return jsonify(entry)
+
+
+def _read_full_coverage_series(output_dir):
+    """Read the full (elapsed_ms, blocks) time series from a run's stats.csv.
+    Tolerates a partial trailing line if the writer is mid-append."""
+    stats_path = os.path.join(output_dir, "stats.csv")
+    series = []
+    try:
+        with open(stats_path, "r") as f:
+            for line in f:
+                fields = line.strip().split(",")
+                if len(fields) < 8:
+                    continue
+                try:
+                    series.append((int(fields[0]), int(fields[7])))
+                except ValueError:
+                    continue
+    except OSError:
+        return []
+    return series
+
+
+def _read_total_valid_blocks(base_dir, benchmark, binary):
+    """Total statically-valid basic block count for a binary, if known.
+
+    Populated ahead of time in <Benchmark>/<Binary>/valid_basic_blocks.txt
+    (one block address per line). Returns None when the file doesn't exist
+    for this binary — not every benchmark has one.
+    """
+    path = os.path.join(
+        get_binary_dir(base_dir, benchmark, binary), "valid_basic_blocks.txt"
+    )
+    try:
+        with open(path, "r") as f:
+            return sum(1 for line in f if line.strip())
+    except OSError:
+        return None
+
+
+@app.route("/api/jobs/<job_id>/coverage-summary", methods=["GET"])
+def job_coverage_summary(job_id):
+    """Live MultiFuzz coverage across a job's runs, read directly from each
+    run's stats.csv on disk — no external tool involved. Aggregated
+    server-side so the browser issues one request per job instead of one per
+    run, regardless of how many runs the job has."""
+    if not job_manager:
+        return jsonify({"avg_blocks": None, "total_blocks": None, "runs": []})
+
+    job = next(
+        (j for j in job_manager.get_current_jobs() if j.job_id == job_id), None
+    )
+    if job is None or job.fuzzer != "MultiFuzz":
+        return jsonify({"avg_blocks": None, "total_blocks": None, "runs": []})
+
+    base_dir = get_frb_base_dir()
+    work_dir = get_run_output_dir(
+        base_dir, job.run_name, job.benchmark, job.binary, job.fuzzer
+    )
+    total_blocks = _read_total_valid_blocks(base_dir, job.benchmark, job.binary)
+
+    runs = []
+    for run_num in range(1, job.runs + 1):
+        run_number = str(run_num).zfill(2)
+        output_dir = os.path.join(work_dir, f"output-{run_number}")
+        blocks = _read_latest_coverage_blocks(output_dir)
+        runs.append(
+            {
+                "run_number": run_number,
+                "blocks": blocks,
+                "coverage_pct": (
+                    round(100 * blocks / total_blocks, 2)
+                    if blocks is not None and total_blocks
+                    else None
+                ),
+            }
+        )
+
+    values = [r["blocks"] for r in runs if r["blocks"] is not None]
+    avg_blocks = sum(values) / len(values) if values else None
+    avg_coverage_pct = (
+        round(100 * avg_blocks / total_blocks, 2)
+        if avg_blocks is not None and total_blocks
+        else None
+    )
+
+    return jsonify(
+        {
+            "avg_blocks": avg_blocks,
+            "total_blocks": total_blocks,
+            "avg_coverage_pct": avg_coverage_pct,
+            "runs": runs,
+        }
+    )
+
+
+COVERAGE_TIMESERIES_MAX_BUCKETS = 200
+
+
+@app.route("/api/jobs/<job_id>/coverage-timeseries", methods=["GET"])
+def job_coverage_timeseries(job_id):
+    """Coverage-over-time for a MultiFuzz job, averaged across a chosen subset
+    of its runs. Reads each selected run's full stats.csv (not just the tail),
+    downsamples into a fixed number of time buckets, and returns per-bucket
+    mean/min/max blocks (and coverage %) across the selected runs so the
+    frontend can draw a single averaged coverage curve with a spread band."""
+    if not job_manager:
+        return jsonify({"buckets": [], "total_blocks": None, "runs_included": []})
+
+    job = next(
+        (j for j in job_manager.get_current_jobs() if j.job_id == job_id), None
+    )
+    if job is None or job.fuzzer != "MultiFuzz":
+        return jsonify({"buckets": [], "total_blocks": None, "runs_included": []})
+
+    runs_param = request.args.get("runs")
+    if runs_param:
+        try:
+            selected_runs = sorted(
+                {int(r) for r in runs_param.split(",") if r.strip()}
+            )
+        except ValueError:
+            return jsonify({"error": "invalid runs parameter"}), 400
+    else:
+        selected_runs = list(range(1, job.runs + 1))
+
+    base_dir = get_frb_base_dir()
+    work_dir = get_run_output_dir(
+        base_dir, job.run_name, job.benchmark, job.binary, job.fuzzer
+    )
+    total_blocks = _read_total_valid_blocks(base_dir, job.benchmark, job.binary)
+
+    series_by_run = {}
+    max_elapsed_ms = 0
+    for run_num in selected_runs:
+        if run_num < 1 or run_num > job.runs:
+            continue
+        run_number = str(run_num).zfill(2)
+        output_dir = os.path.join(work_dir, f"output-{run_number}")
+        series = _read_full_coverage_series(output_dir)
+        if series:
+            series_by_run[run_num] = series
+            max_elapsed_ms = max(max_elapsed_ms, series[-1][0])
+
+    runs_included = sorted(series_by_run.keys())
+    if not runs_included or max_elapsed_ms <= 0:
+        return jsonify(
+            {
+                "buckets": [],
+                "total_blocks": total_blocks,
+                "runs_included": runs_included,
+            }
+        )
+
+    num_buckets = min(COVERAGE_TIMESERIES_MAX_BUCKETS, max(1, max_elapsed_ms // 1000))
+    bucket_ms = max_elapsed_ms / num_buckets
+
+    per_run_bucketed = {}
+    for run_num, series in series_by_run.items():
+        values = [None] * (int(num_buckets) + 1)
+        for elapsed_ms, blocks in series:
+            idx = min(int(num_buckets), int(elapsed_ms // bucket_ms))
+            if values[idx] is None or blocks > values[idx]:
+                values[idx] = blocks
+        # Forward-fill gaps: coverage is monotonic, so a bucket with no
+        # samples holds the last known value rather than reading as a dip.
+        last = None
+        for i, value in enumerate(values):
+            if value is None:
+                values[i] = last
+            else:
+                last = value
+        per_run_bucketed[run_num] = values
+
+    buckets = []
+    for i in range(int(num_buckets) + 1):
+        vals = [
+            per_run_bucketed[r][i]
+            for r in runs_included
+            if per_run_bucketed[r][i] is not None
+        ]
+        if not vals:
+            continue
+        mean_blocks = sum(vals) / len(vals)
+        min_blocks = min(vals)
+        max_blocks = max(vals)
+        buckets.append(
+            {
+                "elapsed_seconds": round(i * bucket_ms / 1000, 1),
+                "mean_blocks": mean_blocks,
+                "min_blocks": min_blocks,
+                "max_blocks": max_blocks,
+                "mean_pct": (
+                    round(100 * mean_blocks / total_blocks, 2)
+                    if total_blocks
+                    else None
+                ),
+                "min_pct": (
+                    round(100 * min_blocks / total_blocks, 2) if total_blocks else None
+                ),
+                "max_pct": (
+                    round(100 * max_blocks / total_blocks, 2) if total_blocks else None
+                ),
+                "num_runs": len(vals),
+            }
+        )
+
+    return jsonify(
+        {
+            "buckets": buckets,
+            "total_blocks": total_blocks,
+            "runs_included": runs_included,
+        }
+    )
 
 
 @app.route("/api/check_fuzzers", methods=["GET"])
@@ -1062,7 +1479,8 @@ def get_reports_endpoint():
         benchmark = data.get("benchmark", "FirmBench")
         fuzzers = data.get("fuzzers", [])
 
-        valid_reports = get_reports(benchmark, fuzzers)
+        report_details = get_reports(benchmark, fuzzers)
+        valid_reports = [r["reportPath"] for r in report_details]
         report_durations = {}
 
         for report_path in valid_reports:
@@ -1076,7 +1494,9 @@ def get_reports_endpoint():
         return jsonify(
             {
                 "valid_reports": valid_reports,
+                "report_details": report_details,
                 "report_durations": report_durations,
+                "binaries": get_benchmark_binaries(benchmark),
                 "benchmark": benchmark,
                 "fuzzers": fuzzers,
             }
@@ -1087,24 +1507,24 @@ def get_reports_endpoint():
         return jsonify({"error": str(e), "valid_reports": []}), 500
 
 
-@app.route("/api/check_output_name", methods=["POST"])
-def check_output_name_endpoint():
-    """Check if output name already exists"""
+@app.route("/api/check_run_name", methods=["POST"])
+def check_run_name_endpoint():
+    """Check if a run name already exists for this benchmark+binary+fuzzer combo"""
     try:
         data = request.json
         benchmark = data.get("benchmark", "FirmBench")
         binary_name = data.get("binary_name", "")
         fuzzers_selected = data.get("fuzzers_selected", [])
-        output_name = data.get("output_name", "")
+        run_name = data.get("run_name", "")
 
-        is_valid = check_output_name(
-            benchmark, binary_name, fuzzers_selected, output_name
+        is_valid = check_run_name_available(
+            benchmark, binary_name, fuzzers_selected, run_name
         )
 
         return jsonify({"is_valid": is_valid, "exists": not is_valid})
 
     except Exception as e:
-        print(f"ERROR in check_output_name: {e}")
+        print(f"ERROR in check_run_name: {e}")
         return jsonify({"error": str(e), "is_valid": False}), 500
 
 

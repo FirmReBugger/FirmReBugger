@@ -1,0 +1,48 @@
+diff --git a/examples/gnrc_networking/Makefile b/examples/gnrc_networking/Makefile
+index 202d1eb080..a9fa00fd40 100644
+--- a/examples/gnrc_networking/Makefile
++++ b/examples/gnrc_networking/Makefile
+@@ -14,7 +14,8 @@ USEMODULE += auto_init_gnrc_netif
+ # Activate ICMPv6 error messages
+ USEMODULE += gnrc_icmpv6_error
+ # Specify the mandatory networking module for a IPv6 routing node
+-USEMODULE += gnrc_ipv6_router_default
++#USEMODULE += gnrc_ipv6_router_default
++USEMODULE += gnrc_sixlowpan_border_router_default
+ # Add a routing protocol
+ USEMODULE += gnrc_rpl
+ USEMODULE += auto_init_gnrc_rpl
+@@ -29,11 +30,31 @@ USEMODULE += netstats_l2
+ USEMODULE += netstats_ipv6
+ USEMODULE += netstats_rpl
+
++# more modules for testing
++USEMODULE += gnrc_sixlowpan_frag_sfr
++USEMODULE += gnrc_sixlowpan_frag_minfwd
++USEMODULE += gnrc_rpl_srh
++USEMODULE += gnrc_ipv6_ext_frag
++USEMODULE += gnrc_ipv6_ext_opt
++USEMODULE += gnrc_ipv6_nib_dns
++USEMODULE += sock_udp
++USEMODULE += sock_tcp
++USEMODULE += gnrc_ipv6_auto_subnets_simple
++USEMODULE += gnrc_dhcpv6_client_6lbr
++USEMODULE += stdio_ethos
++
++CFLAGS += -DETHOS_BAUDRATE=115200
++CFLAGS += -DCONFIG_GNRC_DHCPV6_CLIENT_6LBR_STATIC_ROUTE=1
++CFLAGS += -DCONFIG_GNRC_NETIF_IPV6_ADDRS_NUMOF=3
++
++# need more ram
++RAM_LEN ?= 128K
++
+ # Optionally include DNS support. This includes resolution of names at an
+ # upstream DNS server and the handling of RDNSS options in Router Advertisements
+ # to auto-configure that upstream DNS server.
+-# USEMODULE += sock_dns              # include DNS client
+-# USEMODULE += gnrc_ipv6_nib_dns     # include RDNSS option handling
++USEMODULE += sock_dns              # include DNS client
++USEMODULE += gnrc_ipv6_nib_dns     # include RDNSS option handling
+
+ # Comment this out to disable code in RIOT that does safety checking
+ # which is not needed in a production environment but helps in the

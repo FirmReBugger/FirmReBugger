@@ -1,0 +1,24 @@
+diff --git a/examples/default/Makefile b/examples/default/Makefile
+index 664945b..f902ca1 100644
+--- a/examples/default/Makefile
++++ b/examples/default/Makefile
+@@ -2,6 +2,6 @@
+ APPLICATION = default
+ 
+ # If no BOARD is found in the environment, use this default:
+-BOARD ?= native
++BOARD ?= frdm-k64f
+ 
+ # This has to be the absolute path to the RIOT base directory:
+diff --git a/makefiles/arch/cortexm.inc.mk b/makefiles/arch/cortexm.inc.mk
+index 2726fb4..96a41f0 100644
+--- a/makefiles/arch/cortexm.inc.mk
++++ b/makefiles/arch/cortexm.inc.mk
+@@ -10,6 +10,6 @@ export CFLAGS      += -mno-thumb-interwork
+ endif
+ export CFLAGS_LINK  = -ffunction-sections -fdata-sections -fno-builtin -fshort-enums
+ export CFLAGS_DBG  ?= -ggdb -g3
+-export CFLAGS_OPT  ?= -Os
++export CFLAGS_OPT  ?= -O0
+ 
+ export CFLAGS += $(CFLAGS_CPU) $(CFLAGS_LINK) $(CFLAGS_DBG) $(CFLAGS_OPT)

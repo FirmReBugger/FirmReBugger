@@ -23,3 +23,4 @@ struct CrashLoggerEmu {
 };
 
 void firmrebugger_init_config(Vm, CrashLoggerEmu*);
+int firmrebugger_reset_session(void);

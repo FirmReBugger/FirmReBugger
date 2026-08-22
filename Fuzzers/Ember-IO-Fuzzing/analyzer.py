@@ -1,0 +1,1 @@
+from firmrebugger.bug_analyzer_utils.ember_analyzer import ember_analyzer as analyze

@@ -20,6 +20,7 @@ typedef struct {
 } context_struct;
 
 void firmrebugger_init_config(CPUArchState *env, target_ulong pc_next);
+int firmrebugger_reset_session(void);
 uint32_t frb_mem_read(uint32_t read_addr, size_t size);
 void frb_mem_write(uint32_t write_addr, uint32_t value, size_t size);
 void frb_report_reached(const char* bug_id);

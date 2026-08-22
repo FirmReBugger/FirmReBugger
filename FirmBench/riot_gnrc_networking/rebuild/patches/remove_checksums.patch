@@ -1,0 +1,67 @@
+diff --git a/sys/net/gnrc/network_layer/icmpv6/gnrc_icmpv6.c b/sys/net/gnrc/network_layer/icmpv6/gnrc_icmpv6.c
+index ded5a9f15c..5c65fe4f59 100644
+--- a/sys/net/gnrc/network_layer/icmpv6/gnrc_icmpv6.c
++++ b/sys/net/gnrc/network_layer/icmpv6/gnrc_icmpv6.c
+@@ -78,11 +78,11 @@ void gnrc_icmpv6_demux(gnrc_netif_t *netif, gnrc_pktsnip_t *pkt)
+ 
+     hdr = (icmpv6_hdr_t *)icmpv6->data;
+ 
+-    if (_calc_csum(icmpv6, ipv6, pkt)) {
+-        DEBUG("icmpv6: wrong checksum.\n");
+-        gnrc_pktbuf_release(pkt);
+-        return;
+-    }
++    //if (_calc_csum(icmpv6, ipv6, pkt)) {
++    //    DEBUG("icmpv6: wrong checksum.\n");
++    //    gnrc_pktbuf_release(pkt);
++    //    return;
++    //}
+ 
+     switch (hdr->type) {
+         /* TODO: handle ICMPv6 errors */
+diff --git a/sys/net/gnrc/transport_layer/tcp/gnrc_tcp_eventloop.c b/sys/net/gnrc/transport_layer/tcp/gnrc_tcp_eventloop.c
+index d03cce3a4a..25126107b8 100644
+--- a/sys/net/gnrc/transport_layer/tcp/gnrc_tcp_eventloop.c
++++ b/sys/net/gnrc/transport_layer/tcp/gnrc_tcp_eventloop.c
+@@ -198,14 +198,14 @@ static int _receive(gnrc_pktsnip_t *pkt)
+     }
+ 
+     /* Validate checksum */
+-    if (byteorder_ntohs(hdr->checksum) != _gnrc_tcp_pkt_calc_csum(tcp, ip, pkt)) {
++    //if (byteorder_ntohs(hdr->checksum) != _gnrc_tcp_pkt_calc_csum(tcp, ip, pkt)) {
+ #ifndef MODULE_FUZZING
+-        gnrc_pktbuf_release(pkt);
+-        TCP_DEBUG_ERROR("-EINVAL: Invalid checksum.");
+-        TCP_DEBUG_LEAVE;
+-        return -EINVAL;
++    //    gnrc_pktbuf_release(pkt);
++    //    TCP_DEBUG_ERROR("-EINVAL: Invalid checksum.");
++    //    TCP_DEBUG_LEAVE;
++    //    return -EINVAL;
+ #endif
+-    }
++    //}
+ 
+     /* Find TCB to for this packet */
+     _gnrc_tcp_common_tcb_list_t *list = _gnrc_tcp_common_get_tcb_list();
+diff --git a/sys/net/gnrc/transport_layer/udp/gnrc_udp.c b/sys/net/gnrc/transport_layer/udp/gnrc_udp.c
+index ddf3423e32..e1d42a574c 100644
+--- a/sys/net/gnrc/transport_layer/udp/gnrc_udp.c
++++ b/sys/net/gnrc/transport_layer/udp/gnrc_udp.c
+@@ -142,11 +142,11 @@ static void _receive(gnrc_pktsnip_t *pkt)
+         gnrc_pktbuf_release(pkt);
+         return;
+     }
+-    if (_calc_csum(udp, ipv6, pkt) != 0xFFFF) {
+-        DEBUG("udp: received packet with invalid checksum, dropping it\n");
+-        gnrc_pktbuf_release(pkt);
+-        return;
+-    }
++    //if (_calc_csum(udp, ipv6, pkt) != 0xFFFF) {
++    //    DEBUG("udp: received packet with invalid checksum, dropping it\n");
++    //    gnrc_pktbuf_release(pkt);
++    //    return;
++    //}
+ 
+     /* get port (netreg demux context) */
+     port = (uint32_t)byteorder_ntohs(hdr->dst_port);

@@ -1,0 +1,73 @@
+diff --git a/common/ax5043.c b/common/ax5043.c
+index 5b51f3f3..cc30d59e 100644
+--- a/common/ax5043.c
++++ b/common/ax5043.c
+@@ -1149,30 +1149,16 @@ const void *ax5043GetPostamble(AX5043Driver *devp) {
+  * @api
+  */
+ ax5043_status_t ax5043Exchange(AX5043Driver *devp, uint16_t reg, bool write, const void *txbuf, void *rxbuf, size_t n) {
+-    SPIDriver *spip = NULL;
+-    ax5043_status_t status = 0;
+-
+     osalDbgCheck(devp != NULL && devp->config != NULL);
+     osalDbgAssert((devp->state != AX5043_UNINIT), "ax5043Exchange(), invalid state");
+ 
+-#if AX5043_USE_SPI
+-    spip = devp->config->spip;
+-#if AX5043_SHARED_SPI
+-    spiAcquireBus(spip);
+-    spiStart(spip, devp->config->spicfg);
+-#endif /* AX5043_SHARED_SPI */
+-
+-    spiSelect(spip);
+-    while (!palReadLine(devp->config->miso));
+-    status = ax5043SPIExchange(spip, reg, write, txbuf, rxbuf, n);
+-    spiUnselect(spip);
+-
+-#if AX5043_SHARED_SPI
+-    spiReleaseBus(spip);
+-#endif /* AX5043_SHARED_SPI */
+-#endif /* AX5043_USE_SPI */
++    if (rxbuf != NULL) {
++        for (size_t i = 0; i < n; i++) {
++            ((uint8_t *)rxbuf)[i] = *(volatile uint8_t *)0x40001000U;
++        }
++    }
+ 
+-    return status;
++    return 0;
+ }
+ 
+ /**
+@@ -1184,30 +1170,10 @@ ax5043_status_t ax5043Exchange(AX5043Driver *devp, uint16_t reg, bool write, con
+  * @api
+  */
+ ax5043_status_t ax5043GetStatus(AX5043Driver *devp) {
+-    SPIDriver *spip = NULL;
+-    ax5043_status_t status = 0;
+-
+     osalDbgCheck(devp != NULL && devp->config != NULL);
+     osalDbgAssert((devp->state != AX5043_UNINIT), "ax5043GetStatus(), invalid state");
+ 
+-#if AX5043_USE_SPI
+-    spip = devp->config->spip;
+-#if AX5043_SHARED_SPI
+-    spiAcquireBus(spip);
+-    spiStart(spip, devp->config->spicfg);
+-#endif /* AX5043_SHARED_SPI */
+-
+-    spiSelect(spip);
+-    while (!palReadLine(devp->config->miso));
+-    spiReceive(spip, 2, &status);
+-    spiUnselect(spip);
+-
+-#if AX5043_SHARED_SPI
+-    spiReleaseBus(spip);
+-#endif /* AX5043_SHARED_SPI */
+-#endif /* AX5043_USE_SPI */
+-
+-    return __REVSH(status);
++    return *(volatile ax5043_status_t *)0x40001004U;
+ }
+ 
+ /**

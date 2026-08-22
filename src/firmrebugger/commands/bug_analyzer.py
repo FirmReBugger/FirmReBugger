@@ -1,4 +1,5 @@
 import glob
+import importlib.util
 import json
 import os
 import re
@@ -12,27 +13,9 @@ from firmrebugger.bug_analyzer_utils.common import (
     init_run,
     print_bug_info,
 )
-from firmrebugger.bug_analyzer_utils.dice_analyzer import dice_analyzer
-from firmrebugger.bug_analyzer_utils.ember_analyzer import ember_analyzer
-from firmrebugger.bug_analyzer_utils.fuzzware_analyzer import fuzzware_analyzer
-from firmrebugger.bug_analyzer_utils.hoedur_analyzer import hoedur_analyzer
-from firmrebugger.bug_analyzer_utils.multifuzz_analyzer import multifuzzer_analyzer
-from firmrebugger.bug_analyzer_utils.semu_analyzer import semu_analyzer
 from firmrebugger.charting_tool_utils.summarize_data import summarize_data
 from firmrebugger.commands.gen_symbols import run_gen_symbols
-from firmrebugger.common import get_working_dirs
-
-fuzzer_function_mapping = {
-    "Ember-IO-Fuzzing": ember_analyzer,
-    "Fuzzware": fuzzware_analyzer,
-    "Fuzzware-Icicle": fuzzware_analyzer,
-    "SplITS": fuzzware_analyzer,
-    "Hoedur": hoedur_analyzer,
-    "MultiFuzz": multifuzzer_analyzer,
-    "SEmu-Fuzz": semu_analyzer,
-    "GDMA": fuzzware_analyzer,
-    "DICE": dice_analyzer,
-}
+from firmrebugger.common import get_frb_base_dir, get_working_dirs
 
 
 def get_run_number(output):
@@ -49,11 +32,33 @@ def get_run_number(output):
 
 
 def get_fuzzer_function(fuzzer):
-    if fuzzer in fuzzer_function_mapping:
-        return fuzzer_function_mapping[fuzzer]
-    else:
-        print(f"Error: No analysis function defined for fuzzer '{fuzzer}'")
+    """Load the `analyze` function from Fuzzers/<fuzzer>/analyzer.py.
+
+    Every integrated fuzzer registers its results parser this way, so adding
+    a new fuzzer never requires touching this file — just drop an
+    analyzer.py next to its runner.sh.
+    """
+    base_dir = get_frb_base_dir()
+    analyzer_path = os.path.join(base_dir, "Fuzzers", fuzzer, "analyzer.py")
+    if not os.path.isfile(analyzer_path):
+        print(
+            f"Error: no analyzer.py found for fuzzer '{fuzzer}' "
+            f"(expected at {analyzer_path})"
+        )
         sys.exit(1)
+
+    spec = importlib.util.spec_from_file_location(
+        f"firmrebugger._fuzzer_analyzer_{fuzzer}", analyzer_path
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    analyze = getattr(module, "analyze", None)
+    if analyze is None:
+        print(f"Error: {analyzer_path} does not define an 'analyze' function")
+        sys.exit(1)
+
+    return analyze
 
 
 def generate_frb_report(fuzzing_results_dir, descriptor_path):

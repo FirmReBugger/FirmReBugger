@@ -15,5 +15,6 @@
 
 //void crash_logger_hook(CPUArchState *env, target_ulong pc_next);
 void firmrebugger_init_config(CPUArchState *env,target_ulong pc_next);
+int firmrebugger_reset_session(void);
 
 #endif

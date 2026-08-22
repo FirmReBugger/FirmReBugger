@@ -1,0 +1,17 @@
+diff --git a/Gateway/StandardFirmata.ino b/Gateway/StandardFirmata.ino
+index 3aeb940..25a87ed 100644
+--- a/Gateway/StandardFirmata.ino
++++ b/Gateway/StandardFirmata.ino
+@@ -27,6 +27,4 @@
+ #include <Wire.h>
+ #include <Firmata.h>
+ 
+-#include "afl_call.h"
+-
+ #define I2C_WRITE                   B00000000
+@@ -780,5 +778,3 @@ void setup()
+ 
+   systemResetCallback();  // reset to default config
+-
+-  startForkserver(0);
+ }

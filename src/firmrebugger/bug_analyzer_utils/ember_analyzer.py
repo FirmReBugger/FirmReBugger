@@ -8,8 +8,11 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from firmrebugger.bug_analyzer_utils.common import (
     get_available_cpu_count,
     periodic_printer,
-    run_command,
     update_bug_data,
+)
+from firmrebugger.bug_analyzer_utils.replay_worker import (
+    PersistentReplayPool,
+    replay_as_tuple,
 )
 
 
@@ -110,41 +113,45 @@ def ember_analyzer(
     failure_exc = None
     failure_tb = None
     try:
-        with ThreadPoolExecutor(max_workers=num_workers) as executor:
-            futures = []
-            for seed_path in seeds:
-                command = f"{ember_env}/AFLplusplus/afl-qemu-trace -kernel {binary_path} {params[1]} {seed_path}"
-                futures.append(
-                    executor.submit(
-                        run_command,
-                        command,
-                        seed_path,
-                        get_time_input(seed_path),
-                        Crash,
-                        10,
+        with PersistentReplayPool(
+            num_workers, descriptor_path=descriptor_path
+        ) as replay_pool:
+            with ThreadPoolExecutor(max_workers=num_workers) as executor:
+                futures = []
+                for seed_path in seeds:
+                    command = f"{ember_env}/AFLplusplus/afl-qemu-trace -kernel {binary_path} {params[1]} {seed_path}"
+                    futures.append(
+                        executor.submit(
+                            replay_as_tuple,
+                            replay_pool,
+                            command,
+                            seed_path,
+                            get_time_input(seed_path),
+                            Crash,
+                            10,
+                        )
                     )
-                )
 
-            for future in as_completed(futures):
-                result = future.result()
-                if result is None:
-                    continue
-                seed_path, bugs_triggered, bugs_reached, time_val, elapsed, errors = (
-                    result
-                )
-                execution_times.append(elapsed)
+                for future in as_completed(futures):
+                    result = future.result()
+                    if result is None:
+                        continue
+                    seed_path, bugs_triggered, bugs_reached, time_val, elapsed, errors = (
+                        result
+                    )
+                    execution_times.append(elapsed)
 
-                run_data = update_bug_data(
-                    run_data,
-                    time_val,
-                    seed_path,
-                    bugs_triggered=bugs_triggered,
-                    bugs_reached=bugs_reached,
-                    Crash=Crash,
-                )
+                    run_data = update_bug_data(
+                        run_data,
+                        time_val,
+                        seed_path,
+                        bugs_triggered=bugs_triggered,
+                        bugs_reached=bugs_reached,
+                        Crash=Crash,
+                    )
 
-                progress["completed"] += 1
-                progress["ungrouped_crashes"] = len(run_data[0]["ungrouped_crashes"])
+                    progress["completed"] += 1
+                    progress["ungrouped_crashes"] = len(run_data[0]["ungrouped_crashes"])
     except Exception as exc:
         progress["failed"] = True
         progress["failure_message"] = str(exc)

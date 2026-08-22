@@ -256,11 +256,34 @@ void on_k_queue_get_poll() {
   // https://github.com/zephyrproject-rtos/zephyr/commit/99c2d2d0
   // https://github.com/zephyrproject-rtos/zephyr/commit/b173e4353fe55c42ee7f77277e13106021ba5678
   // fixed-Bug-k_poll-race-condition
+  //
+  // CORRECTED 2026-07-14 (was a no-op check -- see bug_analysis/bugs/H47.md):
+  // the original hook (0x0000ade2) sits inside k_queue_poll()'s post-k_poll()
+  // re-check of the queue (kernel/queue.c:320-321 in v2.2.0), reached only
+  // via the fallthrough of a `cbz r0` on the SAME register this function
+  // then re-read as "node" -- i.e. the old predicate (node==0) was true by
+  // construction every single time this address was hit at all (confirmed
+  // live: 75,775 triggers, zero correlated crashes). It never distinguished
+  // anything.
+  //
+  // The actual race the linked commits describe is k_poll()'s non-atomic
+  // unlock-then-block: it can report success (or -EAGAIN, "try again")
+  // while another context's insert+wakeup is lost, so the subsequent
+  // locked re-check of queue->data_q.head still finds nothing. That
+  // specific combination -- k_poll() claimed something changed
+  // (err == 0), yet the queue is still empty -- is the actual signature of
+  // the race, and it's checkable one instruction earlier, at the `err`
+  // decision point (kernel/queue.c:309, `err = k_poll(...)`), where
+  // reg_state[0] is confirmed live to be k_poll()'s return value and
+  // reg_state[5] the queue pointer (data_q.head is the queue struct's
+  // first word).
   report_reached("H47");
   uint32_t other_bug = arch_swap.bug || sent_cmd_state.bug;
-  uint32_t node = reg_state[0];
+  uint32_t poll_err = reg_state[0];
+  uint32_t queue = reg_state[5];
+  uint32_t data_q_head = frb_mem_read(queue, 4);
 
-  if (node == 0 && !other_bug) {
+  if (poll_err == 0 && data_q_head == 0 && !other_bug) {
     report_detected_triggered("H47");
   }
 }
@@ -462,6 +485,23 @@ void on_hci_cmd_done_state_update() {
 
 void on_bt_att_chan_req_send() {
   // fixed-Bug-double-bt_att_chan_req_send-null-ptr
+  //
+  // VERIFIED 2026-07-14 (see bug_analysis/bugs/H50.md): the hook/predicate
+  // are both correct as written (req+0x10 is req->buf, confirmed via
+  // DWARF; this really is att_send_req's entry, where req->buf gets
+  // dereferenced unconditionally a few instructions later) -- this is NOT
+  // a tautological/broken check like the original H47 was. It never
+  // fires in THIS build because CONFIG_BT_SMP is not compiled in (checked
+  // both FirmBench and FirmBenchX), which is the only path that resends a
+  // request whose req->buf was already nulled by a prior failed send
+  // (att_error_rsp's security-retry branch, hci_core.c/att.c). Every real
+  // invocation of att_send_req in this build (att_process's list-pop,
+  // bt_att_req_send's direct call) always uses a request whose buf was
+  // just freshly populated, and att_handle_rsp unconditionally destroys
+  // and NULLs the outstanding request before ever processing the next
+  // one -- so there is no live "double call" path to hit. Left as-is
+  // (not deleted) since a build with CONFIG_BT_SMP enabled could still
+  // exercise the real historical bug this checks for.
   report_reached("H50");
   uint32_t req = reg_state[4];
   uint32_t buf = frb_mem_read(req + 0x10, 4);
@@ -532,7 +572,7 @@ void register_reflection_points() {
     frb_add_reflection_point(0x00001748, on_arch_swap_enter);
     frb_add_reflection_point(0x0000177c, on_z_arm_pendsv);
     frb_add_reflection_point(0x00001768, on_arch_swap_after_pendsv);
-    frb_add_reflection_point(0x0000ade2, on_k_queue_get_poll);
+    frb_add_reflection_point(0x0000adb8, on_k_queue_get_poll);  // corrected from 0x0000ade2 -- see H47.md
     frb_add_reflection_point(0x000099ec, on_bt_att_sent);
     frb_add_reflection_point(0x000043a2, on_bt_att_recv);
     frb_add_reflection_point(0x000043a4, on_bt_att_recv);

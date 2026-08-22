@@ -41,6 +41,7 @@ USER root
 RUN pip3 install -e $FUZZER/repo/emulator/harness && \
     pip3 install -e $FUZZER/repo/pipeline
 RUN pip3 install watchdog
+COPY --chown=user docker/Fuzzware-Icicle/frb/frb_patches/persistent_worker.py $FUZZER/repo/emulator/harness/fuzzware_harness/persistent_worker.py
 
 
 # Install FirmReBugger
@@ -55,5 +56,6 @@ WORKDIR /home/user/firmrebugger/target
 
 ENV GHIDRA_SRC=$FUZZER/ghidra
 ENV FIRMREBUGGER_BASE_DIR=/home/user/firmrebugger
+ENV FRB_REPLAY_WORKER_COMMAND="/usr/bin/python3 -m fuzzware_harness.persistent_worker"
 
 ENTRYPOINT ["uv", "run", "frb", "bug-analyzer", "."]

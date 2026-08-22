@@ -252,8 +252,6 @@ def reshape_and_convert_to_latex(
                 return int(cleaned.max()) if not cleaned.empty else 0
 
             max_r_count = safe_int_col(bug_group["ReachedCount"])
-            max_t_count = safe_int_col(bug_group["TriggeredCount"])
-            max_d_count = safe_int_col(bug_group["DetectedCount"])
 
             for fuzzer in fuzzers:
                 fuzzer_row = bug_group[bug_group["Fuzzer"] == fuzzer]
@@ -284,9 +282,10 @@ def reshape_and_convert_to_latex(
                     detected_cell  = count_heatmap_cell(d_count, num_runs, detected_str)
 
                 else:
-                    reached_cell   = r"\cellcolor[HTML]{F5F5F5}" + r"\missing"
-                    triggered_cell = r"\cellcolor[HTML]{F5F5F5}" + r"\missing"
-                    detected_cell  = r"\cellcolor[HTML]{F5F5F5}" + r"\missing"
+                    not_applicable = r"\cellcolor[HTML]{D9D9D9}\textit{N/A}"
+                    reached_cell = not_applicable
+                    triggered_cell = not_applicable
+                    detected_cell = not_applicable
 
                 row_data.extend([str(reached_cell), str(triggered_cell), str(detected_cell)])
 

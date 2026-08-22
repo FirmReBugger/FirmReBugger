@@ -1,0 +1,23 @@
+diff --git a/os/net/ipv6/uip6.c b/os/net/ipv6/uip6.c
+index e998628d6..b9581be4b 100644
+--- a/os/net/ipv6/uip6.c
++++ b/os/net/ipv6/uip6.c
+@@ -281,6 +281,9 @@ uip_add32(uint8_t *op32, uint16_t op16)
+ static uint16_t
+ chksum(uint16_t sum, const uint8_t *data, uint16_t len)
+ {
++  // Fuzzing: Unify checksum calculation
++  return 0xffff;
++
+   uint16_t t;
+   const uint8_t *dataptr;
+   const uint8_t *last_byte;
+@@ -339,6 +342,8 @@ upper_layer_chksum(uint8_t proto)
+  * upper_layer_len triggers this bug unless it is declared volatile.
+  * See https://sourceforge.net/apps/mantisbt/contiki/view.php?id=3
+  */
++  // Fuzzing: Unify checksum calculation
++  return 0xffff;
+   volatile uint16_t upper_layer_len;
+   uint16_t sum;
+ 

@@ -1,0 +1,13 @@
+diff --git a/src/f4/app_control/Makefile b/src/f4/app_control/Makefile
+index a9d6c2ef..c2e463b9 100644
+--- a/src/f4/app_control/Makefile
++++ b/src/f4/app_control/Makefile
+@@ -173,7 +173,7 @@ CPPWARN = -Wall -Wextra -Wundef
+ #
+ 
+ # List all user C define here, like -D_DEBUG=1
+-UDEFS = -DSHELL_ENABLE -DSHELL_CONFIG_FILE -DFRAM_SHARED_I2C=TRUE -DMAX7310_SHARED_I2C=TRUE -DAX5043_SHARED_SPI=TRUE -DSI41XX_DEVICE=SI4112 -DUSLP_USE_SDLS=0 -DLFS_CONFIG=lfs_util_custom.h -DSTM32_FLASH_DUAL_BANK_PERMANENT=TRUE
++UDEFS = -DSHELL_ENABLE -DSHELL_CONFIG_FILE -DFRAM_SHARED_I2C=FALSE -DMAX7310_SHARED_I2C=FALSE -DAX5043_SHARED_SPI=FALSE -DSI41XX_DEVICE=SI4112 -DUSLP_USE_SDLS=0 -DLFS_CONFIG=lfs_util_custom.h -DSTM32_FLASH_DUAL_BANK_PERMANENT=TRUE
+ 
+ # Define ASM defines here
+ UADEFS =

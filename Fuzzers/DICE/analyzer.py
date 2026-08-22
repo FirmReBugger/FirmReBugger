@@ -1,0 +1,1 @@
+from firmrebugger.bug_analyzer_utils.dice_analyzer import dice_analyzer as analyze

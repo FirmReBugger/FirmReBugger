@@ -1,0 +1,16 @@
+diff --git a/common/ax5043.c b/common/ax5043.c
+index bafadb3e..5b51f3f3 100644
+--- a/common/ax5043.c
++++ b/common/ax5043.c
+@@ -86,11 +86,6 @@ ax5043_status_t ax5043SPIExchange(SPIDriver *spip, uint16_t reg, bool write, con
+     /* We always receive because we need the status bits */
+     spiExchange(spip, n + sizeof(uint16_t), sendbuf.buf, recvbuf.buf);
+ 
+-    /* Copy the RX data to provided buffer */
+-    if (rxbuf != NULL) {
+-        memcpy(rxbuf, recvbuf.data, n);
+-    }
+-
+     return __REVSH(recvbuf.status);
+ }
+ #endif /* AX5043_USE_SPI */

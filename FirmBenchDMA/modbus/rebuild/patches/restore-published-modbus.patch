@@ -1,0 +1,45 @@
+diff --git a/DICE-Evaluation/ARM/Fuzzing/Firmware/Sources/Modbus-ST-Workbench/src/modbus_rtu.c b/DICE-Evaluation/ARM/Fuzzing/Firmware/Sources/Modbus-ST-Workbench/src/modbus_rtu.c
+index ccdba26..6c89c69 100644
+--- a/DICE-Evaluation/ARM/Fuzzing/Firmware/Sources/Modbus-ST-Workbench/src/modbus_rtu.c
++++ b/DICE-Evaluation/ARM/Fuzzing/Firmware/Sources/Modbus-ST-Workbench/src/modbus_rtu.c
+@@ -5,18 +5,14 @@
+ #include "stm32f3xx_ll_rcc.h"
+ #include <stdint.h>
+ 
+-uint16_t canary1[64];
+ uint16_t modbusMemory[MODBUS_SLAVE_REGISTERS_NUM];
+-uint16_t canary2[64];
+ 
+ #define MODBUS_INTERRUPT_PRIORITY configLIBRARY_MAX_SYSCALL_INTERRUPT_PRIORITY + 2
+ 
+ #define MODBUS_MIN_FRAME_SIZE   5
+ #define MODBUS_MAX_FRAME_SIZE   256
+ 
+-static uint8_t canary3[128];
+ static uint8_t modbusRxTxBuffer[MODBUS_MAX_FRAME_SIZE];
+-static uint8_t canary4[128];
+ 
+ volatile uint16_t modbusRxCount = 0;
+ volatile uint8_t modbusSlaveFrameReadyFlag = 0;
+@@ -75,11 +71,7 @@ static void modbusSlaveHandler(void * pvParameters)
+             modbusSlaveStartReceiving();
+             continue;
+         }
+-        if(!modbusSlaveCheckCRC())
+-        {
+-            modbusSlaveStartReceiving();
+-            continue;
+-        }
++        modbusSlaveCheckCRC();
+         uint16_t answerLen = modbusSlaveParseFrame();
+         modbusSlaveStartTransmitting(answerLen);
+     }
+@@ -220,7 +212,7 @@ static uint8_t modbusSlaveCheckCRC(void)
+     uint16_t calculatedCRC = modbusSlaveGetCRC(modbusRxTxBuffer, modbusRxCount - 2);
+     if(recievedCRC == calculatedCRC)
+         return 1;
+-    return 1; //P2IM
++    return 0;
+ }
+ 
+ static uint16_t modbusSlaveGetCRC(uint8_t * buffer, uint16_t len)

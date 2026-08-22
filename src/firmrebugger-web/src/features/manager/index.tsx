@@ -68,7 +68,8 @@ export function Manager() {
           binary: job.binary,
           runs: job.runs,
           time: job.time,
-          output_dir: job.output_dir || "",
+          run_name: job.run_name || "",
+          run_path: job.run_path || job.run_name || "",
           status: normalizedStatus || "queued",
           progress: job.progress || 0,
           elapsedTime: job.elapsedTime || 0,
@@ -192,7 +193,7 @@ export function Manager() {
                   allTasks={tasks}
                   isFinishedJobs={true}
                   toolbarExtras={
-                    <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+                    <div className="flex flex-nowrap items-center gap-3 text-xs text-muted-foreground">
                       <div className="flex items-center gap-1.5">
                         <FileCheck className="h-3.5 w-3.5 text-blue-500" />
                         <span>Triaged</span>

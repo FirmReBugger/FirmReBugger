@@ -6,10 +6,12 @@ import click
 
 from firmrebugger.app_utils import check_fuzzers
 from firmrebugger.commands.bug_analyzer import run_bug_analyzer
+from firmrebugger.commands.bug_registry import run_bug_registry
 from firmrebugger.commands.build import build_fuzzers
 from firmrebugger.commands.charting_tool import run_charting_tool
 from firmrebugger.commands.fuzz import fuzz
 from firmrebugger.commands.gen_symbols import run_gen_symbols
+from firmrebugger.commands.port_layout import run_port_layout
 from firmrebugger.commands.web_app import run_app
 from firmrebugger.common import get_frb_base_dir, menu, parse_fuzzing_time
 
@@ -46,8 +48,10 @@ Commands:
   fuzz            Fuzz using FirmReBugger Benchmarks.
   build           Build fuzzers with Docker.
   bug-analyzer    Generate FirmReBugger bug reports.
+  bug-registry    Regenerate the bug ID registry (bug_analysis/README.md).
   charting-tool   Visualizes data from FirmReBugger reports.
   gen-symbols     Generate symbols.txt from an ELF file.
+  port-layout     Migrate an old folder layout to the current one.
   app             Run the FirmReBugger web application.
 Note:
   It is recommended to build the FirmReBugger versions locally.
@@ -97,7 +101,7 @@ def fuzz_cmd(time, num_trials, output_name):
     # Gather binaries that contain this fuzzer
     binaries = []
     for item in os.listdir(os.path.join(base_dir, benchmark)):
-        fuzzer_path = os.path.join(base_dir, benchmark, item, "fuzzers", fuzzer)
+        fuzzer_path = os.path.join(base_dir, benchmark, item, fuzzer)
         if os.path.isdir(fuzzer_path):
             binaries.append(item)
 
@@ -179,6 +183,23 @@ def bug_analyzer(fuzzing_results_dir, descriptor_path):
     run_bug_analyzer(fuzzing_results_dir, descriptor_path)
 
 
+@main.command("bug-registry")
+@click.option(
+    "--next",
+    "next_prefix",
+    default=None,
+    help="Print the next free bug ID for PREFIX (e.g. FRB) and exit, without regenerating bug_analysis/README.md.",
+)
+def bug_registry(next_prefix):
+    """Regenerate the bug ID registry (bug_analysis/README.md).
+
+    Cross-checks documented bugs under bug_analysis/ against the bug IDs
+    actually reported in bug_descriptor.c, flags collisions/undocumented
+    IDs, and reports the next free number per prefix.
+    """
+    run_bug_registry(next_prefix=next_prefix)
+
+
 @main.command("gen-symbols")
 @click.argument("elf_path")
 @click.option(
@@ -195,6 +216,39 @@ def gen_symbols(elf_path, output):
       ELF_PATH  Path to the ARM ELF binary.
     """
     run_gen_symbols(elf_path, output)
+
+
+@main.command("port-layout")
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Preview what would be moved without touching anything.",
+)
+@click.option(
+    "--yes",
+    "-y",
+    "assume_yes",
+    is_flag=True,
+    default=False,
+    help="Don't prompt for confirmation before moving files.",
+)
+def port_layout(dry_run, assume_yes):
+    """Migrate an old FirmReBugger folder layout to the current one.
+
+    \b
+    Old layout:
+      <Benchmark>/<Binary>/binary/<elf>
+      <Benchmark>/<Binary>/fuzzers/<Fuzzer>/fuzzing_out/<run_name>/
+    New layout:
+      <Benchmark>/<Binary>/<elf>
+      <Benchmark>/<Binary>/<Fuzzer>/
+      outputs/<run_name>/<Benchmark>-<Binary>-<Fuzzer>/
+
+    Run this if FirmReBugger refuses to start with a message about an old
+    directory layout.
+    """
+    run_port_layout(dry_run=dry_run, assume_yes=assume_yes)
 
 
 @main.command("charting-tool")

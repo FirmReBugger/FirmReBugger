@@ -1,0 +1,105 @@
+diff --git a/cpu/cc2538/periph/gpio.c b/cpu/cc2538/periph/gpio.c
+index b7849c0609..7163ba32a2 100644
+--- a/cpu/cc2538/periph/gpio.c
++++ b/cpu/cc2538/periph/gpio.c
+@@ -227,7 +227,10 @@ static inline void handle_isr(uint8_t port_num)
+     uint8_t pin = 0;
+     while (state) {
+         state = bitarithm_test_and_clear(state, &pin);
+-        isr_ctx[port_num][pin].cb(isr_ctx[port_num][pin].arg);
++        void *cb = isr_ctx[port_num][pin].cb;
++        if (cb) {
++            cb(isr_ctx[port_num][pin].arg);
++        }
+     }
+ 
+     cortexm_isr_end();
+diff --git a/cpu/cc2538/periph/timer.c b/cpu/cc2538/periph/timer.c
+index af8e04307e..884ece92e4 100644
+--- a/cpu/cc2538/periph/timer.c
++++ b/cpu/cc2538/periph/timer.c
+@@ -56,7 +56,7 @@ static const _isr_cfg_t chn_isr_cfg[] = {
+ /**
+  * @brief Timer state memory
+  */
+-static timer_isr_ctx_t isr_ctx[TIMER_NUMOF];
++static timer_isr_ctx_t isr_ctx[TIMER_NUMOF] = {0};
+ 
+ /* pending timer compare values TxMATCHR */
+ static union {
+@@ -381,7 +381,9 @@ static void irq_handler(tim_t tim, int channel)
+         /* Disable further match interrupts for this timer/channel */
+         dev(tim)->IMR &= ~chn_isr_cfg[channel].flag;
+         /* Invoke the callback function */
+-        isr_ctx[tim].cb(isr_ctx[tim].arg, channel);
++        if (isr_ctx[tim].cb) {
++            isr_ctx[tim].cb(isr_ctx[tim].arg, channel);
++        }
+     }
+ 
+     cortexm_isr_end();
+diff --git a/cpu/cc2538/periph/uart.c b/cpu/cc2538/periph/uart.c
+index 3f9a4abe43..186602adce 100644
+--- a/cpu/cc2538/periph/uart.c
++++ b/cpu/cc2538/periph/uart.c
+@@ -67,7 +67,7 @@ enum {
+ /**
+  * @brief Allocate memory to store the callback functions.
+  */
+-static uart_isr_ctx_t uart_ctx[UART_NUMOF];
++static uart_isr_ctx_t uart_ctx[UART_NUMOF] = {0};
+ 
+ #ifdef MODULE_PERIPH_UART_NONBLOCKING
+ 
+@@ -334,8 +334,10 @@ static inline void irq_handler(uart_t uart)
+     uint16_t mis = uart_config[uart].dev->cc2538_uart_mis.MIS;
+     uart_config[uart].dev->ICR = mis;
+ 
+-    while (uart_config[uart].dev->cc2538_uart_fr.FRbits.RXFE == 0) {
+-        uart_ctx[uart].rx_cb(uart_ctx[uart].arg, uart_config[uart].dev->DR);
++    if (uart_ctx[uart].rx_cb) {
++        while (uart_config[uart].dev->cc2538_uart_fr.FRbits.RXFE == 0) {
++            uart_ctx[uart].rx_cb(uart_ctx[uart].arg, uart_config[uart].dev->DR);
++        }
+     }
+ 
+ #ifdef MODULE_PERIPH_UART_NONBLOCKING
+diff --git a/cpu/cc2538/radio/cc2538_rf.c b/cpu/cc2538/radio/cc2538_rf.c
+index 4755ad3fe7..88ca8365d4 100644
+--- a/cpu/cc2538/radio/cc2538_rf.c
++++ b/cpu/cc2538/radio/cc2538_rf.c
+@@ -143,15 +143,16 @@ void cc2538_init(void)
+     _cc2538_observable_signals();
+ 
+     /* Enable IRQs */
+-    if (SYS_CTRL_I_MAP) {
++    if (true) {
+         NVIC_SetPriority(RF_RXTX_ALT_IRQn, CPU_DEFAULT_IRQ_PRIO);
+         NVIC_EnableIRQ(RF_RXTX_ALT_IRQn);
+ 
+         NVIC_SetPriority(RF_ERR_ALT_IRQn, CPU_DEFAULT_IRQ_PRIO);
+         NVIC_EnableIRQ(RF_ERR_ALT_IRQn);
+ 
+-        NVIC_SetPriority(MAC_TIMER_ALT_IRQn, CPU_DEFAULT_IRQ_PRIO);
+-        NVIC_EnableIRQ(MAC_TIMER_ALT_IRQn);
++        // not used?
++        //NVIC_SetPriority(MAC_TIMER_ALT_IRQn, CPU_DEFAULT_IRQ_PRIO);
++        //NVIC_EnableIRQ(MAC_TIMER_ALT_IRQn);
+     }
+     else {
+         NVIC_SetPriority(RF_RXTX_IRQn, CPU_DEFAULT_IRQ_PRIO);
+diff --git a/drivers/netdev_ieee802154_submac/netdev_ieee802154_submac.c b/drivers/netdev_ieee802154_submac/netdev_ieee802154_submac.c
+index d5692a5f57..a08dd32f37 100644
+--- a/drivers/netdev_ieee802154_submac/netdev_ieee802154_submac.c
++++ b/drivers/netdev_ieee802154_submac/netdev_ieee802154_submac.c
+@@ -331,7 +331,9 @@ static void _hal_radio_cb(ieee802154_dev_t *dev, ieee802154_trx_ev_t status)
+     default:
+         break;
+     }
+-    netdev->event_callback(netdev, NETDEV_EVENT_ISR);
++    if (netdev->event_callback) {
++        netdev->event_callback(netdev, NETDEV_EVENT_ISR);
++    }
+ }
+ 
+ static int _init(netdev_t *netdev)

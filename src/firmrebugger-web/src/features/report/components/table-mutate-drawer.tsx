@@ -26,12 +26,15 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+
+type ReportDetail = {
+  reportPath: string;
+  benchmark: string;
+  binary: string;
+  fuzzer: string;
+  run_name: string;
+  mtime: number;
+};
 
 type TableMutateDrawerProps = {
   open: boolean;
@@ -48,7 +51,7 @@ const formSchema = z.object({
     .record(z.string(), z.record(z.string(), z.string()))
     .refine((reports) => {
       return Object.keys(reports).length > 0;
-    }, "At least one binary with reports selected is required."),
+    }, "At least one binary is required."),
 });
 export type TableForm = z.infer<typeof formSchema>;
 
@@ -62,59 +65,61 @@ export function TableMutateDrawer({
 }: TableMutateDrawerProps) {
   const [fuzzers, setFuzzers] = useState<string[]>([]);
   const [loadingFuzzers, setLoadingFuzzers] = useState(false);
-  const [validFuzzers, setValidFuzzers] = useState<string[]>([]);
-  const [reportPaths, setReportPaths] = useState<string[]>([]);
+  const [reportDetails, setReportDetails] = useState<ReportDetail[]>([]);
+  const [benchmarkBinaries, setBenchmarkBinaries] = useState<string[]>([]);
   const [reportDurations, setReportDurations] = useState<
     Record<string, number | null>
-  >({});
-  const [availableBinaries, setAvailableBinaries] = useState<string[]>([]);
-  const [unavailableReasons, setUnavailableReasons] = useState<
-    Record<string, string>
   >({});
   const [loadingReports, setLoadingReports] = useState(false);
   const [binarySearch, setBinarySearch] = useState("");
   const [expandedBinaries, setExpandedBinaries] = useState<Set<string>>(
     new Set(),
   );
+  const [pendingBinarySelections, setPendingBinarySelections] = useState<
+    Set<string>
+  >(new Set());
   const API_URL = useApiUrl();
 
   const reportsByBinaryAndFuzzer: Record<string, Record<string, string[]>> = {};
+  const reportDetailsByPath: Record<string, ReportDetail> = {};
 
-  const extractBinaryAndFuzzer = (reportPath: string) => {
-    const parts = reportPath.split("/");
-    const benchmarkIndex = parts.indexOf(benchmark);
-    const fuzzersIndex = parts.indexOf("fuzzers");
+  reportDetails.forEach((detail) => {
+    reportDetailsByPath[detail.reportPath] = detail;
 
-    if (
-      benchmarkIndex !== -1 &&
-      fuzzersIndex !== -1 &&
-      benchmarkIndex + 1 < parts.length &&
-      fuzzersIndex + 1 < parts.length
-    ) {
-      return {
-        binaryName: parts[benchmarkIndex + 1],
-        fuzzerName: parts[fuzzersIndex + 1],
-      };
+    if (!reportsByBinaryAndFuzzer[detail.binary]) {
+      reportsByBinaryAndFuzzer[detail.binary] = {};
     }
-    return null;
-  };
-
-  reportPaths.forEach((reportPath) => {
-    const extracted = extractBinaryAndFuzzer(reportPath);
-    if (extracted) {
-      const { binaryName, fuzzerName } = extracted;
-
-      if (!reportsByBinaryAndFuzzer[binaryName]) {
-        reportsByBinaryAndFuzzer[binaryName] = {};
-      }
-      if (!reportsByBinaryAndFuzzer[binaryName][fuzzerName]) {
-        reportsByBinaryAndFuzzer[binaryName][fuzzerName] = [];
-      }
-      reportsByBinaryAndFuzzer[binaryName][fuzzerName].push(reportPath);
+    if (!reportsByBinaryAndFuzzer[detail.binary][detail.fuzzer]) {
+      reportsByBinaryAndFuzzer[detail.binary][detail.fuzzer] = [];
     }
+    reportsByBinaryAndFuzzer[detail.binary][detail.fuzzer].push(
+      detail.reportPath,
+    );
   });
 
-  const reportCompleteBinaries = Object.keys(reportsByBinaryAndFuzzer);
+  const reportBinaries = Object.keys(reportsByBinaryAndFuzzer).sort(
+    (a, b) => a.localeCompare(b),
+  );
+  const allBinaries = Array.from(
+    new Set([...benchmarkBinaries, ...reportBinaries]),
+  ).sort((a, b) => a.localeCompare(b));
+  const binariesWithoutReports = allBinaries.filter(
+    (binary) => !reportsByBinaryAndFuzzer[binary],
+  );
+  const reportFolders = Array.from(
+    reportDetails.reduce((folders, detail) => {
+      const outputFolder = detail.run_name || "Unknown output folder";
+      const binaries = folders.get(outputFolder) || new Set<string>();
+      binaries.add(detail.binary);
+      folders.set(outputFolder, binaries);
+      return folders;
+    }, new Map<string, Set<string>>()),
+  )
+    .map(([outputFolder, binaries]) => ({
+      outputFolder,
+      binaries: Array.from(binaries).sort((a, b) => a.localeCompare(b)),
+    }))
+    .sort((a, b) => a.outputFolder.localeCompare(b.outputFolder));
 
   useEffect(() => {
     const fetchFuzzers = async () => {
@@ -188,26 +193,6 @@ export function TableMutateDrawer({
       ? data.fuzzer
       : [data.fuzzer];
 
-    const incompleteBinaries: string[] = [];
-    Object.entries(data.selectedReports).forEach(([binary, fuzzerReports]) => {
-      const missingFuzzers = selectedFuzzers.filter(
-        (fuzzer) => !fuzzerReports[fuzzer],
-      );
-      if (missingFuzzers.length > 0) {
-        incompleteBinaries.push(
-          `${binary} (missing: ${missingFuzzers.join(", ")})`,
-        );
-      }
-    });
-
-    if (incompleteBinaries.length > 0) {
-      form.setError("selectedReports", {
-        type: "manual",
-        message: `Please select a report for all fuzzers in: ${incompleteBinaries.join("; ")}`,
-      });
-      return;
-    }
-
     const selectedReportPaths: string[] = [];
     Object.values(data.selectedReports).forEach((fuzzerReports) => {
       Object.values(fuzzerReports).forEach((reportPath) => {
@@ -220,6 +205,7 @@ export function TableMutateDrawer({
         benchmark,
         selectedFuzzers,
         selectedReportPaths,
+        selectedBinaries: Object.keys(data.selectedReports),
       });
       const response = await fetch(`${API_URL}/api/table/generate`, {
         method: "POST",
@@ -228,6 +214,7 @@ export function TableMutateDrawer({
           benchmark,
           fuzzers: selectedFuzzers,
           report_paths: selectedReportPaths,
+          selected_binaries: Object.keys(data.selectedReports),
         }),
       });
 
@@ -266,132 +253,41 @@ export function TableMutateDrawer({
     }
   };
 
-  useEffect(() => {
-    const fetchValidFuzzers = async () => {
-      try {
-        const response = await fetch(
-          `${API_URL}/api/check_fuzzers?benchmark=${benchmark}`,
-        );
-        const data = await response.json();
-        if (data.valid_fuzzers) {
-          setValidFuzzers(data.valid_fuzzers);
-        }
-      } catch (error) {
-        console.error("Failed to fetch valid fuzzers:", error);
-        setValidFuzzers(fuzzers);
-      }
-    };
-
-    if (benchmark) {
-      fetchValidFuzzers();
-    }
-  }, [benchmark, fuzzers]);
-
   const fetchReportsFor = async (selectedFuzzers: string[]) => {
     if (!selectedFuzzers || selectedFuzzers.length === 0) {
-      setReportPaths([]);
+      setReportDetails([]);
+      setBenchmarkBinaries([]);
       setReportDurations({});
-      setAvailableBinaries([]);
-      setUnavailableReasons({});
       return;
     }
 
     setLoadingReports(true);
     try {
-      const [reportsResponse, binariesResponse] = await Promise.all([
-        fetch(`${API_URL}/api/get_reports`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            benchmark: benchmark,
-            fuzzers: selectedFuzzers,
-          }),
+      const reportsResponse = await fetch(`${API_URL}/api/get_reports`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          benchmark: benchmark,
+          // Fetch every discovered report. The backend's filtered response
+          // omits binaries when one selected fuzzer has no report, while the
+          // drawer needs to show that missing-fuzzer state itself.
+          fuzzers: [],
         }),
-        fetch(`${API_URL}/api/check_binaries`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            benchmark: benchmark,
-            fuzzers: selectedFuzzers,
-          }),
-        }),
-      ]);
-
-      const reportsData = await reportsResponse.json();
-      const binariesData = await binariesResponse.json();
-
-      const validReports = reportsData.valid_reports || [];
-      const durations = reportsData.report_durations || {};
-      const validBinaries = binariesData.valid_binaries || [];
-
-      setReportPaths(validReports);
-      setReportDurations(durations);
-      setAvailableBinaries(validBinaries);
-
-      const binariesWithCompleteReports = new Set<string>();
-      validReports.forEach((reportPath: string) => {
-        const extracted = extractBinaryAndFuzzer(reportPath);
-        if (extracted) {
-          binariesWithCompleteReports.add(extracted.binaryName);
-        }
       });
 
-      const unavailableBinaries = validBinaries.filter(
-        (binary: string) => !binariesWithCompleteReports.has(binary),
-      );
+      const reportsData = await reportsResponse.json();
 
-      if (unavailableBinaries.length > 0) {
-        const perFuzzerReports = await Promise.all(
-          selectedFuzzers.map(async (fuzzer) => {
-            try {
-              const response = await fetch(`${API_URL}/api/get_reports`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  benchmark,
-                  fuzzers: [fuzzer],
-                }),
-              });
-              const data = await response.json();
-              return { fuzzer, reports: data.valid_reports || [] };
-            } catch {
-              return { fuzzer, reports: [] };
-            }
-          }),
-        );
+      const details: ReportDetail[] = reportsData.report_details || [];
+      const durations = reportsData.report_durations || {};
 
-        const fuzzerBinarySets: Record<string, Set<string>> = {};
-        perFuzzerReports.forEach(({ fuzzer, reports }) => {
-          const binariesForFuzzer = new Set<string>();
-          reports.forEach((reportPath: string) => {
-            const extracted = extractBinaryAndFuzzer(reportPath);
-            if (extracted) {
-              binariesForFuzzer.add(extracted.binaryName);
-            }
-          });
-          fuzzerBinarySets[fuzzer] = binariesForFuzzer;
-        });
-
-        const reasons: Record<string, string> = {};
-        unavailableBinaries.forEach((binary: string) => {
-          const missingFuzzers = selectedFuzzers.filter(
-            (fuzzer) => !fuzzerBinarySets[fuzzer]?.has(binary),
-          );
-          reasons[binary] =
-            missingFuzzers.length > 0
-              ? `No result for ${binary} and ${missingFuzzers.join(", ")}`
-              : `No result for ${binary} and selected fuzzers`;
-        });
-        setUnavailableReasons(reasons);
-      } else {
-        setUnavailableReasons({});
-      }
+      setReportDetails(details);
+      setBenchmarkBinaries(reportsData.binaries || []);
+      setReportDurations(durations);
     } catch (error) {
       console.error("Failed to fetch reports:", error);
-      setReportPaths([]);
+      setReportDetails([]);
+      setBenchmarkBinaries([]);
       setReportDurations({});
-      setAvailableBinaries([]);
-      setUnavailableReasons({});
     } finally {
       setLoadingReports(false);
     }
@@ -417,18 +313,14 @@ export function TableMutateDrawer({
         const currentReports = form.getValues("selectedReports") || {};
 
         const updatedReports = Object.fromEntries(
-          Object.entries(currentReports)
-            .map(([binary, fuzzerReports]) => [
-              binary,
-              Object.fromEntries(
-                Object.entries(fuzzerReports).filter(([fuzzer]) =>
-                  selectedFuzzers.includes(fuzzer),
-                ),
+          Object.entries(currentReports).map(([binary, fuzzerReports]) => [
+            binary,
+            Object.fromEntries(
+              Object.entries(fuzzerReports).filter(([fuzzer]) =>
+                selectedFuzzers.includes(fuzzer),
               ),
-            ])
-            .filter(
-              ([, fuzzerReports]) => Object.keys(fuzzerReports).length > 0,
             ),
+          ]),
         );
 
         form.setValue("selectedReports", updatedReports);
@@ -451,12 +343,7 @@ export function TableMutateDrawer({
   };
 
   const getReportLabel = (reportPath: string) => {
-    const parts = reportPath.split("/");
-    let outputName = reportPath;
-    const fuzzingOutIndex = parts.findIndex((p) => p === "fuzzing_out");
-    if (fuzzingOutIndex !== -1 && fuzzingOutIndex + 1 < parts.length) {
-      outputName = parts[fuzzingOutIndex + 1];
-    }
+    const outputName = reportDetailsByPath[reportPath]?.run_name || reportPath;
 
     const durationSeconds = reportDurations[reportPath];
     if (
@@ -485,103 +372,80 @@ export function TableMutateDrawer({
   };
 
   const getReportTimestamp = (reportPath: string): number => {
-    const parts = reportPath.split("/");
-    const fuzzingOutIndex = parts.findIndex((p) => p === "fuzzing_out");
-    if (fuzzingOutIndex !== -1 && fuzzingOutIndex + 1 < parts.length) {
-      const timestamp = parts[fuzzingOutIndex + 1];
-      const match = timestamp.match(
-        /(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})/,
-      );
-      if (match) {
-        const [, year, month, day, hour, minute, second] = match;
-        return new Date(
-          `${year}-${month}-${day}T${hour}:${minute}:${second}`,
-        ).getTime();
-      }
-    }
-    return 0;
+    return (reportDetailsByPath[reportPath]?.mtime || 0) * 1000;
   };
 
   const getOutputFolderName = (reportPath: string): string => {
-    const parts = reportPath.split("/");
-    const fuzzingOutIndex = parts.findIndex((p) => p === "fuzzing_out");
-    if (fuzzingOutIndex !== -1 && fuzzingOutIndex + 1 < parts.length) {
-      return parts[fuzzingOutIndex + 1];
-    }
-    return reportPath;
+    return reportDetailsByPath[reportPath]?.run_name || reportPath;
   };
 
-  const selectMatchingFolderReports = (binary: string) => {
+  const folderBinaryKey = (outputFolder: string, binary: string) =>
+    `${outputFolder}\u0000${binary}`;
+
+  const togglePendingBinary = (outputFolder: string, binary: string) => {
+    const key = folderBinaryKey(outputFolder, binary);
+    setPendingBinarySelections((current) => {
+      const updated = new Set(current);
+      if (updated.has(key)) {
+        updated.delete(key);
+      } else {
+        updated.add(key);
+      }
+      return updated;
+    });
+  };
+
+  const selectFolderReports = (
+    binaries: string[],
+    outputFolder: string,
+  ) => {
     const currentValue = form.getValues("selectedReports") || {};
     const newValue = { ...currentValue };
 
-    if (!newValue[binary]) {
-      newValue[binary] = {};
-    }
-
     const selectedFuzzerList = selectedFuzzers || [];
-    if (selectedFuzzerList.length === 0) {
+    if (selectedFuzzerList.length === 0 || binaries.length === 0) {
       return;
     }
 
-    const outputNameSetsByFuzzer: Record<string, Set<string>> = {};
-    selectedFuzzerList.forEach((fuzzer) => {
-      const reportsForFuzzer = reportsByBinaryAndFuzzer[binary]?.[fuzzer] || [];
-      outputNameSetsByFuzzer[fuzzer] = new Set(
-        reportsForFuzzer.map((path) => getOutputFolderName(path)),
-      );
-    });
+    binaries.forEach((binary) => {
+      // Applying a folder replaces this binary's previous choices. Fuzzers
+      // without a report intentionally remain absent and render as N/A.
+      newValue[binary] = {};
 
-    const [firstFuzzer, ...otherFuzzers] = selectedFuzzerList;
-    const firstSet = outputNameSetsByFuzzer[firstFuzzer] || new Set<string>();
-    const commonOutputNames = Array.from(firstSet).filter((outputName) =>
-      otherFuzzers.every((fuzzer) =>
-        outputNameSetsByFuzzer[fuzzer]?.has(outputName),
-      ),
-    );
-
-    if (commonOutputNames.length === 0) {
-      form.setError("selectedReports", {
-        type: "manual",
-        message: `No common output folder name found for ${binary} across selected fuzzers. Select reports manually in details.`,
-      });
-      return;
-    }
-
-    const chosenOutputName = commonOutputNames.reduce((latest, current) => {
-      const latestTime = getReportTimestamp(latest);
-      const currentTime = getReportTimestamp(current);
-      return currentTime > latestTime ? current : latest;
-    });
-
-    selectedFuzzerList.forEach((fuzzer) => {
-      const reportsForFuzzer = reportsByBinaryAndFuzzer[binary]?.[fuzzer] || [];
-      if (reportsForFuzzer.length > 0) {
-        const matchingReports = reportsForFuzzer.filter(
-          (path) => getOutputFolderName(path) === chosenOutputName,
-        );
+      selectedFuzzerList.forEach((fuzzer) => {
+        const matchingReports = (
+          reportsByBinaryAndFuzzer[binary]?.[fuzzer] || []
+        ).filter((path) => getOutputFolderName(path) === outputFolder);
 
         if (matchingReports.length > 0) {
-          const selectedReportPath = matchingReports.reduce(
-            (latest, current) => {
-              const latestTime = getReportTimestamp(latest);
-              const currentTime = getReportTimestamp(current);
-              return currentTime > latestTime ? current : latest;
-            },
+          newValue[binary][fuzzer] = matchingReports.reduce(
+            (latest, current) =>
+              getReportTimestamp(current) > getReportTimestamp(latest)
+                ? current
+                : latest,
           );
-          newValue[binary][fuzzer] = selectedReportPath;
         }
-      }
+      });
     });
 
     form.clearErrors("selectedReports");
     form.setValue("selectedReports", newValue);
+    setPendingBinarySelections((current) => {
+      const updated = new Set(current);
+      binaries.forEach((binary) =>
+        updated.delete(folderBinaryKey(outputFolder, binary)),
+      );
+      return updated;
+    });
   };
 
   return (
     <Sheet
       open={open}
       onOpenChange={(v) => {
+        if (!v) {
+          setPendingBinarySelections(new Set());
+        }
         onOpenChange(v);
       }}
     >
@@ -636,9 +500,6 @@ export function TableMutateDrawer({
                       <div className="space-y-2">
                         {fuzzers.map((fuzzer) => {
                           const isSelected = field.value?.includes(fuzzer);
-                          const isValid =
-                            validFuzzers.length === 0 ||
-                            validFuzzers.includes(fuzzer);
                           return (
                             <div
                               key={fuzzer}
@@ -646,13 +507,11 @@ export function TableMutateDrawer({
                                 isSelected
                                   ? "bg-primary/10 border border-primary"
                                   : "border border-transparent"
-                              } ${!isValid ? "opacity-50" : ""}`}
+                              }`}
                             >
                               <Checkbox
                                 checked={isSelected}
-                                disabled={!isValid}
                                 onCheckedChange={(checked) => {
-                                  if (!isValid) return;
                                   const currentValue = field.value || [];
                                   const newValue = checked
                                     ? [...currentValue, fuzzer]
@@ -661,9 +520,8 @@ export function TableMutateDrawer({
                                 }}
                               />
                               <label
-                                className={`flex-1 text-sm font-medium ${isValid ? "cursor-pointer" : "cursor-not-allowed"}`}
+                                className="flex-1 cursor-pointer text-sm font-medium"
                                 onClick={() => {
-                                  if (!isValid) return;
                                   const currentValue = field.value || [];
                                   const newValue = isSelected
                                     ? currentValue.filter((v) => v !== fuzzer)
@@ -695,16 +553,27 @@ export function TableMutateDrawer({
               control={form.control}
               name="selectedReports"
               render={({ field }) => {
-                const filteredBinaries = reportCompleteBinaries.filter(
-                  (binary) =>
-                    binary.toLowerCase().includes(binarySearch.toLowerCase()),
+                const filteredReportFolders = reportFolders
+                  .map((folder) => ({
+                    ...folder,
+                    binaries: folder.binaries.filter((binary) =>
+                      binary
+                        .toLowerCase()
+                        .includes(binarySearch.toLowerCase()),
+                    ),
+                  }))
+                  .filter((folder) => folder.binaries.length > 0);
+
+                const filteredBinaries = filteredReportFolders.flatMap(
+                  (folder) => folder.binaries,
                 );
-                const unavailableBinaries = availableBinaries
-                  .filter((binary) => !reportCompleteBinaries.includes(binary))
-                  .filter((binary) =>
+                const filteredBinariesWithoutReports =
+                  binariesWithoutReports.filter((binary) =>
                     binary.toLowerCase().includes(binarySearch.toLowerCase()),
-                  )
-                  .sort((a, b) => a.localeCompare(b));
+                  );
+                const hasFilteredBinaries =
+                  filteredBinaries.length > 0 ||
+                  filteredBinariesWithoutReports.length > 0;
 
                 return (
                   <FormItem>
@@ -727,12 +596,13 @@ export function TableMutateDrawer({
                       </Button>
                     </div>
                     <FormDescription className="text-xs">
-                      Click a binary to expand. Select one report per fuzzer for
-                      each binary. Use "Match" to auto-pick the same output
-                      folder name across selected fuzzers.
+                      Reports are organized by output folder, then binary.
+                      Toggle specific binaries and click "Select", or click
+                      "Select All" when none are toggled. Expand a binary to
+                      adjust individual reports.
+                      Binaries without reports can still be included as N/A.
                     </FormDescription>
-                    {(reportCompleteBinaries.length > 0 ||
-                      availableBinaries.length > 0) && (
+                    {allBinaries.length > 0 && (
                       <Input
                         type="text"
                         placeholder="Search binaries..."
@@ -746,11 +616,55 @@ export function TableMutateDrawer({
                         <p className="text-sm text-muted-foreground">
                           Loading reports...
                         </p>
-                      ) : filteredBinaries.length > 0 ||
-                        unavailableBinaries.length > 0 ? (
-                        <div className="space-y-1">
-                          {filteredBinaries.map((binary) => {
+                      ) : hasFilteredBinaries ? (
+                        <div className="space-y-3">
+                          {filteredReportFolders.map(
+                            ({ outputFolder, binaries }) => {
+                              const toggledBinaries = binaries.filter((binary) =>
+                                pendingBinarySelections.has(
+                                  folderBinaryKey(outputFolder, binary),
+                                ),
+                              );
+                              const binariesToSelect =
+                                toggledBinaries.length > 0
+                                  ? toggledBinaries
+                                  : binaries;
+
+                              return (
+                              <div
+                                key={outputFolder}
+                                className="rounded-md border bg-muted/20 p-2"
+                              >
+                                <div className="mb-2 flex items-center justify-between gap-2">
+                                  <div className="flex min-w-0 items-center gap-2 text-xs font-semibold text-muted-foreground">
+                                    <span>Output folder</span>
+                                    <code className="truncate rounded bg-background px-1.5 py-0.5 font-mono text-foreground">
+                                      {outputFolder}
+                                    </code>
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-7 shrink-0 px-2 text-xs"
+                                    onClick={() =>
+                                      selectFolderReports(
+                                        binariesToSelect,
+                                        outputFolder,
+                                      )
+                                    }
+                                  >
+                                    {toggledBinaries.length > 0
+                                      ? "Select"
+                                      : "Select All"}
+                                  </Button>
+                                </div>
+                                <div className="space-y-1">
+                                  {binaries.map((binary) => {
                             const isExpanded = expandedBinaries.has(binary);
+                            const isToggled = pendingBinarySelections.has(
+                              folderBinaryKey(outputFolder, binary),
+                            );
                             const binaryReports = field.value?.[binary] || {};
                             const selectedCount =
                               Object.keys(binaryReports).length;
@@ -769,6 +683,13 @@ export function TableMutateDrawer({
                                         : "border border-transparent hover:bg-muted"
                                   }`}
                                 >
+                                  <Checkbox
+                                    checked={isToggled}
+                                    aria-label={`Toggle ${binary} for selection`}
+                                    onCheckedChange={() =>
+                                      togglePendingBinary(outputFolder, binary)
+                                    }
+                                  />
                                   <div
                                     className="flex items-center space-x-2 flex-1 min-w-0 cursor-pointer"
                                     onClick={() =>
@@ -797,27 +718,6 @@ export function TableMutateDrawer({
                                       <Check className="h-4 w-4 text-primary shrink-0" />
                                     )}
                                   </div>
-                                  <TooltipProvider>
-                                    <Tooltip>
-                                      <TooltipTrigger asChild>
-                                        <Button
-                                          type="button"
-                                          size="sm"
-                                          variant="ghost"
-                                          className="text-xs h-7 px-2 shrink-0 whitespace-nowrap"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            selectMatchingFolderReports(binary);
-                                          }}
-                                        >
-                                          Match
-                                        </Button>
-                                      </TooltipTrigger>
-                                      <TooltipContent>
-                                        <p>Select Matching Output Directory</p>
-                                      </TooltipContent>
-                                    </Tooltip>
-                                  </TooltipProvider>
                                 </div>
 
                                 {isExpanded &&
@@ -825,10 +725,15 @@ export function TableMutateDrawer({
                                   selectedFuzzers.length > 0 && (
                                     <div className="ml-6 space-y-2 py-1">
                                       {selectedFuzzers.map((fuzzer) => {
-                                        const reportsForFuzzer =
+                                        const reportsForFuzzer = (
                                           reportsByBinaryAndFuzzer[binary]?.[
                                             fuzzer
-                                          ] || [];
+                                          ] || []
+                                        ).filter(
+                                          (path) =>
+                                            getOutputFolderName(path) ===
+                                            outputFolder,
+                                        );
                                         const selectedReport =
                                           binaryReports[fuzzer];
 
@@ -931,49 +836,68 @@ export function TableMutateDrawer({
                                     </div>
                                   )}
                               </div>
-                            );
-                          })}
-
-                          {unavailableBinaries.length > 0 && (
-                            <div className="pt-2 mt-2 border-t space-y-1">
-                              {unavailableBinaries.map((binary) => (
-                                <TooltipProvider key={binary}>
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <div className="flex items-center space-x-2 p-2 rounded-md border border-dashed opacity-50 cursor-not-allowed">
-                                        <span className="flex-1 text-sm font-medium">
-                                          {binary}
-                                        </span>
-                                        <Badge
-                                          variant="outline"
-                                          className="text-xs"
-                                        >
-                                          Unavailable
-                                        </Badge>
-                                      </div>
-                                    </TooltipTrigger>
-                                    <TooltipContent>
-                                      <p>
-                                        {unavailableReasons[binary] ||
-                                          `No result for ${binary} and selected fuzzers`}
-                                      </p>
-                                    </TooltipContent>
-                                  </Tooltip>
-                                </TooltipProvider>
-                              ))}
+                                  );
+                                })}
+                              </div>
+                            </div>
+                              );
+                            },
+                        )}
+                          {filteredBinariesWithoutReports.length > 0 && (
+                            <div className="rounded-md border bg-muted/20 p-2">
+                              <div className="mb-2 flex items-center gap-2 text-xs font-semibold text-muted-foreground">
+                                <span>No report output</span>
+                                <Badge variant="outline" className="text-xs">
+                                  N/A
+                                </Badge>
+                              </div>
+                              <div className="space-y-1">
+                                {filteredBinariesWithoutReports.map((binary) => {
+                                  const isSelected = Object.prototype.hasOwnProperty.call(
+                                    field.value || {},
+                                    binary,
+                                  );
+                                  return (
+                                    <button
+                                      key={binary}
+                                      type="button"
+                                      className={`flex w-full items-center gap-2 rounded-md border p-2 text-left transition-colors ${
+                                        isSelected
+                                          ? "border-primary bg-primary/10"
+                                          : "border-transparent hover:bg-muted"
+                                      }`}
+                                      onClick={() => {
+                                        const newValue = { ...(field.value || {}) };
+                                        if (isSelected) {
+                                          delete newValue[binary];
+                                        } else {
+                                          newValue[binary] = {};
+                                        }
+                                        field.onChange(newValue);
+                                      }}
+                                    >
+                                      <Checkbox checked={isSelected} />
+                                      <span className="flex-1 text-sm font-medium">
+                                        {binary}
+                                      </span>
+                                      <Badge variant="secondary" className="text-xs">
+                                        N/A
+                                      </Badge>
+                                    </button>
+                                  );
+                                })}
+                              </div>
                             </div>
                           )}
                         </div>
-                      ) : (reportCompleteBinaries.length > 0 ||
-                          availableBinaries.length > 0) &&
-                        filteredBinaries.length === 0 ? (
+                      ) : allBinaries.length > 0 ? (
                         <p className="text-sm text-muted-foreground">
                           No binaries match your search
                         </p>
                       ) : (
                         <p className="text-sm text-muted-foreground">
                           {form.watch("fuzzer")?.length > 0
-                            ? "No frb reports available for selected benchmark and fuzzers"
+                            ? "No binaries available for the selected benchmark"
                             : "Please select at least one fuzzer first"}
                         </p>
                       )}
@@ -994,6 +918,7 @@ export function TableMutateDrawer({
                 form.reset();
                 setBinarySearch("");
                 setExpandedBinaries(new Set());
+                setPendingBinarySelections(new Set());
               }}
             >
               Cancel

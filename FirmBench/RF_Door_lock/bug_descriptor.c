@@ -22,32 +22,32 @@ static void report_reached(const char* bug_id) {
 void BUG_FW29() {
     report_reached("FW29");
     //Buffer overflow in set_code
-    if (reg_state[4] > 15) {
+    if (reg_state[4] == 16) {
         report_detected_triggered("FW29");
     }
 }
 
-void BUG_FW38() {
+void BUG_FP_FW38() {
     // Infinite recursion in error handler
-    report_reached("FW38");
+    report_reached("FP_FW38");
     uint32_t stdio_uart_inited = frb_mem_read(0x20000f04, 4);
     if (stdio_uart_inited == 0) {
-        report_detected_triggered("FW38");
+        report_detected_triggered("FP_FW38");
     }
 }
 
 void BUG_FRB09() {
     report_reached("FRB09");
-    uint32_t buffer_start = reg_state[13] - 0x20;
+    uint32_t buffer_start = reg_state[13] + 8;
     uint32_t puvar4 = reg_state[4];
     int idx = puvar4 - buffer_start;
-    if (idx >= 16) {
+    if (idx == 16) {
         report_detected_triggered("FRB09");
     }
 }
 
 void register_reflection_points() {
-    frb_add_reflection_point(0x0000044e, BUG_FW29);
-    frb_add_reflection_point(0x00001894, BUG_FW38);
+    frb_add_reflection_point(0x0000042c, BUG_FW29);
+    frb_add_reflection_point(0x00001894, BUG_FP_FW38);
     frb_add_reflection_point(0x000003da, BUG_FRB09);
 }

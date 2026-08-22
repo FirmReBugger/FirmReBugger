@@ -1,0 +1,1 @@
+from firmrebugger.bug_analyzer_utils.hoedur_analyzer import hoedur_analyzer as analyze

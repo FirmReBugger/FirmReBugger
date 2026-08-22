@@ -165,7 +165,9 @@ def periodic_printer(run_data, stop_event, progress, crash):
         )
         print_bug_info(run_data)
         if progress.get("failure_message"):
-            print("[Progress Error] MultiFuzz replay error details:")
+            print(
+                f"[Progress Error] {progress.get('Fuzzer', 'Replay')} replay error details:"
+            )
             print(progress["failure_message"])
         sys.stdout.flush()
     elif not final_print_done and progress["completed"] >= progress["total"]:
@@ -340,14 +342,34 @@ def run_command(command, seed_path, time_val, Crash, timeout=None):
     end = time.time()
     elapsed = end - start
 
+    return parse_replay_output(
+        seed_path, stdout, stderr, time_val, elapsed, Crash, returncode
+    )
+
+
+def parse_replay_output(
+    seed_path,
+    stdout,
+    stderr,
+    time_val,
+    elapsed,
+    Crash,
+    returncode=0,
+    reached_ids=None,
+    triggered_ids=None,
+):
+    stdout = stdout or ""
+    stderr = stderr or ""
     bugs_triggered = []
     bugs_reached = []
     errors = []
     triggered_found = False
 
-    # output = stdout + "\n" + stderr
-    # print(output)
-    for line in stdout.splitlines():
+    structured_output = list(stdout.splitlines())
+    structured_output.extend(f"REACHED: {bug_id}" for bug_id in reached_ids or [])
+    structured_output.extend(f"TRIGGERED: {bug_id}" for bug_id in triggered_ids or [])
+
+    for line in structured_output:
         if not triggered_found and "REACHED:" in line:
             bug_id = line.split(":", 1)[1].strip()
             if bug_id not in bugs_reached:
@@ -357,14 +379,12 @@ def run_command(command, seed_path, time_val, Crash, timeout=None):
             bug_id = line.split(":", 1)[1].strip()
             if bug_id not in bugs_triggered:
                 bugs_triggered.append(bug_id)
-        if Crash:
-            if "SYSCTL_AIRCR" in line:
-                errors.append(seed_path)
-            if "input file not read until end" in stderr:
-                # print(f"Warning: {seed_path} was not read until the end.")
-                errors.append(seed_path)
+        if Crash and "SYSCTL_AIRCR" in line:
+            errors.append(seed_path)
+    if Crash and "input file not read until end" in stderr:
+        errors.append(seed_path)
 
-    combined_output = f"{stdout or ''}\n{stderr or ''}"
+    combined_output = f"{stdout}\n{stderr}"
     combined_lower = combined_output.lower()
     has_frb_config_init = "firmrebugger config" in combined_lower
     has_c_parse_error = (

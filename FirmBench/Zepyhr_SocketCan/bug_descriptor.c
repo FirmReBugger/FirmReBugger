@@ -27,20 +27,19 @@ void BUG_FW43() {
     }
 }
 
-void BUG_FP_FW44() {
-    report_reached("FP_FW44");
-    //(FP) Initialization race in log_backend_enable
+void BUG_FW44() {
+    report_reached("FW44");
+    // UART RX can preempt shell log-backend activation before output context setup.
     if (reg_state[0] == 0) {
-        report_detected_triggered("FP_FW44");
+        report_detected_triggered("FW44");
     }
 }
 
-void BUG_MF06() {
-    report_reached("MF06");
-    //canbus subcommands fail to validate argument count
-    // attach
+void BUG_FP_MF06() {
+    report_reached("FP_MF06");
+    // cmd_attach guards the argv cursor against argc before parsing the mask.
     if (reg_state[0] == 0) {
-        report_detected_triggered("MF06");
+        report_detected_triggered("FP_MF06");
     }
 }
 
@@ -53,12 +52,11 @@ void BUG_MF07() {
     }
 }
 
-void BUG_MF08() {
-    report_reached("MF08");
-    //canbus subcommands fail to validate argument count
-    // cmd_deatch
+void BUG_FP_MF08() {
+    report_reached("FP_MF08");
+    // cmd_detach's mandatory argument count guarantees argv[2].
     if (reg_state[0] == 0) {
-        report_detected_triggered("MF08");
+        report_detected_triggered("FP_MF08");
     }
 }
 
@@ -81,9 +79,18 @@ void BUG_E03() {
 
 void BUG_S05() {
     report_reached("S05");
-    //net pkt command dereferences a user provided pointer
-    uint32_t read_addr = reg_state[5] + 0x10;
-    if (frb_mem_read(read_addr,4) == 0) {
+    // cmd_net_pkt dereferences a user-provided pointer without validating that
+    // it is a live object from either of this build's net_pkt slabs.
+    uint32_t pkt = reg_state[5];
+    bool rx_slot = pkt >= 0x20004090 && pkt < 0x20004810 &&
+                   ((pkt - 0x20004090) & 0x3f) == 0;
+    bool tx_slot = pkt >= 0x20004810 && pkt < 0x20004f90 &&
+                   ((pkt - 0x20004810) & 0x3f) == 0;
+    bool live_rx = rx_slot && frb_mem_read(pkt + 0x0c, 4) == 0x200001cc &&
+                   frb_mem_read(pkt + 0x24, 4) != 0;
+    bool live_tx = tx_slot && frb_mem_read(pkt + 0x0c, 4) == 0x200001e8 &&
+                   frb_mem_read(pkt + 0x24, 4) != 0;
+    if (!live_rx && !live_tx) {
         report_detected_triggered("S05");
     }
 }
@@ -92,7 +99,7 @@ void BUG_MF10() {
     report_reached("MF10");
     //canbus subcommands fail to verify device type
     // config
-    uint32_t read_addr = reg_state[0] + 0x4;
+    uint32_t read_addr = reg_state[0] + 0x8;
     if (frb_mem_read(read_addr,4) != 0x0800f7e4){
         report_detected_triggered("MF10");
     }
@@ -102,7 +109,7 @@ void BUG_MF11() {
     report_reached("MF11");
     //canbus subcommands fail to verify device type
     // attach
-    uint32_t read_addr = reg_state[0] + 0x4;
+    uint32_t read_addr = reg_state[0] + 0x8;
     if (frb_mem_read(read_addr,4) != 0x0800f7e4){
         report_detected_triggered("MF11");
     }
@@ -112,7 +119,7 @@ void BUG_MF12() {
     report_reached("MF12");
     //canbus subcommands fail to verify device type
     // detach
-    uint32_t read_addr = reg_state[0] + 0x4;
+    uint32_t read_addr = reg_state[0] + 0x8;
     if (frb_mem_read(read_addr,4) != 0x0800f7e4){
         report_detected_triggered("MF12");
     }
@@ -122,7 +129,7 @@ void BUG_MF13() {
     report_reached("MF13");
     //canbus subcommands fail to verify device type
     // config
-    uint32_t read_addr = reg_state[0] + 0x4;
+    uint32_t read_addr = reg_state[0] + 0x8;
     if (frb_mem_read(read_addr,4) != 0x0800f7e4){
         report_detected_triggered("MF13");
     }
@@ -132,7 +139,7 @@ void BUG_MF14() {
     report_reached("MF14");
     //pwm subcommand fail to verify device type
     // usec
-    if (reg_state[3] != 0x0800fe34) {
+    if (reg_state[3] != 0x0800e2c5) {
         report_detected_triggered("MF14");
     }
 }
@@ -141,7 +148,7 @@ void BUG_MF15() {
     report_reached("MF15");
     //pwm subcommand fail to verify device type
     // nsec
-    if (reg_state[3] != 0x0800fe34) {
+    if (reg_state[3] != 0x0800e2c5) {
         report_detected_triggered("MF15");
     }
 }
@@ -150,31 +157,31 @@ void BUG_MF16() {
     report_reached("MF16");
     //pwm subcommand fail to verify device type
     // cycle
-    if (reg_state[4] != 0x0800fe34) {
+    if (reg_state[4] != 0x08009075) {
         report_detected_triggered("MF16");
     }
 }
 
-void div_by_zero() {
-    report_reached("FP_FRB11");
+void BUG_FRB11() {
+    report_reached("FRB11");
     if (reg_state[4] == 0) {
-        report_detected_triggered("FP_FRB11");
+        report_detected_triggered("FRB11");
     }
 }
 
-void div_by_zero_2() {
-    report_reached("FP_FRB12");
+void BUG_FRB12() {
+    report_reached("FRB12");
     if (reg_state[2] == 0) {
-        report_detected_triggered("FP_FRB12");
+        report_detected_triggered("FRB12");
     }
 }
 
 void register_reflection_points() {
     frb_add_reflection_point(0x08004964, BUG_FW43);
-    frb_add_reflection_point(0x0800c538, BUG_FP_FW44);
-    frb_add_reflection_point(0x08005ba2, BUG_MF06);
+    frb_add_reflection_point(0x0800c538, BUG_FW44);
+    frb_add_reflection_point(0x08005ba2, BUG_FP_MF06);
     frb_add_reflection_point(0x08005dfe, BUG_MF07);
-    frb_add_reflection_point(0x08005d52, BUG_MF08);
+    frb_add_reflection_point(0x08005d52, BUG_FP_MF08);
     frb_add_reflection_point(0x080058e6, BUG_FP_MF09);
     frb_add_reflection_point(0x08001e36, BUG_E03);
     frb_add_reflection_point(0x08008c4e, BUG_S05);
@@ -185,6 +192,6 @@ void register_reflection_points() {
     frb_add_reflection_point(0x0800945a, BUG_MF14);
     frb_add_reflection_point(0x080004fa, BUG_MF15);
     frb_add_reflection_point(0x080093be, BUG_MF16);
-    frb_add_reflection_point(0x0800c02c, div_by_zero);
-    frb_add_reflection_point(0x080023ce, div_by_zero_2);
+    frb_add_reflection_point(0x0800c02c, BUG_FRB11);
+    frb_add_reflection_point(0x080023ce, BUG_FRB12);
 }

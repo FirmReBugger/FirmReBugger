@@ -27,5 +27,5 @@ void H13() {
 }
 
 void register_reflection_points() {
-    frb_add_reflection_point(0x00207d9c, H13);
+    frb_add_reflection_point(0x0020819c, H13);
 }

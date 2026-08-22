@@ -1,0 +1,12 @@
+diff --git a/sys/net/gnrc/network_layer/sixlowpan/frag/sfr/gnrc_sixlowpan_frag_sfr.c b/sys/net/gnrc/network_layer/sixlowpan/frag/sfr/gnrc_sixlowpan_frag_sfr.c
+index b2fc21568f..34667f9d84 100644
+--- a/sys/net/gnrc/network_layer/sixlowpan/frag/sfr/gnrc_sixlowpan_frag_sfr.c
++++ b/sys/net/gnrc/network_layer/sixlowpan/frag/sfr/gnrc_sixlowpan_frag_sfr.c
+@@ -567,6 +567,7 @@ void gnrc_sixlowpan_frag_sfr_arq_timeout(gnrc_sixlowpan_frag_fb_t *fbuf)
+     }
+ error:
+     /* don't check return value, as we don't want to wait for an ACK again ;-) */
++    assert(fbuf->pkt != NULL);
+     _send_abort_frag(fbuf->pkt, (uint8_t)fbuf->tag, false, 0);
+     _clean_up_fbuf(fbuf, error_no);
+ }

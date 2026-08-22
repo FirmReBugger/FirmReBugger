@@ -19,6 +19,15 @@ pub unsafe fn init_config(vm: &mut icicle_vm::Vm) {
     }
 }
 
+/// Clear descriptor callbacks and per-input report state after the VM has
+/// restored its CPU, memory, devices, scheduler, and translation cache.
+pub unsafe fn reset_session() -> Result<(), &'static str> {
+    if firmrebugger_reset_session() != 0 {
+        return Err("FirmReBugger reset failed");
+    }
+    Ok(())
+}
+
 unsafe extern "C" fn firmrebugger_reg_read(
     data: EmuData,
     reg_name: *mut std::os::raw::c_char,

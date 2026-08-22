@@ -20,6 +20,7 @@ ENV LD_LIBRARY_PATH="/home/user/.cargo/bin/"
 WORKDIR $FUZZER
 COPY --from=tcc-build /tinycc $FUZZER/tinycc
 COPY --chown=user docker/Hoedur/frb/frb_patches/ $FUZZER/frb_patches/
+COPY --chown=user docker/Hoedur/frb/frb_patches/replay_worker.rs $FUZZER/hoedur/src/replay_worker.rs
 RUN git apply $FUZZER/frb_patches/firmrebugger_hoedur_rust.patch
 RUN cargo install --path $FUZZER/hoedur \
     --bin hoedur-arm && \
@@ -39,4 +40,5 @@ WORKDIR /home/user/firmrebugger/target
 # ---- Final Setup ----
 ENV FIRMREBUGGER_BASE_DIR=/home/user/firmrebugger
 ENV HOEDUR_BASE_DIR=$FUZZER/hoedur
+ENV FRB_REPLAY_WORKER_COMMAND=/home/user/.cargo/bin/hoedur-dict-arm
 ENTRYPOINT ["uv", "run", "frb", "bug-analyzer", "."]

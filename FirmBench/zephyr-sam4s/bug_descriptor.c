@@ -1,140 +1,100 @@
 #include <tcclib.h>
 #include <stdint.h>
-#include <stdbool.h>
 
 extern uint32_t reg_state[16];
 extern uint32_t frb_mem_read(uint32_t read_addr, size_t size);
-extern void frb_mem_write(uint32_t write_addr, uint32_t write_value, size_t size);
-extern void frb_report_detected_triggered(const char* bug_id);
-extern void frb_report_reached(const char* bug_id);
-extern uint32_t frb_symbolize(const char *symbol_name, uint32_t offset);
-extern void frb_add_reflection_point(uint32_t address, void (*introspection_point)(void));
-extern void frb_print_regs(void);
+extern void frb_report_detected_triggered(const char *bug_id);
+extern void frb_report_reached(const char *bug_id);
+extern void frb_add_reflection_point(uint32_t address,
+                                     void (*introspection_point)(void));
 
-static void report_detected_triggered(const char* bug_id) {
-    frb_report_detected_triggered(bug_id);
+static void report_detected_triggered(const char *bug_id) {
+  frb_report_detected_triggered(bug_id);
 }
 
-static void report_reached(const char* bug_id) {
-    frb_report_reached(bug_id);
+static void report_reached(const char *bug_id) {
+  frb_report_reached(bug_id);
 }
 
-
-void on_CVE_2021_3322() {
-  // Check for NULL ptr in pkt->frags
-  report_reached("FW52");
-  uint32_t frags = frb_mem_read(reg_state[0] + 0x10, 4);
-  if (frags == 0) {
-    report_detected_triggered("FW52");
-  }
-}
-
-void check_compressed_hdr_size(uint32_t compressed_hdr_size) {
-  // CVE-2021-3323
-  report_reached("FW53");
-  uint32_t net_buf = reg_state[6];
-  uint32_t pkt_buf_len_addr = (net_buf + 0x8) + 0x4;
-  uint32_t pkt_buf_len = frb_mem_read(pkt_buf_len_addr, 2);
-
-  if (pkt_buf_len < compressed_hdr_size) {
-    report_reached("FW53");
-  }
-}
-
-void on_CVE_2021_3323_callsite_1() {
-  // CVE_2021_3323
-  check_compressed_hdr_size(reg_state[3]);
-}
-
-void on_CVE_2021_3323_callsite_2() {
-  // CVE_2021_3323
-  check_compressed_hdr_size(reg_state[4]);
-}
-
-void on_CVE_2021_3320() {
-  // Check for unexpected frame type
-  report_reached("FW50");
-  if (reg_state[3] == 2) {
-    report_detected_triggered("FW50");
-  }
-}
-
-uint32_t mhr_src_addr_ptr = false;
-
-void on_CVE_2021_3319() {
+/* CVE-2021-3319: validate_addr() returned NULL for a truncated address but
+ * ieee802154_validate_frame() accepted it.  These are the two inlined
+ * assignment sites.  lr holds mhr->fs in this optimized leaf function. */
+static void on_CVE_2021_3319_dst(void) {
   report_reached("FW49");
-  // CVE_2021_3319
-  // Catch NULL return from validate_addr outside IEEE802154_ADDR_MODE_NONE
-  // https://github.com/zephyrproject-rtos/zephyr/blob/0aaae4a039cab54df84c1f0371d44d6045ff58d8/subsys/net/l2/ieee802154/ieee802154_frame.c#L120
 
-  // validate_addr is inlined in ieee802154_validate_frame for source and
-  // destination addresses This is why we catch both cases (src and dest NULL
-  // assignment) Source Address is combined as 0x0040d420 is reachable via
-  // multiple paths
-  if (reg_state[15] == 0x0040d302) {
-    // Reset tracking of whether we have a pointer when entering
-    // ieee802154_validate_frame
-    mhr_src_addr_ptr = false;
-  } else if (reg_state[15] == 0x0040d3c4) {
-    // We are in the "is a pointer" path
-    mhr_src_addr_ptr = true;
-  } else if (reg_state[15] == 0x0040d41a) {
-    // Source address pointer assignment path triggered
-    if (mhr_src_addr_ptr) {
-      report_detected_triggered("FW49");
-    }
-  } else if (reg_state[15] == 0x0040d416) {
-    // Destination address (NULL assignment only reached in buggy case)
+  uint32_t address = reg_state[8];
+  uint32_t fs = reg_state[14];
+  uint32_t address_mode = (frb_mem_read(fs + 1, 1) >> 2) & 0x3;
+  if (address == 0 && address_mode != 0) {
     report_detected_triggered("FW49");
   }
 }
 
-void on_CVE_2021_3321() {
-  // Check for size underflow in memmove call from ieee802154_reassemble
-  report_reached("FW51");
-  if (reg_state[2] > 0xf0000000 && reg_state[14] == 0x00403c78) {
-    report_detected_triggered("FW51");
+static void on_CVE_2021_3319_src(void) {
+  report_reached("FW49");
+
+  uint32_t address = reg_state[10];
+  uint32_t fs = reg_state[14];
+  uint32_t address_mode = (frb_mem_read(fs + 1, 1) >> 6) & 0x3;
+  if (address == 0 && address_mode != 0) {
+    report_detected_triggered("FW49");
   }
 }
 
-void on_ieee802154_validate_frame() {
-  report_reached("FP_FRB17");
-  if (reg_state[8] == 0) {
-    report_detected_triggered("FP_FRB17");
+/* CVE-2021-3320: an ACK has passed validation and scanning checks and is
+ * about to fall through the data-frame receive path. */
+static void on_CVE_2021_3320(void) {
+  report_reached("FW62");
+  if (reg_state[3] == 2) {
+    report_detected_triggered("FW62");
   }
 }
 
-void on_ieee802154_recv() {
-  report_reached("FP_FRB16");
-  // MPDU->dst = 0
-  frb_print_regs();
-  uint32_t sp = reg_state[13];
-  uint32_t mpdu_dst = frb_mem_read(sp + 8, 4);
-  uint32_t mpdu_src = frb_mem_read(sp + 12, 4);
+/* CVE-2021-3321: fragment_add_to_cache() is about to accept a fragment whose
+ * buffer is shorter than its four-byte FRAG1 or five-byte FRAGN header. */
+static void on_CVE_2021_3321(void) {
+  report_reached("FW63");
 
-  if (mpdu_dst == 0 || mpdu_src == 0) {
-    report_detected_triggered("FP_FRB16");
+  uint32_t type = reg_state[2];
+  uint32_t frag = reg_state[10];
+  uint32_t len = frb_mem_read(frag + 0x0c, 2);
+  if ((type == 0xc0 && len < 4) || (type == 0xe0 && len < 5)) {
+    report_detected_triggered("FW63");
   }
 }
 
-void on_net_buf_simple_pull() {
-  report_reached("H62");
-  if (reg_state[2] < reg_state[1]) {
-    report_detected_triggered("H62");
+/* CVE-2021-3322: completion of a one-fragment datagram aliases cache->pkt
+ * with the input pkt.  The following ownership transfer therefore clears
+ * the same pkt->buffer it just assigned. */
+static void on_CVE_2021_3322(void) {
+  report_reached("FW64");
+
+  uint32_t cache = reg_state[4];
+  uint32_t pkt = reg_state[5];
+  uint32_t cached_pkt = frb_mem_read(cache + 0x30, 4);
+  if (cached_pkt == pkt) {
+    report_detected_triggered("FW64");
   }
 }
 
-void register_reflection_points() {
-    frb_add_reflection_point(0x00406c58, on_CVE_2021_3322);
-    frb_add_reflection_point(0x00406c96, on_CVE_2021_3323_callsite_1);
-    frb_add_reflection_point(0x00406c9e, on_CVE_2021_3323_callsite_2);
-    frb_add_reflection_point(0x0040cf4c, on_CVE_2021_3321);
-    frb_add_reflection_point(0x0040d302, on_CVE_2021_3319);
-    frb_add_reflection_point(0x0040d3c4, on_CVE_2021_3319);
-    frb_add_reflection_point(0x0040d41a, on_CVE_2021_3319);
-    frb_add_reflection_point(0x0040d416, on_CVE_2021_3319);
-    frb_add_reflection_point(0x0040d130, on_CVE_2021_3320);
-    frb_add_reflection_point(0x0040d4c4, on_ieee802154_validate_frame);
-    frb_add_reflection_point(0x0040d110, on_ieee802154_recv);
-    frb_add_reflection_point(0x0040d070, on_net_buf_simple_pull);
+/* CVE-2021-3323: compressed_hdr_size is complete in r4 on both IPHC paths;
+ * r6 is pkt->buffer.  Pulling a larger header underflows net_buf::len. */
+static void on_CVE_2021_3323(void) {
+  report_reached("FW65");
+
+  uint32_t compressed_hdr_size = reg_state[4];
+  uint32_t net_buf = reg_state[6];
+  uint32_t len = frb_mem_read(net_buf + 0x0c, 2);
+  if (compressed_hdr_size > len) {
+    report_detected_triggered("FW65");
+  }
+}
+
+void register_reflection_points(void) {
+  frb_add_reflection_point(0x0040d356, on_CVE_2021_3319_dst);
+  frb_add_reflection_point(0x0040d398, on_CVE_2021_3319_src);
+  frb_add_reflection_point(0x0040d13a, on_CVE_2021_3320);
+  frb_add_reflection_point(0x00403a82, on_CVE_2021_3321);
+  frb_add_reflection_point(0x00403b56, on_CVE_2021_3322);
+  frb_add_reflection_point(0x00406c9e, on_CVE_2021_3323);
 }

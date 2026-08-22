@@ -39,11 +39,11 @@ static uint32_t MEMCPY_CALL_LOC_OUTPUT_PACKETBUF_OOB = 0x207C92;
 static uint32_t MEMCPY_CALL_LOC_BLE_L2CAP_TX_PROCESS = 0x205638;
 // PORTING: memcpy call in function "fragment_copy_payload_and_send". These OOBs
 // (always) originate from output->fragment_copy_payload_and_send->memcpy
-static uint32_t MEMCPY_CALL_LOC_fragment_copy_payload_and_send = 0x204bae;
+static uint32_t MEMCPY_CALL_LOC_fragment_copy_payload_and_send = 0x207512;
 // PORTING: memcpy call in function "packetbuf_copyfrom". These OOBs (always)
 // originate from
 // output->fragment_copy_payload_and_send->queuebuf_to_packetbuf->packetbuf_copyfrom->memcpy
-static uint32_t MEMCPY_CALL_LOC_packetbuf_copyfrom = 0x207512;
+static uint32_t MEMCPY_CALL_LOC_packetbuf_copyfrom = 0x204bae;
 // PORTING: memcpy call in function "compress_addr_64" (first call with constant
 // size 2). These OOBs (always) originate from output->compress_addr_64->memcpy
 static uint32_t MEMCPY_CALL_LOC_output_compress_addr_64_1 = 0x20748a;
@@ -76,16 +76,19 @@ static uint32_t MEMCPY_CALL_LOC_UNCOMPRESS_HDR_IPHC = 0x208398;
 // Bugs: H07
 // PORTING: Symbol: frag_info
 static uint32_t FRAG_INFO = 0x20000a10;
-// sicslowpan_frag_info frag_info[2]
-static uint32_t FRAG_INFO_SIZE = 2 * 0xb8;
+// sicslowpan_frag_info frag_info[2]. Each 0xb8-byte element contains its
+// 148-byte first_frag buffer at offset 0x22.
+static uint32_t FRAG_INFO_COUNT = 2;
+static uint32_t FRAG_INFO_STRIDE = 0xb8;
+static uint32_t FRAG_INFO_FIRST_FRAG_OFFSET = 0x22;
+static uint32_t FRAG_INFO_FIRST_FRAG_LEN = 148;
 
 void H03() {
   uint32_t packetbuf_dataptr = reg_state[0];
   uint32_t channel = reg_state[5];
   report_reached("H03");
   uint32_t sdu_length = frb_mem_read(channel + 0xa14, 2);
-  // Fix:
-  // https://github.com/contiki-ng/contiki-ng/commit/506f9def7cdff853fa24cf6d88e1f4e5619dc46c
+  // Fix: https://github.com/contiki-ng/contiki-ng/commit/20ae1a06f2fa13acfba43da73adb71dc61fcef84
   if ((packetbuf_dataptr + sdu_length) >
       (PACKETBUF_ALIGNED + PACKETBUF_ALIGNED_LEN)) {
     report_detected_triggered("H03");
@@ -191,15 +194,19 @@ void on_fraginfo_oob_writes() {
   uint32_t dst = reg_state[0];
   report_reached("H07");
   report_reached("H08");
-  // Check for any copies targeting fragment buffers
-  if ((dst >= FRAG_INFO) && (dst < FRAG_INFO + FRAG_INFO_SIZE)) {
-    // Remaining buffer size: buffer len minus buffer cursor offset
-    uint32_t buf_size = FRAG_INFO_SIZE - (dst - FRAG_INFO);
-    uint32_t n = reg_state[2];
+  // Check against the selected element's first_frag subobject, not against
+  // the aggregate frag_info array.
+  for (uint32_t i = 0; i < FRAG_INFO_COUNT; i++) {
+    uint32_t buf_start =
+        FRAG_INFO + i * FRAG_INFO_STRIDE + FRAG_INFO_FIRST_FRAG_OFFSET;
+    uint32_t buf_end = buf_start + FRAG_INFO_FIRST_FRAG_LEN;
+    if ((dst >= buf_start) && (dst < buf_end)) {
+      uint32_t buf_size = buf_end - dst;
+      uint32_t n = reg_state[2];
 
-    if (n > buf_size) {
-      uint32_t lr = reg_state[14];
-      if (lr == (MEMCPY_CALL_LOC_UNCOMPRESS_HDR_IPHC | 1)) {
+      if (n > buf_size) {
+        uint32_t lr = reg_state[14];
+        if (lr == (MEMCPY_CALL_LOC_UNCOMPRESS_HDR_IPHC | 1)) {
         // Fix commits:
         // uncompress_hdr_iphc retval:
         // https://github.com/contiki-ng/contiki-ng/commit/971354a
@@ -207,14 +214,16 @@ void on_fraginfo_oob_writes() {
         // https://github.com/contiki-ng/contiki-ng/commit/b88e5c3 Main checks:
         // https://github.com/contiki-ng/contiki-ng/commit/668f244 Off-by-one
         // fix: https://github.com/contiki-ng/contiki-ng/commit/79cd1d6
-        report_detected_triggered("H07");
-      } else if (lr ==
-                 (MEMCPY_CALL_LOC_SICSLOWPAN_FIRSTFRAG_OR_UNFRAG_OOB | 1)) {
+          report_detected_triggered("H07");
+        } else if (lr ==
+                   (MEMCPY_CALL_LOC_SICSLOWPAN_FIRSTFRAG_OR_UNFRAG_OOB | 1)) {
         // buffer_size tracking:
         // https://github.com/contiki-ng/contiki-ng/commit/b88e5c3 buffer_size
         // oob check: https://github.com/contiki-ng/contiki-ng/commit/c76aa9bc
-        report_detected_triggered("H08");
+          report_detected_triggered("H08");
+        }
       }
+      return;
     }
   }
 }

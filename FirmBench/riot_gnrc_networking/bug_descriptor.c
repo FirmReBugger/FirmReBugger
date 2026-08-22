@@ -19,9 +19,6 @@ static void report_reached(const char* bug_id) {
     frb_report_reached(bug_id);
 }
 
-typedef struct {
-  uint8_t missing_src;
-} NetifHdr;
 void H19() {
   report_reached("H19");
   uint32_t rh = reg_state[1];
@@ -34,19 +31,12 @@ void H19() {
   }
 }
 
-uint8_t missing_src = 0;
-
-void gnrc_sixlowpan_frag_vrb_get() {
-  uint32_t src_len = reg_state[1];
-  if (src_len == 0) {
-    missing_src = 1;
-  }
-}
-
-void gnrc_netif_hdr_build() {
+void H20() {
   report_reached("H20");
-  uint32_t src_len = reg_state[1];
-  if (src_len == 0 && missing_src == 1) {
+
+  /* r7 preserves src_len at the matched-return branch.  A zero-length key
+   * can only match the zero-initialized entry sentinel. */
+  if (reg_state[7] == 0) {
     report_detected_triggered("H20");
   }
 }
@@ -100,32 +90,26 @@ void H25() {
   report_reached("H25");
   uint32_t snippet = reg_state[3];
   uint32_t size = frb_mem_read(snippet + 8, 4);
+  uint32_t pkt = reg_state[7];
+  uint32_t ipv6_snip = frb_mem_read(pkt, 4);
+  uint32_t ipv6_data = frb_mem_read(ipv6_snip + 4, 4);
+  uint8_t nh = frb_mem_read(ipv6_data + 6, 1);
+  bool compressible_non_udp = (nh == 0) || (nh == 41) || (nh == 43) ||
+                              (nh == 44) || (nh == 60) || (nh == 135);
 
-  if (size > 8) {
-    // actual snippet size is larger than the udp header
+  if (size > 8 && compressible_non_udp) {
+    /* The UNDEF branch reserves only sizeof(udp_hdr_t), but the next-header
+     * value will route this larger snippet through an NHC encoder. */
     report_detected_triggered("H25");
   }
 }
 
-uint8_t data_nullptr = 0;
-
-void gnrc_pktbuf_mark() {
-  uint32_t pkt = reg_state[0];
-  uint32_t pkt_size = frb_mem_read(pkt + 8, 4);
-  uint32_t mark_size = reg_state[1];
-
-  if (pkt_size == mark_size) {
-    data_nullptr = 1;
-  }
-}
-
-void gnrc_sixlowpan_iphc_recv() {
+void H26() {
   report_reached("H26");
-  uint32_t sixlo = reg_state[0];
-  uint32_t data = frb_mem_read(sixlo + 4, 4);
 
-  // Check NULL pointer deref on sixlo->data
-  if (data == 0 && data_nullptr == 1) {
+  /* At the pkt->data store, r3 is the exact new data pointer.  NULL means the
+   * complete snippet was consumed but the old node remains linked. */
+  if (reg_state[3] == 0) {
     report_detected_triggered("H26");
   }
 }
@@ -141,130 +125,66 @@ void H27() {
   }
 }
 
-bool check_freed(uint32_t addr) {
-  const uint32_t _first_unused = 0x20007268;
-  uint32_t block_ptr = frb_mem_read(_first_unused, 4);
-
-  while (block_ptr != 0) {
-    uint32_t next_ptr = frb_mem_read(block_ptr, 4);
-    uint32_t block_size = frb_mem_read(block_ptr + 4, 4);
-    // printf("Checking block at 0x%08X with size %u\n", block_ptr, block_size);
-
-    if (addr >= block_ptr && addr < block_ptr + block_size) {
-      return true;
-    }
-
-    block_ptr = next_ptr;
-  }
-  return false;
-}
-
-void shell_command() {
-  report_reached("FP_FRB23");
-  if (reg_state[0] == 0) {
-    report_detected_triggered("FP_FRB23");
-  }
-}
-
-void core_panic_exit() {
+void impossible_rf_event_assert() {
   report_reached("FP_FRB31");
+  /* All invalid RF event/state combinations converge on this assertion-only
+   * basic block.  Normal CC2538 interrupt states branch around it. */
   report_detected_triggered("FP_FRB31");
 }
 
-// void on_gnrc_pktbuf_hold() {
-//     report_reached("gnrnc_pktbuf_hold");
-//     if (check_freed(reg_state[0])) {
-//         report_detected_triggered("gnrc_pktbuf_hold");
-//     }
-// }
-
-// bool msg_recieve_flag = 0;
-// void msg_receive_start() {
-//     msg_recieve_flag = 1;
-//     // printf("on_msg_reieve: ptr = 0x%08X\n", ptr);
-// }
-
-// void msg_receive_end() {
-//     msg_recieve_flag = 0;
-// }
-
-// void on_release() {
-//     report_reached("FP_FRB27");
-//     if (msg_recieve_flag) {
-//         report_detected_triggered("FP_FRB27");
-//     }
-// }
-
-// void send_check() {
-//     report_reached("send_check");
-//     if(check_freed(reg_state[0]) || check_freed(reg_state[1])) {
-//         report_detected_triggered("send_check");
-//     }
-// }
-
-// void on_msg_send() {
-//     report_reached("on_msg_send");
-//     uint32_t ptr = frb_mem_read(reg_state[0]+4, 4);
-//     // printf("on_msg_send: ptr = 0x%08X\n", ptr);
-//     if (check_freed(ptr)) {
-//         report_detected_triggered("on_msg_send");
-//     }
-// }
-
-void RFCORE_ASSERT_failure_exit() {
-  report_reached("FP_FRB32");
-  report_detected_triggered("FP_FRB32");
-}
-
-// void on_gnrc_sixlowpan_dispatch_send() {
-//     report_reached("gnrc_sixlowpan_dispatch_send");
-//     if (check_freed(reg_state[0])) {
-//         report_detected_triggered("gnrc_sixlowpan_dispatch_send");
-//     }
-// }
-
-void check_wildcard_udp() {
-  report_reached("FP_FRB35");
-  uint32_t pkt_type = reg_state[0] + 0x10;
-  if (pkt_type != 0xfd || pkt_type != 0xff || pkt_type != 0x0 ||
-      pkt_type != 0x1 || pkt_type != 0x2 || pkt_type != 0x3 ||
-      pkt_type != 0x4 || pkt_type != 0x5 || pkt_type != 0x6 ||
-      pkt_type != 0x7) {
-    report_detected_triggered("FP_FRB35");
+void FRB68() {
+  report_reached("FRB68");
+  /* r7 preserves argc at the del-only argv[2] load. */
+  if (reg_state[7] < 3) {
+    report_detected_triggered("FRB68");
   }
 }
 
-void on_gnrc_ipv6_ext_process_all() {
-  report_reached("FP_FRB36");
-  if (reg_state[3] == 0) {
-    report_detected_triggered("FP_FRB36");
+void illegal_isr_mutex_wait() {
+  report_reached("FRB32");
+  uint32_t sp = reg_state[13];
+
+  /* Blocking on a contended mutex from an ISR links the interrupted thread
+   * into the waiter list even though it can resume after the interrupt. */
+  if (sp >= 0x20000000 && sp < 0x20000200) {
+    report_detected_triggered("FRB32");
   }
 }
 
-void on_gnrc_sixlowpan_iphc_revec() {
-  report_reached("FP_FRB37");
+void rfcore_assert_with_contended_stdio() {
+  report_reached("FRB32");
+  uint32_t sp = reg_state[13];
+  uint32_t ethos_out_mutex = frb_mem_read(0x200071c0, 4);
+
+  /* RFCORE_ASSERT_failure prints through stdio_ethos.  If the output mutex is
+   * already locked, this ISR call is guaranteed to enter mutex_lock's blocking
+   * path and enqueue the interrupted active thread as though it were a caller. */
+  if (sp >= 0x20000000 && sp < 0x20000200 && ethos_out_mutex != 0) {
+    report_detected_triggered("FRB32");
+  }
+}
+
+void FRB37() {
+  report_reached("FRB37");
   // Check NULL pointer deref on sixlo->data
   if (reg_state[11] == 0) {
-    report_detected_triggered("FP_FRB37");
+    report_detected_triggered("FRB37");
   }
 }
 
 void register_reflection_points() {
     frb_add_reflection_point(0x0020c994, H19);
-    frb_add_reflection_point(0x0020a3c0, gnrc_netif_hdr_build);
-    frb_add_reflection_point(0x0020ea14, gnrc_sixlowpan_frag_vrb_get);
+    frb_add_reflection_point(0x0020ea4e, H20);
     frb_add_reflection_point(0x0020fbea, H21);
     frb_add_reflection_point(0x0020fbe2, H22);
     frb_add_reflection_point(0x0020d682, H23);
     frb_add_reflection_point(0x0020f156, H24);
     frb_add_reflection_point(0x0020f10e, H25);
-    frb_add_reflection_point(0x0020f7b8, gnrc_sixlowpan_iphc_recv);
-    frb_add_reflection_point(0x0020ad4c, gnrc_pktbuf_mark);
+    frb_add_reflection_point(0x0020ae1e, H26);
     frb_add_reflection_point(0x0020dd20, H27);
-    frb_add_reflection_point(0x00213e28, shell_command);
-    frb_add_reflection_point(0x00201738, core_panic_exit);
-    frb_add_reflection_point(0x00200468, RFCORE_ASSERT_failure_exit);
-    frb_add_reflection_point(0x0021181c, check_wildcard_udp);
-    frb_add_reflection_point(0x0020469a, on_gnrc_ipv6_ext_process_all);
-    frb_add_reflection_point(0x0020fbde, on_gnrc_sixlowpan_iphc_revec);
+    frb_add_reflection_point(0x00200b4a, impossible_rf_event_assert);
+    frb_add_reflection_point(0x0021415a, FRB68);
+    frb_add_reflection_point(0x00200468, rfcore_assert_with_contended_stdio);
+    frb_add_reflection_point(0x002013f0, illegal_isr_mutex_wait);
+    frb_add_reflection_point(0x0020fbde, FRB37);
 }

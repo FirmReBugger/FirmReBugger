@@ -1,4 +1,5 @@
 # FirmReBugger
+
 A benchmark framework for monolithic firmware fuzzers.
 ![alt text](report.png)
 
@@ -11,14 +12,17 @@ We have made the process of incorporating a bug with a Raven, simple—we demons
 - [Dangling Pointer](#danling-pointer)
 
 ## Full Paper Results
+
 The full table of our experiemnts are detailed in `paper_results`
+
 - [FirmBench](paper_results/FirmBench.pdf)
 - [FirmBenchDMA](paper_results/FirmBenchDMA.pdf)
 - [FirmBenchX](paper_results/FirmBenchX.pdf)
 
-## Quick Start 
+## Quick Start
 
 ### Set up
+
 ```bash
 echo core | sudo tee /proc/sys/kernel/core_pattern
 sudo sh -c 'echo 524288 > /proc/sys/fs/inotify/max_user_watches && echo 8192 > /proc/sys/fs/inotify/max_user_instances'
@@ -28,7 +32,7 @@ sudo sh -c 'echo 524288 > /proc/sys/fs/inotify/max_user_watches && echo 8192 > /
 
 ```bash
 Install uv https://docs.astral.sh/uv/getting-started/installation/
-Install docker https://docs.docker.com/engine/install 
+Install docker https://docs.docker.com/engine/install
 sudo apt-get install automake texinfo unzip
 sudo apt install gcc-arm-none-eabi
 sudo apt install texlive-latex-base
@@ -60,7 +64,9 @@ uv run frb build
 ```
 
 ### Starting the Web Application (Recommended)
+
 It is recommneded to run FirmReBugger through the webapp
+
 ```bash
 # Run the webapp
 uv run frb app --help
@@ -72,10 +78,10 @@ uv run frb app -p <port>
 ssh -L <port>:localhost:<port> user@remote-host
 # Then open http://localhost:<port> in your local browser
 
-# If you want/need to rebuild the front end 
+# If you want/need to rebuild the front end
 cd src/firmrebugger-web
 npm install
-npm run build 
+npm run build
 ```
 
 **Report** shows you a summary of your fuzzing campaigns with FirmReBugger.
@@ -99,7 +105,7 @@ npm run build
 ```bash
 cd FirmReBugger
 export FIRMREBUGGER_BASE_DIR=$(pwd)
-# Fuzz your choice of binaries with 
+# Fuzz your choice of binaries with
 uv run frb fuzz -h
 
 # Bind-mount your local FirmReBugger source for live updates in containers
@@ -116,12 +122,23 @@ uv run frb bug-analyzer <fuzzing_results_dir> <descriptor_path>
 # Visualize the data
 uv run frb charting-tool
 ```
+
 ### Trouble shooting
+
 - If fuzzing sessions die prematurely, check the logs at:
 
 ```
-/home/user/FirmReBugger/<benchmark>/fuzzers/<fuzzer>/fuzzing_out/<output_name>/fuzzing_out.
+$FIRMREBUGGER_BASE_DIR/outputs/<run_name>/<benchmark>-<binary>-<fuzzer>/fuzzing_logs/
 ```
+
+- If FirmReBugger refuses to start with an error about an old directory
+  layout, your checkout still has data from before the folder structure
+  changed (see [Folder Structure](#folder-structure)). Migrate it in place:
+
+  ```bash
+  uv run frb port-layout --dry-run   # preview what would move
+  uv run frb port-layout             # apply it
+  ```
 
 #### Commands
 
@@ -133,6 +150,7 @@ uv run frb fuzz --help
 uv run frb build --help
 uv run frb bug-analyzer --help
 uv run frb charting-tool --help
+uv run frb port-layout --help
 uv run frb app --help
 ```
 
@@ -144,29 +162,64 @@ To integrate a new fuzzer into FirmReBugger:
 
 1. Docker Integration
 
-    Add your fuzzer under the docker/ directory:
+   Add your fuzzer under the docker/ directory:
+   - An original image for fuzzing.
 
-    - An original image for fuzzing.
-
-    - A **FRB-patched** version for triaging (i.e., including the FirmReBugger modifications). Follow the structure and integration pattern used by the existing fuzzers as a reference.
+   - A **FRB-patched** version for triaging (i.e., including the FirmReBugger modifications). Follow the structure and integration pattern used by the existing fuzzers as a reference.
 
 2. Runner Implementation
 
-    Implement a corresponding runner in:
-    ```
-    src/firmrebugger/fuzer_runners/
-    ```
-    This runner defines how FirmReBugger invokes your fuzzer inside Docker.
+   Implement a corresponding runner at:
+
+   ```
+   Fuzzers/<your_fuzzer>/runner.sh
+   ```
+
+   This runner defines how FirmReBugger invokes your fuzzer inside Docker.
 
 3. Benchmark Configuration
 
-    For each binary you want to support, add your fuzzer configuration under:
+   For each binary you want to support, add your fuzzer configuration under:
 
-    ```
-    src/<Benchmark>/<Binary>/fuzzers/<your_fuzzer>/
-    ```
+   ```
+   <Benchmark>/<Binary>/<your_fuzzer>/
+   ```
 
-    Include all required configuration files, scripts, and auxiliary resources.
+   Include all required configuration files, scripts, and auxiliary resources.
+   To override the runner for a specific target, drop a `runner.sh` directly
+   in this folder — it takes priority over `Fuzzers/<your_fuzzer>/runner.sh`.
+
+4. Results Analyzer
+
+   Implement a results parser at:
+
+   ```
+   Fuzzers/<your_fuzzer>/analyzer.py
+   ```
+
+   exposing a function named `analyze(bench_info, output, run_data, Crash, run_name, descriptor_path)`
+   that returns `(run_data, time_list)`. The bug-analyzer discovers this file by
+   fuzzer name, so nothing elsewhere needs to be registered. If your fuzzer's
+   output format matches an existing one, this file can just re-export it, e.g.:
+
+   ```python
+   from firmrebugger.bug_analyzer_utils.fuzzware_analyzer import fuzzware_analyzer as analyze
+   ```
+
+5. Optional Metadata
+
+   Drop a `Fuzzers/<your_fuzzer>/fuzzer.yml` if you need either of these
+   (both are optional and omitted by default):
+
+   ```yaml
+   bug_prefix:
+     XY # short prefix used for this fuzzer's bug IDs (e.g. FW01),
+     # shown in `frb bug-registry`'s "next free ID" table
+   bind_mount:
+     true # bind-mount the output dir into the container instead of
+     # docker-cp'ing it in/out — use this if your fuzzer needs to
+     # stream output live or has baked-in absolute host paths
+   ```
 
 During execution, FirmReBugger automatically:
 
@@ -178,7 +231,10 @@ During execution, FirmReBugger automatically:
 
 - Launches the fuzzer inside the corresponding Docker container.
 
+- Picks up your `analyzer.py` and `fuzzer.yml` (if present) by fuzzer name — no other file in the repo needs to be touched.
+
 ### Extending existing Ravens
+
 If you discover a new bug and want to extend an existing Raven:
 
 - Modify the corresponding `bug_descriptor.c` file located in the relevant binary's directory.
@@ -187,16 +243,15 @@ If you discover a new bug and want to extend an existing Raven:
 
 - If your introspection point address is symbol-based, use `frb_symbolize("symbol_name", offset)` to resolve it at runtime from the binary's `symbols.txt` file. If the address is fixed, pass it directly to `frb_add_reflection_point`.
 
-
 ### Adding a New Binary and Its Corresponding Raven
 
-1. Choose a benchmark suite (e.g., FirmBench, FirmBenchDMA, or FirmBenchX) and create a new folder named after your binary:
+1. Choose a benchmark suite (FirmBench, FirmBenchDMA, or FirmBenchX) and create a new folder named after your binary:
 
 ```
 <Benchmark>/<Binary>/
 ```
 
-2. Add a `binary/` subdirectory containing the ELF.
+2. Add the ELF directly in that folder.
 
 3. Add the Raven implementation in:
 
@@ -207,25 +262,36 @@ If you discover a new bug and want to extend an existing Raven:
 4. Follow the existing directory structure for fuzzers:
 
 ```
-<Benchmark>/<Binary>/fuzzers/<fuzzer>/fuzzing_out/<output_dir>/
+<Benchmark>/<Binary>/<fuzzer>/
 ```
 
-Maintaining consistency with the existing structure ensures compatibility with the scheduling, fuzzing, and triaging pipelines.
-
+Maintaining consistency with the existing structure ensures compatibility with the scheduling, fuzzing, and triaging pipelines. Fuzzing/triaging output is never stored here — it's written under the top-level `outputs/` tree (see Folder Structure below).
 
 ## Folder Structure
 
 ```
 FirmReBugger/
 ├── docker/
+├── Fuzzers/
+│   └── <Fuzzer>/
+│       ├── runner.sh
+│       ├── analyzer.py
+│       └── fuzzer.yml (optional)
 ├── FirmBench/
 │   └── <Binary>/
-│       └── fuzzers/
-│           └── <Fuzzer>/
-│               └── fuzzing_out/
-│                   └── <output_name>/
+│       ├── <Binary's ELF file>
+│       ├── bug_descriptor.c
+│       └── <Fuzzer>/
+│           └── config.yml
 ├── FirmBenchDMA/
 ├── FirmBenchX/
+├── outputs/
+│   └── <run_name>/
+│       └── <Benchmark>-<Binary>-<Fuzzer>/
+│           ├── frb_info.json
+│           ├── frb_report.json
+│           ├── fuzzing_logs/
+│           └── 01-output/, 02-output/, ...
 ├── pyproject.toml
 ├── README.md
 ├── requirements.txt
@@ -242,7 +308,6 @@ FirmReBugger/
 │   └── firmrebugger-web/
 ├── uv.lock
 ```
-
 
 ## Raven API
 
@@ -271,7 +336,7 @@ static void report_reached(const char* bug_id) {
 }
 ```
 
-Reflection points are registered in a single `register_reflection_points()` function using `frb_add_reflection_point`. Addresses can be hardcoded or resolved at runtime from `binary/symbols.txt` using `frb_symbolize(symbol_name, offset)`:
+Reflection points are registered in a single `register_reflection_points()` function using `frb_add_reflection_point`. Addresses can be hardcoded or resolved at runtime from `symbols.txt` using `frb_symbolize(symbol_name, offset)`:
 
 ```c
 void register_reflection_points() {
@@ -284,16 +349,16 @@ void register_reflection_points() {
 
 Available API functions:
 
-| Function | Description |
-|---|---|
-| `reg_state[0..15]` | Current ARM register values (r0–pc) at the reflection point |
-| `frb_mem_read(addr, size)` | Read `size` bytes from emulated memory at `addr` |
-| `frb_mem_write(addr, value, size)` | Write `value` of `size` bytes to emulated memory at `addr` |
-| `frb_report_reached(bug_id)` | Mark bug as reached (first time only) |
-| `frb_report_detected_triggered(bug_id)` | Mark bug as triggered/detected (first time only) |
-| `frb_symbolize(symbol, offset)` | Resolve `symbol` from `symbols.txt` and add `offset` (Thumb bit stripped) |
-| `frb_add_reflection_point(addr, fn)` | Register an introspection function at `addr` |
-| `frb_print_regs()` | Print all registers to stdout (debugging) |
+| Function                                | Description                                                               |
+| --------------------------------------- | ------------------------------------------------------------------------- |
+| `reg_state[0..15]`                      | Current ARM register values (r0–pc) at the reflection point               |
+| `frb_mem_read(addr, size)`              | Read `size` bytes from emulated memory at `addr`                          |
+| `frb_mem_write(addr, value, size)`      | Write `value` of `size` bytes to emulated memory at `addr`                |
+| `frb_report_reached(bug_id)`            | Mark bug as reached (first time only)                                     |
+| `frb_report_detected_triggered(bug_id)` | Mark bug as triggered/detected (first time only)                          |
+| `frb_symbolize(symbol, offset)`         | Resolve `symbol` from `symbols.txt` and add `offset` (Thumb bit stripped) |
+| `frb_add_reflection_point(addr, fn)`    | Register an introspection function at `addr`                              |
+| `frb_print_regs()`                      | Print all registers to stdout (debugging)                                 |
 
 ## Raven Examples
 
@@ -344,7 +409,6 @@ void register_reflection_points() {
 
 The CAN bus subcommands allow users to specify a target device for command execution. At runtime, the target device is resolved using the `z_impl_device_get_binding` function, which returns a pointer to a generic device struct. However, no type verification is performed to ensure that the selected device implements the CAN bus API. As a result, if a non-CAN device is specified (such as a GPIO device), the subcommand will erroneously perform CAN bus operations on an incompatible device struct.
 
-
 ### Dangling Pointer
 
 **Dangling Pointer** refers to a pointer that continues to reference freed memory or a stack frame that no longer exists. Dereferencing such pointers in C or C++ is considered undefined behavior and can result in unpredictable or erroneous program states. This is a common issue in manual memory management environments, particularly in C/C++ firmware.
@@ -379,9 +443,6 @@ The listing above highlights a dangling pointer bug (Bug ID: FW19) identified by
 Later, in another interrupt, `MMA8652FC::getAxisReadings` is called, which invokes `FRToSI2C::Mem_Read` with a temporary stack buffer and its length as arguments. Due to the calling convention, the last two arguments (including the buffer length) are stored on the stack. If a hardware timer interrupt occurs before `HAL_I2C_Mem_Read` is called, the interrupt handler function `I2C_MasterReceive_BTF` writes to the global `pBuffPtr`, which still points to the now-reused stack location. This corrupts the buffer length argument, leading to a stack buffer overflow in `MMA8652FC::getAxisReadings`, which could overwrite the return address and grant arbitrary control over the instruction pointer.
 
 Dangling pointers are particularly hard to detect because a stale pointer might be dereferenced at many locations throughout the program. To facilitate triage, `frb_mem_write` overwrites the pointer with a sentinel value (`0xDEADBEEF`) at the moment it becomes invalid. Any later use of the dangling pointer will then be caught by the second reflection point, making the bug easy to identify.
-
-
-
 
 ## Modification table
 
@@ -420,7 +481,6 @@ Dangling pointers are particularly hard to detect because a stale pointer might 
 | FirmReBugger | Hoverboard        | Dma patched in DMA1_Channel1_IRQHandler<br>Patched softwareserialRXInterrupt<br>Early return to HAL_Delay<br>Early return to Flash_WaitLastOperation<br>Early return to consoleLog                                                                                                                                                                                                                                                                                                                                             |
 | FirmReBugger | Oresat-Control    | Timer patch to chVTDoTickI<br>Patched DMA in ax5043SPIExchange<br>Patched DMA in ax5043GetStatus<br>Early return to Delay                                                                                                                                                                                                                                                                                                                                                                                                      |
 | FirmReBugger | BetaFlight        | Early return to FLASH_WaitForLastOperation<br>Early return to OverclockRebootIfNecessar<br>Early return to OTG_FS_IRQHandle<br>Early return to Delay                                                                                                                                                                                                                                                                                                                                                                           |
-
 
 # Cite as:
 

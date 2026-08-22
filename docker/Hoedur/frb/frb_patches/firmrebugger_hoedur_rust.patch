@@ -6,7 +6,7 @@ index 6239778..61b0464 100644
      let qemu_dir = out_dir.join("qemu-7.1.0");
      let build_dir = out_dir.join("build");
      let bindings_dir = PathBuf::from(BINDINGS_DIR);
-+    
++
  
      // get QEMU
      if !qemu_dir.is_dir() {
@@ -18,22 +18,119 @@ index 6239778..61b0464 100644
          ];
          for patch in patches {
              let file = File::open(patch).expect("Failed to open patch file");
-@@ -57,6 +59,18 @@ fn main() {
+@@ -57,7 +59,18 @@ fn main() {
          }
      }
  
-+    
++
 +    let destination_dir = &qemu_dir.join("accel").join("tcg");
 +    let destination_dir_h = &qemu_dir.join("include").join("tcg");
 +    let source_c = PathBuf::from("/home/user/hoedur/frb_patches/firmrebugger.c");
 +    let source_h = PathBuf::from("/home/user/hoedur/frb_patches/firmrebugger.h");
-+    
-+    
++
++
 +    fs::copy(&source_c, &destination_dir.join("firmrebugger.c"))
 +            .expect("COPYING FIRMREBUGGER.c PATCH FAILED");
 +    fs::copy(&source_h, &destination_dir_h.join("firmrebugger.h"))
 +            .expect("COPYING FIRMREBUGGER.h PATCH FAILED");
-+
      // create build dir
      if !build_dir.is_dir() {
          fs::create_dir(&build_dir).expect("Failed to create build dir");
+     }
+
+diff --git a/hoedur/Cargo.toml b/hoedur/Cargo.toml
+index 2b4fca4..6d03b8c 100644
+--- a/hoedur/Cargo.toml
++++ b/hoedur/Cargo.toml
+@@ -30,5 +30,7 @@ qemu-rs = { path = "../qemu-rs" }
+ serde = { version = "1.0.162", features = ["derive", "rc"] }
+ serde_yaml = "0.8.26"
+ signal-hook = "0.3.15"
+ tempfile = "3.5.0"
++libc = "0.2"
++serde_json = "1.0"
+ 
+ [dev-dependencies]
+
+diff --git a/hoedur/src/lib.rs b/hoedur/src/lib.rs
+index 1d9d45a..0a7e0d4 100644
+--- a/hoedur/src/lib.rs
++++ b/hoedur/src/lib.rs
+@@ -2,6 +2,7 @@ mod archive;
+ pub mod cli;
+ pub mod coverage;
+ mod hoedur;
+ mod runner;
++mod replay_worker;
+ 
+ use anyhow::Context;
+@@ -12,7 +13,11 @@ pub use runner::{run, Command, RunConfig, RunnerConfig};
+ 
+ pub type Emulator = emulator::Emulator<InputFile>;
++pub use emulator::EmulatorSnapshot;
+ 
+ pub fn main() -> anyhow::Result<()> {
++    if std::env::var_os("FRB_REPLAY_WORKER").is_some() {
++        return replay_worker::run();
++    }
+     use clap::Parser;
+     let opt = cli::Arguments::parse();
+ 
+diff --git a/hoedur/src/runner.rs b/hoedur/src/runner.rs
+index 3ea7c12..e3a9b78 100644
+--- a/hoedur/src/runner.rs
++++ b/hoedur/src/runner.rs
+@@ -630,3 +630,53 @@ pub(crate) fn verify_remaining_values(result: &ExecutionResult<InputFile>) {
+         );
+     }
+ }
++
++pub struct ReplaySession {
++    emulator: Emulator,
++    snapshot: crate::EmulatorSnapshot,
++}
++
++impl ReplaySession {
++    pub fn create(corpus_path: PathBuf) -> anyhow::Result<Self> {
++        use clap::Parser;
++        let args = cli::Arguments::try_parse_from(vec![
++            "hoedur-dict-arm".to_owned(),
++            "--import-config".to_owned(),
++            corpus_path.to_string_lossy().into_owned(),
++            "run".to_owned(),
++        ])?;
++        let config = RunnerConfig::from_cli(args)?;
++        let RunnerConfig { file_storage, emulator: emulator_config, modeling, .. } = config;
++        let mut emulator = Emulator::new(&file_storage, emulator_config, modeling)
++            .context("Failed to create persistent emulator")?;
++        qemu_rs::set_signal_handler()?;
++        log::info!("Running Hoedur persistent worker initialization ...");
++        emulator.set_next_input_limits(EmulatorLimits::new());
++        let result = emulator
++            .run(InputFile::default(), RunMode::Normal)
++            .context("run emulator with empty input")?;
++        if result.stop_reason != StopReason::EndOfInput {
++            anyhow::bail!("Could not initialize Hoedur replay emulator: {:x?}", result.stop_reason);
++        }
++        emulator.offset_limits();
++        let snapshot = emulator
++            .snapshot_create()
++            .context("Failed to create persistent replay snapshot")?;
++        Ok(Self { emulator, snapshot })
++    }
++
++    pub fn reset(&mut self) -> anyhow::Result<()> {
++        self.emulator.snapshot_restore(&self.snapshot);
++        Ok(())
++    }
++
++    pub fn replay(&mut self, path: &Path) -> anyhow::Result<()> {
++        let result = self
++            .emulator
++            .run(InputFile::read_from_path(path)?, RunMode::Leaf)
++            .context("run Hoedur replay")?;
++        verify_remaining_values(&result);
++        log::info!("Result: {}", result);
++        Ok(())
++    }
++}

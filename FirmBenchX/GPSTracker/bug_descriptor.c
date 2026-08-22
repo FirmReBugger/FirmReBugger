@@ -21,9 +21,12 @@ static void report_reached(const char* bug_id) {
 
 void BUG_FW30() {
     report_reached("FW30");
-    //Stack overflow in USB_SendString_descriptor
+    // Unbounded VLA in USB_SendStringDescriptor crosses below the static-data end.
     uint32_t w_len = reg_state[1];
-    if (w_len > 0xc000) {
+    uint32_t sp = reg_state[13];
+    uint32_t aligned_len = (w_len + 7u) & ~7u;
+    if ((int32_t)w_len > 1 &&
+        (aligned_len > sp || sp - aligned_len < 0x2007a83cu)) {
         report_detected_triggered("FW30");
     }
 }
@@ -62,8 +65,8 @@ void BUG_S02() {
 
 void BUG_MF03() {
     report_reached("MF03");
-    //strok not checked for NULL in gsm_get_time
-    if (reg_state[0] == 0) {
+    // strtok result reaches strlcpy only when gpsData.timerFirstFix is nonzero.
+    if (reg_state[0] == 0 && frb_mem_read(0x20079a38u, 1) != 0) {
         report_detected_triggered("MF03");
     }
 }
@@ -72,8 +75,6 @@ void strex() {
     report_reached("ERROR:strex");
     report_detected_triggered("ERROR:strex");
 }
-
-const
 
 void register_reflection_points() {
     frb_add_reflection_point(0x00084336, BUG_FW30);

@@ -1,0 +1,22 @@
+diff --git a/cores/arduino/HardwareSerial.h b/cores/arduino/HardwareSerial.h
+--- a/cores/arduino/HardwareSerial.h
++++ b/cores/arduino/HardwareSerial.h
+@@ -40,5 +40,5 @@
+ // Serial behave erratically. See https://github.com/arduino/Arduino/issues/2405
+ #if !defined(SERIAL_TX_BUFFER_SIZE)
+-#define SERIAL_TX_BUFFER_SIZE 64
++#define SERIAL_TX_BUFFER_SIZE 128
+ #endif
+ #if !defined(SERIAL_RX_BUFFER_SIZE)
+diff --git a/system/Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_rcc.c b/system/Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_rcc.c
+--- a/system/Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_rcc.c
++++ b/system/Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_rcc.c
+@@ -862,7 +862,7 @@ HAL_StatusTypeDef HAL_RCC_ClockConfig(RCC_ClkInitTypeDef  *RCC_ClkInitStruct, ui
+       /* Check the PLL ready flag */  
+       if(__HAL_RCC_GET_FLAG(RCC_FLAG_PLLRDY) == RESET)
+       {
+-        return HAL_ERROR;
++        /* P2IM emulation: continue even when the model omits PLLRDY. */
+       }
+     }
+     /* HSI is selected as System Clock Source */

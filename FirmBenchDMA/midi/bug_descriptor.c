@@ -19,17 +19,23 @@ static void report_reached(const char* bug_id) {
     frb_report_reached(bug_id);
 }
 
-void on_MIDI_note_off_do() {
-    report_reached("DI4");
-    report_detected_triggered("DI4");
+#define MIDI_STATIC_MESSAGE 0x20000908u
+
+void BUG_DI04() {
+    report_reached("DI04");
+    if (reg_state[0] == MIDI_STATIC_MESSAGE) {
+        report_detected_triggered("DI04");
+    }
 }
 
-void on_MIDI_note_on_do() {
-    report_reached("DI5");
-    report_detected_triggered("DI5");
+void BUG_DI05() {
+    report_reached("DI05");
+    if (reg_state[0] == MIDI_STATIC_MESSAGE) {
+        report_detected_triggered("DI05");
+    }
 }
 
 void register_reflection_points() {
-    frb_add_reflection_point(0x080015d8, on_MIDI_note_off_do);
-    frb_add_reflection_point(0x08001590, on_MIDI_note_on_do);
+    frb_add_reflection_point(0x080015d8, BUG_DI04);
+    frb_add_reflection_point(0x08001590, BUG_DI05);
 }

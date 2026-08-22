@@ -198,6 +198,36 @@ def get_run_parameters(output_path):
                 file_info += line + " "
 
 
+def _get_dice_working_folder(output_path, crash):
+    folder_name = "crashes" if crash else "queue"
+    candidates = [
+        os.path.join(output_path, "outputs", "default", folder_name),
+        os.path.join(output_path, "output", "default", folder_name),
+        os.path.join(output_path, "outputs", folder_name),
+        os.path.join(output_path, "default", folder_name),
+    ]
+    for candidate in candidates:
+        if os.path.isdir(candidate):
+            return candidate
+
+    label = "Crashes" if crash else "Queue"
+    raise FileNotFoundError(
+        f"The '{label}' folder does not exist; checked: {', '.join(candidates)}"
+    )
+
+
+def _get_dice_fuzzer_stats_path(output_path, working_folder):
+    candidates = [
+        os.path.join(os.path.dirname(working_folder), "fuzzer_stats"),
+        os.path.join(output_path, "outputs", "fuzzer_stats"),
+        os.path.join(output_path, "fuzzer_stats"),
+    ]
+    for candidate in candidates:
+        if os.path.isfile(candidate):
+            return candidate
+    return candidates[0]
+
+
 def dice_analyzer(
     bench_info,
     output_path,
@@ -208,18 +238,8 @@ def dice_analyzer(
 ):
     os.environ["FIRMREBUGGER_CONFIG"] = descriptor_path
     execution_times = []
-    if not Crash:
-        working_folder = os.path.join(output_path, "outputs", "queue")
-        if not os.path.isdir(working_folder):
-            raise FileNotFoundError(
-                f"The 'Queue' folder does not exist at: {working_folder}"
-            )
-    else:
-        working_folder = os.path.join(output_path, "outputs", "crashes")
-        if not os.path.isdir(working_folder):
-            raise FileNotFoundError(
-                f"The 'Crashes' folder does not exist at: {working_folder}"
-            )
+    working_folder = _get_dice_working_folder(output_path, Crash)
+    fuzzer_stats_path = _get_dice_fuzzer_stats_path(output_path, working_folder)
 
     seeds = [
         os.path.join(working_folder, seed)
@@ -263,7 +283,7 @@ def dice_analyzer(
                         run_command,
                         command,
                         seed_path,
-                        get_time_input(seed_path),
+                        get_time_input(seed_path, fuzzer_stats_path),
                         Crash,
                         10,
                     )

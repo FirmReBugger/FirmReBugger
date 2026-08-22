@@ -1,0 +1,13 @@
+diff --git a/DICE-Evaluation/ARM/Fuzzing/Firmware/Sources/stm32-codec-midi-mmdsp-test-ST-Workbench/src/main.c b/DICE-Evaluation/ARM/Fuzzing/Firmware/Sources/stm32-codec-midi-mmdsp-test-ST-Workbench/src/main.c
+index f9e4283..a7212e3 100644
+--- a/DICE-Evaluation/ARM/Fuzzing/Firmware/Sources/stm32-codec-midi-mmdsp-test-ST-Workbench/src/main.c
++++ b/DICE-Evaluation/ARM/Fuzzing/Firmware/Sources/stm32-codec-midi-mmdsp-test-ST-Workbench/src/main.c
+@@ -25,7 +25,7 @@ void MIDI_note_on_do(void *data, MIDIMsg *msg)
+             && (msg->data[1] == 67)) {
+         LEDs_redSet();
+     }
+-    //MIDIMsg_free(msg); //Bug identified by DICE
++    MIDIMsg_free(msg); //Bug identified by DICE
+ }
+ 
+ void MIDI_note_off_do(void *data, MIDIMsg *msg)

@@ -1,0 +1,51 @@
+diff --git a/subsys/bluetooth/host/adv.c b/subsys/bluetooth/host/adv.c
+index 9cc1d3fb2e..59c4a2b242 100644
+--- a/subsys/bluetooth/host/adv.c
++++ b/subsys/bluetooth/host/adv.c
+@@ -1351,11 +1351,11 @@ int bt_le_adv_start(const struct bt_le_adv_param *param,
+ 		bt_le_adv_delete_legacy();
+ 	}
+ 
+-	if (ad_is_limited(ad, ad_len)) {
+-		k_work_init_delayable(&adv->lim_adv_timeout_work, adv_timeout);
+-		k_work_reschedule(&adv->lim_adv_timeout_work,
+-				  K_SECONDS(CONFIG_BT_LIM_ADV_TIMEOUT));
+-	}
++	//if (ad_is_limited(ad, ad_len)) {
++	//	k_work_init_delayable(&adv->lim_adv_timeout_work, adv_timeout);
++	//	k_work_reschedule(&adv->lim_adv_timeout_work,
++	//			  K_SECONDS(CONFIG_BT_LIM_ADV_TIMEOUT));
++	//}
+ 
+ 	return err;
+ }
+diff --git a/subsys/bluetooth/host/hci_core.c b/subsys/bluetooth/host/hci_core.c
+index 72baefc01b..0c3f650a77 100644
+--- a/subsys/bluetooth/host/hci_core.c
++++ b/subsys/bluetooth/host/hci_core.c
+@@ -58,7 +58,7 @@
+ #include "direction_internal.h"
+ #endif /* CONFIG_BT_DF */
+ 
+-#define HCI_CMD_TIMEOUT      K_SECONDS(10)
++#define HCI_CMD_TIMEOUT      K_FOREVER
+ 
+ /* Stacks for the threads */
+ #if !defined(CONFIG_BT_RECV_BLOCKING)
+diff --git a/subsys/bluetooth/host/l2cap.c b/subsys/bluetooth/host/l2cap.c
+index 67f6ac807c..d7794f44ea 100644
+--- a/subsys/bluetooth/host/l2cap.c
++++ b/subsys/bluetooth/host/l2cap.c
+@@ -48,9 +48,9 @@
+ #define L2CAP_LE_PSM_IS_DYN(_psm) \
+ 	(_psm >= L2CAP_LE_PSM_DYN_START && _psm <= L2CAP_LE_PSM_DYN_END)
+ 
+-#define L2CAP_CONN_TIMEOUT	K_SECONDS(40)
+-#define L2CAP_DISC_TIMEOUT	K_SECONDS(2)
+-#define L2CAP_RTX_TIMEOUT	K_SECONDS(2)
++#define L2CAP_CONN_TIMEOUT	K_FOREVER
++#define L2CAP_DISC_TIMEOUT	K_FOREVER
++#define L2CAP_RTX_TIMEOUT	K_FOREVER
+ 
+ #if defined(CONFIG_BT_L2CAP_DYNAMIC_CHANNEL)
+ /* Dedicated pool for disconnect buffers so they are guaranteed to be send

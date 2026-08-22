@@ -5,14 +5,22 @@ import subprocess
 import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import nullcontext
+from pathlib import Path
 
 from firmrebugger.bug_analyzer_utils.common import (
     get_available_cpu_count,
     periodic_printer,
+    parse_replay_output,
     run_command,
     update_bug_data,
 )
 from firmrebugger.common import get_working_dirs
+from firmrebugger.bug_analyzer_utils.replay_worker import PersistentReplayPool
+
+
+_generated_stats = set()
+_generated_stats_lock = threading.Lock()
 
 
 def get_time_data_fuzzware(crash_timing_path):
@@ -23,6 +31,30 @@ def get_time_data_fuzzware(crash_timing_path):
             time_data.append((time, crash_path))
 
     return time_data
+
+
+def group_seed_info_by_config(output_path, seed_info):
+
+    grouped = {}
+    output_root = Path(output_path).resolve()
+    for item in seed_info:
+        _, seed_path = item
+        full_seed_path = (output_root / seed_path).resolve()
+        config_path = None
+        for parent in full_seed_path.parents:
+            if parent.name.startswith("main"):
+                candidate = parent / "config.yml"
+                if candidate.is_file():
+                    config_path = str(candidate)
+                    break
+            if parent == output_root:
+                break
+        if config_path is None:
+            raise FileNotFoundError(
+                f"Could not find a mainXXX/config.yml for replay seed: {seed_path}"
+            )
+        grouped.setdefault(config_path, []).append(item)
+    return grouped
 
 
 def replace_main_config(output_path):
@@ -40,6 +72,16 @@ def replace_main_config(output_path):
 
 
 def gen_fuzzware_stats(RESULT_DIR, fuzzer):
+    stats_key = (os.path.realpath(RESULT_DIR), fuzzer)
+    with _generated_stats_lock:
+        if stats_key in _generated_stats:
+            return
+
+        _generate_fuzzware_stats(RESULT_DIR, fuzzer)
+        _generated_stats.add(stats_key)
+
+
+def _generate_fuzzware_stats(RESULT_DIR, fuzzer):
     def process_output_dir(output):
         if fuzzer == "Fuzzware-Icicle":
             replace_main_config(output)
@@ -146,54 +188,105 @@ def fuzzware_analyzer(
     failure_exc = None
     failure_tb = None
     try:
-        # Use all visible CPUs, capped by replay items to avoid thread oversubscription.
-        num_workers = max(1, min(len(seed_info), get_available_cpu_count()))
+        if fuzzer == "GDMA":
+            replay_groups = [(None, seed_info)]
+        else:
+            replay_groups = list(
+                group_seed_info_by_config(output_path, seed_info).items()
+            )
 
-        def _process_seed(seed_tuple):
-            time_val, seed_path = seed_tuple
-            full_seed_path = os.path.join(output_path, seed_path)
-            command = f"fuzzware replay -v {shlex.quote(full_seed_path)}"
-            return run_command(command, seed_path, time_val, Crash, 10)
+        for config_path, grouped_seed_info in replay_groups:
+            configured_workers = int(os.environ.get("FUZZWARE_REPLAY_WORKERS", "4"))
+            num_workers = max(
+                1,
+                min(
+                    len(grouped_seed_info),
+                    configured_workers,
+                    get_available_cpu_count(),
+                ),
+            )
+            replay_pool = None
+            if config_path is not None:
+                replay_pool = PersistentReplayPool(
+                    num_workers,
+                    descriptor_path=descriptor_path,
+                    worker_env={"FRB_REPLAY_CONFIG": config_path},
+                )
 
-        with ThreadPoolExecutor(max_workers=num_workers) as executor:
-            futures = [executor.submit(_process_seed, item) for item in seed_info]
+            with replay_pool or nullcontext():
+                with ThreadPoolExecutor(max_workers=num_workers) as executor:
 
-            for future in as_completed(futures):
-                try:
-                    result = future.result()
-                except Exception as exc:
-                    for pending in futures:
-                        pending.cancel()
-                    raise exc
+                    def _process_seed_with_pool(seed_tuple):
+                        time_val, seed_path = seed_tuple
+                        full_seed_path = os.path.join(output_path, seed_path)
+                        command = f"fuzzware replay -v {shlex.quote(full_seed_path)}"
+                        if replay_pool is None:
+                            return run_command(command, seed_path, time_val, Crash, 10)
+                        raw = replay_pool.replay(
+                            command,
+                            full_seed_path,
+                            10,
+                            mode="crash" if Crash else "queue",
+                            timing=time_val,
+                        )
+                        if raw.timed_out:
+                            print(
+                                f"[replay_worker] Timeout (10s) exceeded for seed: {seed_path} — skipping."
+                            )
+                            return seed_path, [], [], time_val, raw.elapsed, []
+                        return parse_replay_output(
+                            seed_path,
+                            raw.stdout,
+                            raw.stderr,
+                            time_val,
+                            raw.elapsed,
+                            Crash,
+                            raw.returncode,
+                            raw.reached_ids,
+                            raw.triggered_ids,
+                        )
 
-                if result is None:
-                    progress["completed"] += 1
-                    continue
+                    futures = [
+                        executor.submit(_process_seed_with_pool, item)
+                        for item in grouped_seed_info
+                    ]
 
-                (
-                    seed_path,
-                    bugs_triggered,
-                    bugs_reached,
-                    time_val,
-                    elapsed,
-                    errors,
-                ) = result
-                execution_times.append(elapsed)
+                    for future in as_completed(futures):
+                        try:
+                            result = future.result()
+                        except Exception as exc:
+                            for pending in futures:
+                                pending.cancel()
+                            raise exc
 
-                if not errors:
-                    run_data = update_bug_data(
-                        run_data,
-                        time_val,
-                        seed_path,
-                        bugs_triggered=bugs_triggered,
-                        bugs_reached=bugs_reached,
-                        Crash=Crash,
-                    )
-                    progress["ungrouped_crashes"] = len(
-                        run_data[0]["ungrouped_crashes"]
-                    )
+                        if result is None:
+                            progress["completed"] += 1
+                            continue
 
-                progress["completed"] += 1
+                        (
+                            seed_path,
+                            bugs_triggered,
+                            bugs_reached,
+                            time_val,
+                            elapsed,
+                            errors,
+                        ) = result
+                        execution_times.append(elapsed)
+
+                        if not errors:
+                            run_data = update_bug_data(
+                                run_data,
+                                time_val,
+                                seed_path,
+                                bugs_triggered=bugs_triggered,
+                                bugs_reached=bugs_reached,
+                                Crash=Crash,
+                            )
+                            progress["ungrouped_crashes"] = len(
+                                run_data[0]["ungrouped_crashes"]
+                            )
+
+                        progress["completed"] += 1
     except Exception as exc:
         progress["failed"] = True
         progress["failure_message"] = str(exc)

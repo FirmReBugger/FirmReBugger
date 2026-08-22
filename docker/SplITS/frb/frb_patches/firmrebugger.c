@@ -1,4 +1,5 @@
 #include <stdbool.h>
+#include <stdlib.h>
 
 #include <unicorn/unicorn.h>
 
@@ -53,6 +54,7 @@ static size_t g_pending_reflection_point_count = 0;
 
 static frb_reflection_point_registration g_reflection_points[FRB_MAX_REFLECTION_POINTS];
 static size_t g_reflection_point_count = 0;
+static uc_hook g_reflection_hooks[FRB_MAX_REFLECTION_POINTS];
 
 static void populate_reg_state(uint32_t *reg_state, uc_engine *uc) {
     uc_reg_read(uc, UC_ARM_REG_R0,  &reg_state[0]);
@@ -350,13 +352,31 @@ void firmrebugger_init_config(uc_engine *uc)
 
     /* Move pending into active table and install unicorn hooks */
     g_reflection_point_count = g_pending_reflection_point_count;
-    uc_hook tmp;
     for (size_t i = 0; i < g_reflection_point_count; i++) {
         g_reflection_points[i] = g_pending_reflection_points[i];
         printf("FirmReBugger: installing reflection point[%zu] at 0x%X\n",
                i, g_reflection_points[i].entry.address);
-        uc_hook_add(uc, &tmp, UC_HOOK_CODE, firmrebugger_hook, NULL,
+        uc_hook_add(uc, &g_reflection_hooks[i], UC_HOOK_CODE, firmrebugger_hook, NULL,
                     (g_reflection_points[i].entry.address & 0xfffffffe),
                     (g_reflection_points[i].entry.address | 0x1));
     }
+}
+
+__attribute__((visibility("default"))) int firmrebugger_reset_session(uc_engine *uc)
+{
+    if (!uc) return -1;
+    for (size_t i = 0; i < g_reflection_point_count; i++) {
+        if (g_reflection_hooks[i]) uc_hook_del(uc, g_reflection_hooks[i]);
+        g_reflection_hooks[i] = 0;
+    }
+    for (int i = 0; i < reached_bug_count; i++) free(reached_bug_ids[i]);
+    for (int i = 0; i < triggered_bug_count; i++) free(triggered_bug_ids[i]);
+    reached_bug_count = 0;
+    triggered_bug_count = 0;
+    g_reflection_point_count = 0;
+    g_pending_reflection_point_count = 0;
+    memset(reg_state, 0, sizeof(reg_state));
+    if (tcc_state) { tcc_delete(tcc_state); tcc_state = NULL; }
+    firmrebugger_init_config(uc);
+    return 0;
 }

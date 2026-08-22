@@ -1,0 +1,21 @@
+diff --git a/PLC/modbus.ino b/PLC/modbus.ino
+index a7d6f69..e0adc22 100644
+--- a/PLC/modbus.ino
++++ b/PLC/modbus.ino
+@@ -8,7 +8,6 @@
+  */
+ 
+ #include "ModbusRtu.h"
+-#include "afl_call.h"
+ 
+ // data array for modbus network sharing
+ uint16_t au16data[16] = {
+@@ -24,8 +23,6 @@ Modbus slave(1,0,0); // this is slave @1 and RS-232 or USB-FTDI
+ 
+ void setup() {
+-    startForkserver(0);
+-
+     // init HardwareSerial here by port->begin, rather than in ctro 
+     slave.begin( 19200 ); // baud-rate at 19200
+ }
+ 

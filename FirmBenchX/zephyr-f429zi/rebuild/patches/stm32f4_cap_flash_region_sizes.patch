@@ -1,0 +1,26 @@
+diff --git a/drivers/flash/flash_stm32f4x.c b/drivers/flash/flash_stm32f4x.c
+index c58ad3ad2a..2375eeb1b7 100644
+--- a/drivers/flash/flash_stm32f4x.c
++++ b/drivers/flash/flash_stm32f4x.c
+@@ -265,12 +265,17 @@ static const struct flash_pages_layout stm32f4_flash_layout[] = {
+ 	 * RM0090, table 6: STM32F427xx, STM32F437xx, STM32F429xx, STM32F439xx
+ 	 * RM0386, table 4: STM32F469xx, STM32F479xx
+ 	 */
++	// Cap page sizes to lower than 64k, as this is asserted in settings_backend_init
+ 	{.pages_count = 4, .pages_size = KB(16)},
+-	{.pages_count = 1, .pages_size = KB(64)},
+-	{.pages_count = 7, .pages_size = KB(128)},
++	//{.pages_count = 1, .pages_size = KB(64)},
+ 	{.pages_count = 4, .pages_size = KB(16)},
+-	{.pages_count = 1, .pages_size = KB(64)},
+-	{.pages_count = 7, .pages_size = KB(128)},
++	//{.pages_count = 7, .pages_size = KB(128)},
++	{.pages_count = 28, .pages_size = KB(32)},
++	{.pages_count = 4, .pages_size = KB(16)},
++	//{.pages_count = 1, .pages_size = KB(64)},
++	{.pages_count = 2, .pages_size = KB(32)},
++	//{.pages_count = 7, .pages_size = KB(128)},
++	{.pages_count = 28, .pages_size = KB(32)},
+ };
+ #else
+ #error "Unknown flash layout"

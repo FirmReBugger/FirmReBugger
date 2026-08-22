@@ -1,0 +1,12 @@
+diff --git a/arch/Kconfig b/arch/Kconfig
+index e1657266aa..c770957187 100644
+--- a/arch/Kconfig
++++ b/arch/Kconfig
+@@ -27,6 +27,7 @@ config ARC
+ 
+ config ARM
+ 	bool
++	select ATOMIC_OPERATIONS_C
+ 	select ARCH_IS_SET
+ 	select ARCH_SUPPORTS_COREDUMP if CPU_CORTEX_M
+ 	select HAS_DTS

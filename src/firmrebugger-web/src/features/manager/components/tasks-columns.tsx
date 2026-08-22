@@ -50,6 +50,29 @@ let toggleAutoTriagingCallback: ((id: string, value: boolean) => void) | null =
   null;
 let allTasks: Task[] = [];
 
+function getRelatedTriagingJobs(task: Task): Task[] {
+  return allTasks.filter(
+    (candidate) =>
+      candidate.mode === "Triaging" &&
+      candidate.benchmark === task.benchmark &&
+      candidate.binary === task.binary &&
+      candidate.fuzzer === task.fuzzer &&
+      candidate.run_name === task.run_name,
+  );
+}
+
+function hasFinishedTriagingError(task: Task): boolean {
+  const relatedTriagingJobs = getRelatedTriagingJobs(task);
+  return (
+    relatedTriagingJobs.some((candidate) => candidate.status === "errored") &&
+    !relatedTriagingJobs.some(
+      (candidate) =>
+        candidate.status === "running" || candidate.status === "queued",
+    ) &&
+    !relatedTriagingJobs.some((candidate) => candidate.status === "completed")
+  );
+}
+
 export function setTaskCallbacks(
   deleteFn: (id: string) => void,
   stopFn: (id: string) => void,
@@ -69,6 +92,19 @@ export const tasksColumns: ColumnDef<Task>[] = [
     accessorKey: "status",
     header: () => <div className="pl-4">Status</div>,
     enableSorting: true,
+    filterFn: (row, id, value) => {
+      const selected = Array.isArray(value) ? value : [value];
+      const status = String(row.getValue(id));
+
+      return selected.some(
+        (filterValue) =>
+          filterValue === status ||
+          (filterValue === "triaged" && row.original.triaged === true) ||
+          (filterValue === "not-triaged" && row.original.triaged !== true) ||
+          (filterValue === "triage-failed" &&
+            hasFinishedTriagingError(row.original)),
+      );
+    },
     sortingFn: (rowA, rowB) => {
       const statusOrder = {
         running: 0,
@@ -160,16 +196,56 @@ export const tasksColumns: ColumnDef<Task>[] = [
     accessorKey: "fuzzer",
     header: () => <div className="pl-4">Fuzzer</div>,
     enableSorting: false,
-    cell: ({ row }) => {
+    cell: ({ row, table }) => {
       const fuzzer = String(row.getValue("fuzzer"));
+      const coverage =
+        fuzzer === "MultiFuzz"
+          ? (
+              table.options.meta as
+                | {
+                    coverageByJobId?: Record<
+                      string,
+                      {
+                        avgBlocks: number | null;
+                        totalBlocks: number | null;
+                        avgCoveragePct: number | null;
+                      }
+                    >;
+                  }
+                | undefined
+            )?.coverageByJobId?.[row.original.id]
+          : undefined;
+      const avgBlocks = coverage?.avgBlocks;
+      const totalBlocks = coverage?.totalBlocks;
+      const avgCoveragePct = coverage?.avgCoveragePct;
       return (
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
-              <div className="w-[120px] pl-4 truncate">{fuzzer}</div>
+              <div className="w-[120px] pl-4 truncate">
+                {fuzzer}
+                {avgBlocks != null && (
+                  <div className="text-xs text-muted-foreground font-mono">
+                    ~{Math.round(avgBlocks).toLocaleString()}
+                    {totalBlocks != null
+                      ? `/${totalBlocks.toLocaleString()} blocks`
+                      : " blocks"}
+                    {avgCoveragePct != null && ` (${avgCoveragePct}%)`}
+                  </div>
+                )}
+              </div>
             </TooltipTrigger>
             <TooltipContent>
               <p>{fuzzer}</p>
+              {avgBlocks != null && (
+                <p className="text-xs text-muted-foreground">
+                  Avg coverage: {Math.round(avgBlocks).toLocaleString()}
+                  {totalBlocks != null
+                    ? ` / ${totalBlocks.toLocaleString()} valid blocks`
+                    : " blocks"}
+                  {avgCoveragePct != null && ` (${avgCoveragePct}%)`}
+                </p>
+              )}
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
@@ -202,8 +278,8 @@ export const tasksColumns: ColumnDef<Task>[] = [
     },
   },
   {
-    accessorKey: "output_dir",
-    header: () => <div className="pl-4">Output Dir</div>,
+    accessorKey: "run_name",
+    header: () => <div className="pl-4">Run Name</div>,
     enableSorting: false,
     filterFn: (row, id, value) => {
       if (!Array.isArray(value) || value.length === 0) return true;
@@ -212,9 +288,9 @@ export const tasksColumns: ColumnDef<Task>[] = [
     cell: ({ row }) => (
       <div
         className="w-[160px] pl-4 truncate"
-        title={String(row.getValue("output_dir") || "")}
+        title={String(row.getValue("run_name") || "")}
       >
-        {String(row.getValue("output_dir") || "-")}
+        {String(row.getValue("run_name") || "-")}
       </div>
     ),
   },
@@ -363,27 +439,12 @@ export const tasksColumns: ColumnDef<Task>[] = [
         ? false
         : (row.original.autoQueueTriaging ?? true);
       const triaged = row.original.triaged ?? false;
-      const relatedTriagingJobs = allTasks.filter(
-        (task) =>
-          task.mode === "Triaging" &&
-          task.binary === row.original.binary &&
-          task.fuzzer === row.original.fuzzer &&
-          task.output_dir === row.original.output_dir,
-      );
-      const hasTriagingError = relatedTriagingJobs.some(
-        (task) => task.status === "errored",
-      );
+      const relatedTriagingJobs = getRelatedTriagingJobs(row.original);
       const hasActiveTriaging = relatedTriagingJobs.some(
         (task) => task.status === "running" || task.status === "queued",
       );
-      const hasCompletedTriaging = relatedTriagingJobs.some(
-        (task) => task.status === "completed",
-      );
       const showTriagingFailed =
-        hasTriagingError &&
-        !hasActiveTriaging &&
-        !hasCompletedTriaging &&
-        !isTriagingMode;
+        hasFinishedTriagingError(row.original) && !isTriagingMode;
 
       return (
         <div
@@ -500,6 +561,7 @@ export const tasksColumns: ColumnDef<Task>[] = [
                   {(() => {
                     const hasRunningTriaging = allTasks.some(
                       (task) =>
+                        task.benchmark === row.original.benchmark &&
                         task.binary === row.original.binary &&
                         task.fuzzer === row.original.fuzzer &&
                         task.mode === "Triaging" &&

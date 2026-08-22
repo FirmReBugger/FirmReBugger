@@ -1,0 +1,75 @@
+diff --git a/CNC/Makefile b/CNC/Makefile
+index 61a0ed8..3bef302 100644
+--- a/CNC/Makefile
++++ b/CNC/Makefile
+@@ -35,6 +35,5 @@ SRC = $(GRBL_DIR)/coolant_control.c \
+       $(GRBL_DIR)/stepper.c \
+       $(GRBL_DIR)/serial.c \
+-      $(GRBL_DIR)/afl_call.c \
+ 
+ # hal sources
+ HAL_DIR = ./hal/src
+diff --git a/CNC/board/main.c b/CNC/board/main.c
+index ffb9c07..81de001 100644
+--- a/CNC/board/main.c
++++ b/CNC/board/main.c
+@@ -19,8 +19,6 @@
+   #include "usart.h"
+ #endif
+ 
+-#include "afl_call.h"
+-
+ //-----------------------------------------------------------------------------
+ 
+ extern int grbl_main(void);
+@@ -136,7 +134,6 @@ int main(void)
+ #else
+     usart_init();
+ #endif
+-    startForkserver(0);
+     grbl_main();
+     return 0;
+ }
+diff --git a/CNC/board/usart.c b/CNC/board/usart.c
+index c4b81e1..5184f24 100644
+--- a/CNC/board/usart.c
++++ b/CNC/board/usart.c
+@@ -283,7 +283,6 @@ uint8_t serial_read()
+ // Reset and empty data in read buffer. Used by e-stop and reset.
+ void serial_reset_read_buffer(void)
+ {
+-  return;
+   while (usart_tstc()) {
+     usart_getc();
+   }
+diff --git a/CNC/grbl/grbl-master/nuts_bolts.c b/CNC/grbl/grbl-master/nuts_bolts.c
+index af57f75..dc6309e 100644
+--- a/CNC/grbl/grbl-master/nuts_bolts.c
++++ b/CNC/grbl/grbl-master/nuts_bolts.c
+@@ -113,6 +113,5 @@ uint8_t get_direction_pin_mask(uint8_t axis_idx)
+ // which only accepts constants in future compiler releases.
+ void delay_ms(uint16_t ms) 
+ {
+-  return;
+   while ( ms-- ) { _delay_ms(1); }
+ }
+@@ -123,7 +122,6 @@ void delay_ms(uint16_t ms)
+ // efficiently with larger delays, as the counter adds parasitic time in each iteration.
+ void delay_us(uint32_t us) 
+ {
+-  return;
+   while (us) {
+     if (us < 10) { 
+       _delay_us(1);
+diff --git a/CNC/hal/src/stm32f4xx_hal_rcc.c b/CNC/hal/src/stm32f4xx_hal_rcc.c
+index f28dd18..7560cc2 100644
+--- a/CNC/hal/src/stm32f4xx_hal_rcc.c
++++ b/CNC/hal/src/stm32f4xx_hal_rcc.c
+@@ -688,6 +688,6 @@ HAL_StatusTypeDef HAL_RCC_ClockConfig(RCC_ClkInitTypeDef *RCC_ClkInitStruct, uint32_t FLatency)
+         /* Check the PLL ready flag */  
+         if(__HAL_RCC_GET_FLAG(RCC_FLAG_PLLRDY) == RESET)
+         {
+-          //return HAL_ERROR;
++          return HAL_ERROR;
+         }
+       }

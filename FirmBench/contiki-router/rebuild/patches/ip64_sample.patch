@@ -1,0 +1,16 @@
+diff --git a/examples/ip64-router/Makefile b/examples/ip64-router/Makefile
+index 0beea11bd..54dc3cdd7 100644
+--- a/examples/ip64-router/Makefile
++++ b/examples/ip64-router/Makefile
+@@ -2,6 +2,11 @@ CONTIKI_PROJECT = ip64-router
+ all: $(CONTIKI_PROJECT)
+ CONTIKI=../..
+ 
++MAKE_MAC = MAKE_MAC_NULLMAC
++MAKE_ROUTING = MAKE_ROUTING_NULLROUTING
++
++CFLAGS += -g
++
+ # Currently only supported on Orion, the only platform with 802.15.4 + Ethernet
+ PLATFORMS_ONLY = zoul
+ BOARDS_ONLY = orion

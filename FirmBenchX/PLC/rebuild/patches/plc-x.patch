@@ -1,0 +1,41 @@
+diff --git a/PLC/ModbusRtu.h b/PLC/ModbusRtu.h
+index 84c238f..70e2305 100644
+--- a/PLC/ModbusRtu.h
++++ b/PLC/ModbusRtu.h
+@@ -1105,7 +1105,6 @@ uint8_t Modbus::validateRequest()
+ {
+     // check message crc vs calculated crc
+     // The assumption that last 2 bytes in the frame are CRC doesn't hold during fuzzing
+-/*
+     uint16_t u16MsgCRC =
+         ((au8Buffer[u8BufferSize - 2] << 8)
+          | au8Buffer[u8BufferSize - 1]); // combine the crc Low & High bytes
+@@ -1114,7 +1113,6 @@ uint8_t Modbus::validateRequest()
+         u16errCnt ++;
+         return NO_REPLY;
+     }
+-*/
+ 
+     // check fct code
+     boolean isSupported = false;
+diff --git a/PLC/modbus.ino b/PLC/modbus.ino
+index a7d6f69..e0adc22 100644
+--- a/PLC/modbus.ino
++++ b/PLC/modbus.ino
+@@ -8,7 +8,6 @@
+  */
+ 
+ #include "ModbusRtu.h"
+-#include "afl_call.h"
+ 
+ // data array for modbus network sharing
+ uint16_t au16data[16] = {
+@@ -24,8 +23,6 @@ Modbus slave(1,0,0); // this is slave @1 and RS-232 or USB-FTDI
+ 
+ void setup() {
+-    startForkserver(0);
+-
+     // init HardwareSerial here by port->begin, rather than in ctro 
+     slave.begin( 19200 ); // baud-rate at 19200
+ }
+ 

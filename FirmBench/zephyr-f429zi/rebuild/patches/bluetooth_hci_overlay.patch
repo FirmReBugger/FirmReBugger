@@ -1,0 +1,7 @@
+diff --git a/samples/bluetooth/peripheral_dis/bluetooth_hci.conf b/samples/bluetooth/peripheral_dis/bluetooth_hci.conf
+new file mode 100644
+index 0000000000..792c6e894f
+--- /dev/null
++++ b/samples/bluetooth/peripheral_dis/bluetooth_hci.conf
+@@ -0,0 +1 @@
++CONFIG_BT_HCI=y

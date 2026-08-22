@@ -1,0 +1,130 @@
+diff --git a/arch/dev/ethernet/enc28j60/enc28j60.c b/arch/dev/ethernet/enc28j60/enc28j60.c
+index dd680fbdf..0e97d16d8 100644
+--- a/arch/dev/ethernet/enc28j60/enc28j60.c
++++ b/arch/dev/ethernet/enc28j60/enc28j60.c
+@@ -123,8 +123,8 @@
+ #define ERXFCON_MCEN  0x02
+ #define ERXFCON_BCEN  0x01
+ 
+-
+-PROCESS(enc_watchdog_process, "Enc28j60 watchdog");
++// Fuzzing: Disable watchdog
++// PROCESS(enc_watchdog_process, "Enc28j60 watchdog");
+ 
+ static uint8_t initialized = 0;
+ static uint8_t bank = ERXTX_BANK;
+@@ -486,7 +486,8 @@ enc28j60_init(const uint8_t *mac_addr)
+   memcpy(enc_mac_addr, mac_addr, 6);
+ 
+   /* Start watchdog process */
+-  process_start(&enc_watchdog_process, NULL);
++  // Fuzzing: Disable watchdog
++  // process_start(&enc_watchdog_process, NULL);
+ 
+   reset();
+ 
+@@ -498,6 +499,8 @@ enc28j60_init(const uint8_t *mac_addr)
+ int
+ enc28j60_send(const uint8_t *data, uint16_t datalen)
+ {
++  return datalen;
++ 
+   uint16_t dataend;
+ 
+   if(!initialized) {
+@@ -666,6 +669,8 @@ enc28j60_read(uint8_t *buffer, uint16_t bufsize)
+   PRINTF("enc28j60: received_packets %d\n", received_packets);
+   return len;
+ }
++// Fuzzing: Disable watchdog
++#if 0
+ /*---------------------------------------------------------------------------*/
+ PROCESS_THREAD(enc_watchdog_process, ev, data)
+ {
+@@ -690,3 +695,4 @@ PROCESS_THREAD(enc_watchdog_process, ev, data)
+   PROCESS_END();
+ }
+ /*---------------------------------------------------------------------------*/
++#endif
+\ No newline at end of file
+diff --git a/arch/platform/zoul/orion/enc28j60-arch-gpio.c b/arch/platform/zoul/orion/enc28j60-arch-gpio.c
+index 4a35e2723..ed8ebd9e7 100644
+--- a/arch/platform/zoul/orion/enc28j60-arch-gpio.c
++++ b/arch/platform/zoul/orion/enc28j60-arch-gpio.c
+@@ -108,43 +108,48 @@ enc28j60_arch_spi_init(void)
+   GPIO_CLR_PIN(CLK_PORT, CLK_BIT);
+ }
+ /*---------------------------------------------------------------------------*/
++
+ uint8_t
+ enc28j60_arch_spi_write(uint8_t output)
+ {
+-  int i;
+-  uint8_t input;
+-  input = 0;
+-
+-  for(i=0; i < 8; i++) {
+-    /* Write data on MOSI pin */
+-    if(output & 0x80) {
+-      GPIO_SET_PIN(MOSI_PORT, MOSI_BIT);
+-    } else {
+-      GPIO_CLR_PIN(MOSI_PORT, MOSI_BIT);
+-    }
+-    output <<= 1;
+-
+-    /* Set clock high  */
+-    GPIO_SET_PIN(CLK_PORT, CLK_BIT);
+-    delay();
+-
+-    /* Read data from MISO pin */
+-    input <<= 1;
+-    if(GPIO_READ_PIN(MISO_PORT, MISO_BIT) != 0) {
+-      input |= 0x1;
+-    }
++  // Fuzzer: Skip write
++  return REG_B(GPIO_A_BASE);
+ 
+-    /* Set clock low */
+-    GPIO_CLR_PIN(CLK_PORT, CLK_BIT);
+-    delay();
+-  }
+-  return input;
++  //int i;
++  //uint8_t input;
++  //input = 0;
++//
++  //for(i=0; i < 8; i++) {
++  //  /* Write data on MOSI pin */
++  //  if(output & 0x80) {
++  //    GPIO_SET_PIN(MOSI_PORT, MOSI_BIT);
++  //  } else {
++  //    GPIO_CLR_PIN(MOSI_PORT, MOSI_BIT);
++  //  }
++  //  output <<= 1;
++//
++  //  /* Set clock high  */
++  //  GPIO_SET_PIN(CLK_PORT, CLK_BIT);
++  //  delay();
++//
++  //  /* Read data from MISO pin */
++  //  input <<= 1;
++  //  if(GPIO_READ_PIN(MISO_PORT, MISO_BIT) != 0) {
++  //    input |= 0x1;
++  //  }
++//
++  //  /* Set clock low */
++  //  GPIO_CLR_PIN(CLK_PORT, CLK_BIT);
++  //  delay();
++  //}
++  //return input;
+ }
+ /*---------------------------------------------------------------------------*/
+ uint8_t
+ enc28j60_arch_spi_read(void)
+ {
+-  return enc28j60_arch_spi_write(0);
++  // Fuzzing: return value directly
++  return REG_B(GPIO_A_BASE);
+ }
+ /*---------------------------------------------------------------------------*/
+ /**

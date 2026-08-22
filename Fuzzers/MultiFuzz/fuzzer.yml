@@ -1,0 +1,7 @@
+bug_prefix: MF
+
+# hail-fuzz's output directory is bind-mounted into the container (instead of
+# docker-cp'd in/out) so results stream to the host live while the run is in
+# progress, and so its baked-in absolute paths (settings.json) resolve
+# correctly on the host.
+bind_mount: true

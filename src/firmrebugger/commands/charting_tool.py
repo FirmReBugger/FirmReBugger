@@ -2,34 +2,25 @@ from firmrebugger.common import menu, get_frb_base_dir
 from firmrebugger.charting_tool_utils.generate_latex_tables import generate_table
 from firmrebugger.charting_tool_utils.generate_survival_plots import survival_plot
 from firmrebugger.charting_tool_utils.generate_upset_plot import generate_upset_plot
+import glob
 import sys
 import os
 
 FIRMREBUGGER_BASE_DIR = None
 
 
-def multiple_results_check(fuzzing_out_path):
-    if os.path.exists(fuzzing_out_path):
-        folders = [
-            item
-            for item in os.listdir(fuzzing_out_path)
-            if os.path.isdir(os.path.join(fuzzing_out_path, item))
-        ]
-        if len(folders) == 0:
-            return None
-        elif len(folders) > 1:
-            selected_out_folder = menu(
-                f"Select output folder for {fuzzing_out_path}", folders
-            )
-            if not selected_out_folder:
-                print("No output folder selected, exiting.")
-                sys.exit(1)
-            return selected_out_folder[0]
-        else:
-            return folders[0]
+def multiple_results_check(candidate_dirs, label):
+    if not candidate_dirs:
+        return None
+    if len(candidate_dirs) > 1:
+        run_names = [os.path.basename(os.path.dirname(d)) for d in candidate_dirs]
+        selected_run = menu(f"Select run for {label}", run_names)
+        if not selected_run:
+            print("No run selected, exiting.")
+            sys.exit(1)
+        return candidate_dirs[run_names.index(selected_run[0])]
     else:
-        print(f"{fuzzing_out_path} does not exist")
-        sys.exit(1)
+        return candidate_dirs[0]
 
 
 def check_frb_report_exists(output_path):
@@ -42,21 +33,28 @@ def check_frb_report_exists(output_path):
 
 def init_working_dirs(benchmark):
     benchmark_path = os.path.join(FIRMREBUGGER_BASE_DIR, benchmark)
+    outputs_path = os.path.join(FIRMREBUGGER_BASE_DIR, "outputs")
     frb_reports = {}
     selected_targets = menu("Select binaries(s)", sorted(os.listdir(benchmark_path)))
     binary_collection = {}
 
     for binary in sorted(selected_targets):
         binary_path = os.path.join(benchmark_path, binary)
-        fuzzers_path = os.path.join(binary_path, "fuzzers")
+        fuzzer_names = sorted(
+            item
+            for item in os.listdir(binary_path)
+            if os.path.isdir(os.path.join(binary_path, item))
+        )
         report_paths = []
-        for fuzzer in sorted(os.listdir(fuzzers_path)):
-            fuzzing_out_path = os.path.join(fuzzers_path, fuzzer, "fuzzing_out")
-            selected_out = multiple_results_check(fuzzing_out_path)
-            if selected_out:
-                report_path = check_frb_report_exists(
-                    os.path.join(fuzzing_out_path, selected_out)
+        for fuzzer in fuzzer_names:
+            candidate_dirs = sorted(
+                glob.glob(
+                    os.path.join(outputs_path, "*", f"{benchmark}-{binary}-{fuzzer}")
                 )
+            )
+            selected_dir = multiple_results_check(candidate_dirs, f"{binary}/{fuzzer}")
+            if selected_dir:
+                report_path = check_frb_report_exists(selected_dir)
                 if report_path is not None:
                     report_paths.append(report_path)
         if report_paths:

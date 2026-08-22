@@ -1,5 +1,6 @@
 import { useState, Fragment, useEffect, useRef } from "react";
 import { KaplanMeier } from "./kaplan-meier";
+import { BugDescriptionDialog } from "./bug-description-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -120,6 +121,7 @@ export function BugTable({
   const [tooltipEnabled, setTooltipEnabled] = useState(true);
   const [exportDialogOpen, setExportDialogOpen] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
+  const [csvExportLoading, setCsvExportLoading] = useState(false);
   const [exportPdfBase64, setExportPdfBase64] = useState("");
   const [exportLatexCode, setExportLatexCode] = useState("");
   const [exportPdfError, setExportPdfError] = useState<string | null>(null);
@@ -143,6 +145,35 @@ export function BugTable({
     "reached" | "triggered" | "detected"
   >("detected");
 
+  const [bugDescOpen, setBugDescOpen] = useState(false);
+  const [bugDescId, setBugDescId] = useState<string | null>(null);
+
+  const buildRunsByFuzzer = (bug: BugRow) => {
+    const runsByFuzzer: Record<
+      string,
+      Array<{
+        run: string;
+        reached?: number | null;
+        triggered?: number | null;
+        detected?: number | null;
+      }>
+    > = {};
+    Object.entries(bug.fuzzerStats || {}).forEach(([f, stats]) => {
+      runsByFuzzer[f] = stats.runs || [];
+    });
+    return runsByFuzzer;
+  };
+
+  const openSurvivalGraph = (
+    bug: BugRow,
+    metric: "reached" | "triggered" | "detected",
+  ) => {
+    setKmFuzzerRuns(buildRunsByFuzzer(bug));
+    setKmBugId(bug.bugId);
+    setKmMetric(metric);
+    setKmOpen(true);
+  };
+
   const getSelectedReportPaths = (form: TableForm | null): string[] => {
     if (!form) return [];
     const selectedReportPaths: string[] = [];
@@ -156,6 +187,9 @@ export function BugTable({
     return selectedReportPaths;
   };
 
+  const getSelectedBinaries = (form: TableForm | null): string[] =>
+    form ? Object.keys(form.selectedReports || {}) : [];
+
   useEffect(() => {
     if (!onReportPathsUpdate) return;
     onReportPathsUpdate(getSelectedReportPaths(tableFormSelections));
@@ -168,14 +202,10 @@ export function BugTable({
     if (!selections) return;
 
     const selectedFuzzers = selections.fuzzer;
-    const selectedReportPaths: string[] = [];
-    Object.values(selections.selectedReports).forEach((fuzzerReports) => {
-      Object.values(fuzzerReports).forEach((reportPath) => {
-        selectedReportPaths.push(reportPath);
-      });
-    });
+    const selectedReportPaths = getSelectedReportPaths(selections);
+    const selectedBinaries = getSelectedBinaries(selections);
 
-    if (selectedFuzzers.length === 0 || selectedReportPaths.length === 0)
+    if (selectedFuzzers.length === 0 || selectedBinaries.length === 0)
       return;
 
     setIsAutoFetching(true);
@@ -186,6 +216,7 @@ export function BugTable({
         benchmark,
         fuzzers: selectedFuzzers,
         report_paths: selectedReportPaths,
+        selected_binaries: selectedBinaries,
       }),
     })
       .then((res) => {
@@ -235,7 +266,12 @@ export function BugTable({
       onDataUpdate(filteredTableData);
     }
 
-    const fuzzerSet = new Set<string>();
+    const responseFuzzers = Array.isArray(response.fuzzers)
+      ? response.fuzzers.filter((fuzzer: unknown): fuzzer is string =>
+          typeof fuzzer === "string" && fuzzer.length > 0,
+        )
+      : [];
+    const fuzzerSet = new Set<string>(responseFuzzers);
     filteredTableData.forEach((binaryGroup: BinaryGroup) => {
       if (binaryGroup.bugs && Array.isArray(binaryGroup.bugs)) {
         binaryGroup.bugs.forEach((bug: BugRow) => {
@@ -267,8 +303,9 @@ export function BugTable({
 
   const handleExportTable = async () => {
     const reportPaths = getSelectedReportPaths(tableFormSelections);
-    if (reportPaths.length === 0) {
-      toast.error("Configure the table first to select report paths");
+    const selectedBinaries = getSelectedBinaries(tableFormSelections);
+    if (selectedBinaries.length === 0) {
+      toast.error("Configure the table first to select binaries");
       return;
     }
 
@@ -280,6 +317,8 @@ export function BugTable({
         body: JSON.stringify({
           benchmark,
           report_paths: reportPaths,
+          selected_binaries: selectedBinaries,
+          fuzzers: tableFormSelections?.fuzzer || [],
         }),
       });
 
@@ -325,6 +364,49 @@ export function BugTable({
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
     toast.success("Table PDF downloaded");
+  };
+
+  const handleExportCsv = async () => {
+    const reportPaths = getSelectedReportPaths(tableFormSelections);
+    const selectedBinaries = getSelectedBinaries(tableFormSelections);
+    if (selectedBinaries.length === 0) {
+      toast.error("Configure the table first to select binaries");
+      return;
+    }
+
+    setCsvExportLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/api/report/export-csv`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          benchmark,
+          report_paths: reportPaths,
+          selected_binaries: selectedBinaries,
+          fuzzers: tableFormSelections?.fuzzer || [],
+        }),
+      });
+
+      if (!response.ok) {
+        const result = await response.json().catch(() => ({}));
+        throw new Error(result.error || "Failed to export CSV table");
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${benchmark.toLowerCase()}_summary_table.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      toast.success("Table CSV downloaded");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to export CSV table");
+    } finally {
+      setCsvExportLoading(false);
+    }
   };
 
   const toggleBinary = (binary: string) => {
@@ -498,15 +580,26 @@ export function BugTable({
                 Interactive table to show reached, triggered and detected metrics for each bug and fuzzer combination.
               </CardDescription>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleExportTable}
-              disabled={exportLoading}
-            >
-              <Download className="h-4 w-4 mr-2" />
-              {exportLoading ? "Exporting..." : "Export TeX"}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExportCsv}
+                disabled={exportLoading || csvExportLoading}
+              >
+                <Download className="h-4 w-4 mr-2" />
+                {csvExportLoading ? "Exporting..." : "Export CSV"}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleExportTable}
+                disabled={exportLoading || csvExportLoading}
+              >
+                <Download className="h-4 w-4 mr-2" />
+                {exportLoading ? "Exporting..." : "Export TeX"}
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent>
@@ -588,25 +681,8 @@ export function BugTable({
                                       style={{ color: bug.bugId.startsWith("FP_") ? "#c46464" : "#4e79a7" }}
                                       onClick={(e) => {
                                         e.stopPropagation();
-                                        const runsByFuzzer: Record<
-                                          string,
-                                          Array<{
-                                            run: string;
-                                            reached?: number | null;
-                                            triggered?: number | null;
-                                            detected?: number | null;
-                                          }>
-                                        > = {};
-                                        Object.entries(
-                                          bug.fuzzerStats || {},
-                                        ).forEach(([f, stats]) => {
-                                          runsByFuzzer[f] =
-                                            (stats as any).runs || [];
-                                        });
-                                        setKmFuzzerRuns(runsByFuzzer);
-                                        setKmBugId(bug.bugId);
-                                        setKmMetric("detected");
-                                        setKmOpen(true);
+                                        setBugDescId(bug.bugId);
+                                        setBugDescOpen(true);
                                       }}
                                     >
                                       {bug.bugId}
@@ -640,8 +716,9 @@ export function BugTable({
                                     return (
                                       <Fragment key={fuzzer}>
                                         <td
-                                          className={`px-1.5 py-2 text-center align-middle border-l text-xs cursor-pointer transition-opacity hover:opacity-80 ${isReachedBest ? "font-bold" : ""}`}
-                                          style={stats ? heatmapStyle(rCount, stats.runs.length) : undefined}
+                                          className={`px-1.5 py-2 text-center align-middle border-l text-xs transition-opacity ${stats ? "cursor-pointer hover:opacity-80" : "text-muted-foreground italic"} ${isReachedBest ? "font-bold" : ""}`}
+                                          style={stats ? heatmapStyle(rCount, stats.runs.length) : { backgroundColor: "#d9d9d9" }}
+                                          onClick={() => stats && openSurvivalGraph(bug, "reached")}
                                           onMouseEnter={(e) =>
                                             tooltipEnabled &&
                                             stats &&
@@ -653,11 +730,12 @@ export function BugTable({
                                             setTooltip((prev) => ({ ...prev, visible: false }))
                                           }
                                         >
-                                          {stats ? (stats.meanReached !== null ? formatValue(stats.meanReached) : "✗") : "✗"}
+                                          {stats ? (stats.meanReached !== null ? formatValue(stats.meanReached) : "✗") : "N/A"}
                                         </td>
                                         <td
-                                          className={`px-1.5 py-2 text-center align-middle text-xs cursor-pointer transition-opacity hover:opacity-80 ${isTriggeredBest ? "font-bold" : ""}`}
-                                          style={stats ? heatmapStyle(tCount, stats.runs.length) : undefined}
+                                          className={`px-1.5 py-2 text-center align-middle text-xs transition-opacity ${stats ? "cursor-pointer hover:opacity-80" : "text-muted-foreground italic"} ${isTriggeredBest ? "font-bold" : ""}`}
+                                          style={stats ? heatmapStyle(tCount, stats.runs.length) : { backgroundColor: "#d9d9d9" }}
+                                          onClick={() => stats && openSurvivalGraph(bug, "triggered")}
                                           onMouseEnter={(e) =>
                                             tooltipEnabled &&
                                             stats &&
@@ -669,11 +747,12 @@ export function BugTable({
                                             setTooltip((prev) => ({ ...prev, visible: false }))
                                           }
                                         >
-                                          {stats ? (stats.meanTriggered !== null ? formatValue(stats.meanTriggered) : "✗") : "✗"}
+                                          {stats ? (stats.meanTriggered !== null ? formatValue(stats.meanTriggered) : "✗") : "N/A"}
                                         </td>
                                         <td
-                                          className={`px-1.5 py-2 text-center align-middle text-xs cursor-pointer transition-opacity hover:opacity-80 ${isDetectedBest ? "font-bold" : ""}`}
-                                          style={stats ? heatmapStyle(dCount, stats.runs.length) : undefined}
+                                          className={`px-1.5 py-2 text-center align-middle text-xs transition-opacity ${stats ? "cursor-pointer hover:opacity-80" : "text-muted-foreground italic"} ${isDetectedBest ? "font-bold" : ""}`}
+                                          style={stats ? heatmapStyle(dCount, stats.runs.length) : { backgroundColor: "#d9d9d9" }}
+                                          onClick={() => stats && openSurvivalGraph(bug, "detected")}
                                           onMouseEnter={(e) =>
                                             tooltipEnabled &&
                                             stats &&
@@ -685,7 +764,7 @@ export function BugTable({
                                             setTooltip((prev) => ({ ...prev, visible: false }))
                                           }
                                         >
-                                          {stats ? (stats.meanDetected !== null ? formatValue(stats.meanDetected) : "✗") : "✗"}
+                                          {stats ? (stats.meanDetected !== null ? formatValue(stats.meanDetected) : "✗") : "N/A"}
                                         </td>
                                       </Fragment>
                                     );
@@ -767,7 +846,7 @@ export function BugTable({
 
               <div className="flex items-center gap-2">
                 <MousePointerClick className="h-3.5 w-3.5" />
-                <span>Click a bug ID for survival graph</span>
+                <span>Click a bug ID for its description, or an R/T/D value for its survival graph</span>
               </div>
               <button
                 className={`ml-auto text-xs underline ${tooltipEnabled ? "text-primary" : "text-muted-foreground"}`}
@@ -856,6 +935,12 @@ export function BugTable({
           onMetricChange={setKmMetric}
         />
       )}
+
+      <BugDescriptionDialog
+        open={bugDescOpen}
+        onOpenChange={setBugDescOpen}
+        bugId={bugDescId}
+      />
     </>
   );
 }

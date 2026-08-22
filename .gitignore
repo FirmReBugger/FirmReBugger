@@ -12,8 +12,27 @@ wheels/
 DICE-DMA-Emulation
 
 # Benchmark results
-**/fuzzing_out/*
-!**/fuzzing_out/.gitkeep
+/outputs/
+
+/.frb_layout_version
 
 # ghrc_push.sh
 ghrc_push.sh
+
+# Testing ravens 
+raven_test
+
+# misc. 
+report.md
+.codex
+.claude
+triage-log.md
+zephyr-sdk
+zephyrproject-poc
+image.png
+zephyr-security-advisory.md
+poc
+bug_history.md
+scripts
+reports
+trace.txt

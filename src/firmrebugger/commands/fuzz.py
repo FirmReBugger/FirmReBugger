@@ -1,8 +1,7 @@
 import uuid
 from firmrebugger.manager import Job, prep_target_folder, finalize_job
-from firmrebugger.app_utils import check_output_name
-from firmrebugger.common import get_frb_base_dir
-import os
+from firmrebugger.app_utils import check_run_name_available
+from firmrebugger.common import get_frb_base_dir, get_run_output_dir
 from firmrebugger.task import Task
 
 
@@ -20,9 +19,10 @@ def fuzz(
     base_dir = get_frb_base_dir()
     print(f"[CLI fuzz] Base dir: {base_dir}, Benchmark: {benchmark}")
 
-    if not check_output_name(benchmark, binary, [fuzzer], fuzzing_output_name):
+    if not check_run_name_available(benchmark, binary, [fuzzer], fuzzing_output_name):
         raise RuntimeError(
-            f"Output path already exists: {os.path.join(base_dir, benchmark, binary, 'fuzzers', fuzzer, 'fuzzing_out', fuzzing_output_name)}"
+            f"Output path already exists: "
+            f"{get_run_output_dir(base_dir, fuzzing_output_name, benchmark, binary, fuzzer)}"
         )
 
     job_id = f"cli-{benchmark}-{binary}-{fuzzer}-{uuid.uuid4().hex[:8]}"
@@ -35,7 +35,7 @@ def fuzz(
         mode="Fuzzing",
         benchmark=benchmark,
         progress=0,
-        output_dir=fuzzing_output_name,
+        run_name=fuzzing_output_name,
     )
 
     # Prepare the target folder once for all runs
@@ -55,7 +55,7 @@ def fuzz(
             run_number=run_str,
             mode="Fuzzing",
             benchmark=benchmark,
-            output_dir=fuzzing_output_name,
+            run_name=fuzzing_output_name,
             runs=int(num_trials),
             core_idx=1,  # Changes later
             container_name="tmp-name",

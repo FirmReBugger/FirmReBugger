@@ -1,0 +1,10 @@
+diff --git a/cores/arduino/HardwareSerial.h b/cores/arduino/HardwareSerial.h
+--- a/cores/arduino/HardwareSerial.h
++++ b/cores/arduino/HardwareSerial.h
+@@ -40,5 +40,5 @@
+ // Serial behave erratically. See https://github.com/arduino/Arduino/issues/2405
+ #if !defined(SERIAL_TX_BUFFER_SIZE)
+-#define SERIAL_TX_BUFFER_SIZE 64
++#define SERIAL_TX_BUFFER_SIZE 128
+ #endif
+ #if !defined(SERIAL_RX_BUFFER_SIZE)

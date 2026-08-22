@@ -38,7 +38,13 @@ void BUG_FP_FW21() {
 
 void BUG_FP_FW22() {
     report_reached("FP_FW22");
-    // (FP) Uninitialized use of hi2c->pBuffPtrc in I2C_ITError
+    // (FP) Uninitialized use of hi2c->pBuffPtr in I2C_ITError
+    // FIXED 2026-07-15: this reflection point used to also be registered at
+    // 0x080050da (inside I2C_Slave_STOPF, checking hi2c->hdmarx==NULL) --
+    // that hook is a byte-for-byte duplicate of FP_FRB01's own hook at the
+    // exact same address/register/predicate (verified: this build's ELF has
+    // identical instructions to FirmBench's at both addresses). Removed the
+    // duplicate registration; FP_FRB01 already covers that case.
     if (reg_state[2] == 0) {
         report_detected_triggered("FP_FW22");
     }
@@ -100,11 +106,35 @@ void BUG_FP_FRB02() {
     }
 }
 
-void BUG_FP_FRB03() {
-    report_reached("FP_FRB03");
-    // pbuffptr exceeds paser buff
+// RE-INSTATED 2026-07-17 (deleted as FP_FRB03 on 2026-07-15; kept its
+// original ID rather than taking a new one -- this is the same raven,
+// corrected, not a new finding). The 2026-07-15 removal claimed "pBuffPtr
+// legitimately exceeds the constant during ordinary I2C operation, so it
+// was true almost always" -- live TriAgent triage of a previously-
+// ungrouped crash on the FirmBench build (0x8002309_0x8002ed0_read_error)
+// disproved that: pBuffPtr sits at Wire+124 (0x2000038c) with a 32-byte
+// window during ordinary HAL_I2C_Slave_Sequential_Receive_IT operation,
+// well under this threshold. It only crosses 0x200003d0 after sustained
+// I2C bus-error interrupts keep re-entering I2C_ITError's error-logging
+// append path past the declared Size, walking pBuffPtr unboundedly past
+// Wire's own storage -- proven to corrupt Firmata._firmataStream 228 bytes
+// past the buffer's declared end, causing a NULL-vtable crash in
+// FirmataClass::available() on the very next call. Status corrected
+// false_positive -> confirmed. FirmBenchX's GatewayX.elf disassembles
+// byte-identically at this address (0x0800501c) and shares the same
+// Wire (0x20000310) / Firmata (0x200003d0) layout -- address-sanity-
+// checked, not independently crash-verified on this benchmark. See
+// bug_analysis/bugs/FRB03.md and bug_analysis/bug_history.md.
+void BUG_FRB03() {
+    report_reached("FRB03");
+    // hi2c->pBuffPtr (r2) about to be stored through; I2C_ITError never
+    // bounds it against hi2c->XferSize/XferCount. 0x200003d0 is one-past-
+    // the-end of the Wire object itself (== &Firmata) -- a sound proxy in
+    // this firmware since Wire's own declared receive buffers never
+    // approach it (see bug_analysis/bugs/FRB03.md for the general-case
+    // caveat).
     if (reg_state[2] > 0x200003d0) {
-        report_detected_triggered("FP_FRB03");
+        report_detected_triggered("FRB03");
     }
 }
 
@@ -116,20 +146,23 @@ void BUG_FP_FRB04() {
     }
 }
 
-void three_wire(){
-    report_reached("FP_FRB10");
-    uint32_t wire_len = frb_mem_read(0x200003b4,4);
-    if (wire_len + 1 > 7) {
-    report_detected_triggered("FP_FRB10");
-    } 
-}
+// REMOVED 2026-07-15: FP_FRB10 checked TwoWire::write's txBufferLength
+// against a fixed threshold (7) that never corresponded to any real
+// capacity limit -- the function dynamically grows its tx buffer via
+// realloc (capped at 32 bytes) and NULL-checks the result before ever
+// storing, so there is no length at which the store becomes unsafe. Not a
+// weak/imprecise proxy for a real bug (the way some other false_positive
+// ravens in this file still are) -- there is no unsafe condition in this
+// function for any raven to detect. Fired constantly on ordinary I2C
+// traffic (thousands of times per campaign run) for no diagnostic value.
+// See bug_analysis/triage-log.md.
 
 void register_reflection_points() {
     frb_add_reflection_point(0x08002fc6, BUG_FW12);
     frb_add_reflection_point(0x08008796, BUG_FP_FW21);
     frb_add_reflection_point(0x08008770, BUG_FP_FW21);
-    frb_add_reflection_point(0x080050da, BUG_FP_FW22);
     frb_add_reflection_point(0x0800501c, BUG_FP_FW22);
+    frb_add_reflection_point(0x0800501c, BUG_FRB03);
     frb_add_reflection_point(0x080071b4, pwm_ret);
     frb_add_reflection_point(0x08005e7a, check_FW23_use);
     frb_add_reflection_point(0x0800348a, BUG_E01);
@@ -137,9 +170,6 @@ void register_reflection_points() {
     frb_add_reflection_point(0x0800515a, BUG_FP_FRB01);
     frb_add_reflection_point(0x080050da, BUG_FP_FRB01);
     frb_add_reflection_point(0x08004f8e, BUG_FP_FRB02);
-    frb_add_reflection_point(0x080050da, BUG_FP_FRB03);
-    frb_add_reflection_point(0x0800501c, BUG_FP_FRB03);
     frb_add_reflection_point(0x08004e5e, BUG_FP_FRB04);
     frb_add_reflection_point(0x08007124, pwm_started);
-    frb_add_reflection_point(0x08002890, three_wire);
 }
