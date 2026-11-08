@@ -81,7 +81,7 @@ def main():
 )
 def fuzz_cmd(time, num_trials, output_name):
     """Fuzz using FirmReBugger Benchmarks."""
-    fuzzing_time_seconds = parse_fuzzing_time(time)
+    fuzzing_time_seconds = int(parse_fuzzing_time(time))
 
     base_dir = get_frb_base_dir()
     benchmarks = ["FirmBench", "FirmBenchDMA", "FirmBenchX"]
